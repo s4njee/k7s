@@ -17,6 +17,8 @@ import type { Cell, NodeMetricsMap, PodMetricsMap, Row } from "../../providers/t
 export function ResourceTable() {
   const nav = useStore((s) => s.nav);
   const namespace = useStore((s) => s.namespace);
+  const tableFilter = useStore((s) => s.tableFilter);
+  const setTableFilter = useStore((s) => s.setTableFilter);
   const allRows = useStore((s) => s.rows[nav]);
   const podMetrics = useStore((s) => s.podMetrics);
   const nodeMetrics = useStore((s) => s.nodeMetrics);
@@ -29,17 +31,36 @@ export function ResourceTable() {
   const columns = KIND_META[nav].columns;
   const isPods = nav === "pods";
 
-  // Namespace filter (cluster-scoped kinds ignore it) + metrics overlay.
+  // Namespace filter (cluster-scoped kinds ignore it), name filter, metrics overlay.
   const rows = useMemo(() => {
-    const filtered = CLUSTER_SCOPED.has(nav)
-      ? allRows
-      : allRows.filter((r) => namespace === "all" || r.namespace === namespace);
+    const q = tableFilter.trim().toLowerCase();
+    const filtered = allRows.filter((r) => {
+      // Namespace filter — cluster-scoped kinds ignore it.
+      if (!CLUSTER_SCOPED.has(nav) && namespace !== "all" && r.namespace !== namespace) {
+        return false;
+      }
+      // Name filter (case-insensitive substring).
+      return !q || r.name.toLowerCase().includes(q);
+    });
     return overlayMetrics(nav, filtered, podMetrics, nodeMetrics);
-  }, [nav, allRows, namespace, podMetrics, nodeMetrics]);
+  }, [nav, allRows, namespace, tableFilter, podMetrics, nodeMetrics]);
 
   return (
-    <div className={styles.wrap}>
-      <table className={styles.table}>
+    <div className={styles.container}>
+      <div className={styles.toolbar}>
+        <div className={styles.search}>
+          <span className={styles.searchIcon}>⌕</span>
+          <input
+            className={styles.searchInput}
+            value={tableFilter}
+            onChange={(e) => setTableFilter(e.target.value)}
+            placeholder="filter…"
+            data-table-filter
+          />
+        </div>
+      </div>
+      <div className={styles.wrap}>
+        <table className={styles.table}>
         <thead>
           <tr>
             {columns.map((col) => (
@@ -71,8 +92,9 @@ export function ResourceTable() {
             );
           })}
         </tbody>
-      </table>
-      {rows.length === 0 && <div className={styles.empty}>no resources match filter</div>}
+        </table>
+        {rows.length === 0 && <div className={styles.empty}>no resources match filter</div>}
+      </div>
     </div>
   );
 }

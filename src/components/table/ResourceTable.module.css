@@ -1,9 +1,53 @@
 /* Resource table (Design §3): fills the remaining width and scrolls; sticky
    monospace header; tone-colored cells; hover and selected row backgrounds. */
 
-.wrap {
+/* Column: filter toolbar (fixed) above the scrolling table. */
+.container {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Filter toolbar (mirrors the logs search chrome). */
+.toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-row);
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: min(320px, 100%);
+  background: var(--bg-terminal);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 4px 9px;
+}
+.search:focus-within {
+  border-color: var(--border-hover);
+}
+.searchIcon {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.wrap {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
 }
 

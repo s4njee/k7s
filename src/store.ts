@@ -57,6 +57,8 @@ export interface AppState {
   nav: ResourceKind;
   /** Namespace filter; "all" shows everything. */
   namespace: string;
+  /** Free-text name filter for the current table (cleared on nav change). */
+  tableFilter: string;
   /** Which dropdown is open (cluster switcher or ns menu). */
   openMenu: OpenMenu;
 
@@ -85,6 +87,7 @@ export interface AppState {
   // navigation
   setNav: (kind: ResourceKind) => void;
   setNamespace: (ns: string) => void;
+  setTableFilter: (q: string) => void;
   toggleMenu: (menu: Exclude<OpenMenu, null>) => void;
   closeMenus: () => void;
 
@@ -127,6 +130,7 @@ export const useStore = create<AppState>((set) => ({
 
   nav: "pods",
   namespace: "all",
+  tableFilter: "",
   openMenu: null,
 
   rows: emptyRows(),
@@ -146,10 +150,12 @@ export const useStore = create<AppState>((set) => ({
   yamlDraft: "",
 
   // ---------- navigation ----------
-  // Switching kind clears the pod selection and any open menu (design behavior).
-  setNav: (kind) => set({ nav: kind, selectedPod: null, openMenu: null }),
+  // Switching kind clears the pod selection, any open menu, and the name filter
+  // (the filter is scoped to the kind you typed it for).
+  setNav: (kind) => set({ nav: kind, selectedPod: null, openMenu: null, tableFilter: "" }),
   // Changing namespace also clears selection (a pod may no longer be visible).
   setNamespace: (ns) => set({ namespace: ns, openMenu: null, selectedPod: null }),
+  setTableFilter: (q) => set({ tableFilter: q }),
   // Toggle a menu; opening one closes the other (only one open at a time).
   toggleMenu: (menu) => set((s) => ({ openMenu: s.openMenu === menu ? null : menu })),
   closeMenus: () => set({ openMenu: null }),

@@ -15,6 +15,7 @@ beforeEach(() => {
     nav: "pods",
     following: true,
     openMenu: null,
+    tableFilter: "",
   });
 });
 
@@ -69,13 +70,14 @@ describe("selection & nav reset", () => {
     expect(s.following).toBe(true);
   });
 
-  it("setNav clears the pod selection and closes menus", () => {
-    useStore.setState({ selectedPod: podRow("valkyrie"), openMenu: "ns" });
+  it("setNav clears the pod selection, menus, and the table filter", () => {
+    useStore.setState({ selectedPod: podRow("valkyrie"), openMenu: "ns", tableFilter: "valk" });
     useStore.getState().setNav("nodes");
     const s = useStore.getState();
     expect(s.nav).toBe("nodes");
     expect(s.selectedPod).toBeNull();
     expect(s.openMenu).toBeNull();
+    expect(s.tableFilter).toBe("");
   });
 
   it("cycleContainer advances the index and clears the buffer", () => {
