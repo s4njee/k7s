@@ -1,0 +1,99 @@
+/* Top bar (Design §2): 46px, chrome background, breadcrumb left, namespace
+   dropdown right. */
+
+.topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 46px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-chrome);
+}
+
+/* Breadcrumb: cluster / group / Kind. */
+.breadcrumb {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.sep {
+  color: var(--separator);
+}
+.kind {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* ---------- Namespace dropdown ---------- */
+
+.nsWrap {
+  position: relative;
+}
+.nsButton {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.nsButton:hover {
+  border-color: var(--border-hover);
+}
+.nsPrefix {
+  color: var(--text-faint);
+}
+.nsValue {
+  color: var(--text-primary);
+}
+.nsChevron {
+  color: var(--text-faint);
+  font-size: 8px;
+}
+
+.nsMenu {
+  position: absolute;
+  right: 0;
+  top: 32px;
+  z-index: 60;
+  min-width: 170px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-menu);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  overflow: hidden;
+  padding: 4px 0;
+}
+.nsRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.nsRow:hover {
+  background: var(--bg-hover-strong);
+}
+.nsRowSelected {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+/* Fixed-width check column so labels align whether or not a row is selected. */
+.nsCheck {
+  width: 12px;
+  color: var(--accent);
+}

@@ -1,0 +1,31 @@
+{
+  // TypeScript configuration for the k7s React frontend.
+  // Targets a modern browser runtime (Tauri ships a current WebView), strict everywhere.
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    // Bundler-mode resolution: Vite owns the actual module graph, tsc only type-checks.
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    // Strictness: catch as much as possible at compile time — this is a data-heavy UI.
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+
+    // Vitest globals (describe/it/expect) without importing them in every test file.
+    "types": ["vitest/globals"]
+  },
+  "include": ["src"]
+}

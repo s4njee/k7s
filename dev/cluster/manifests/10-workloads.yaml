@@ -1,0 +1,166 @@
+# Core workloads for the fixture cluster. Uses busybox so nothing needs a private
+# registry; each container emits log lines so the Logs tab has real content in a
+# mix of formats (klog-ish, JSON, and level-less) to exercise the level parser.
+
+# --- valkyrie-api: multi-container Deployment (app + istio-proxy + log-shipper),
+#     the "chatty" logger emitting ~2 lines/sec in mixed formats. ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkyrie-api
+  namespace: prod
+  labels: { app: valkyrie-api }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: valkyrie-api }
+  template:
+    metadata:
+      labels: { app: valkyrie-api }
+    spec:
+      containers:
+        - name: valkyrie-api
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              i=0
+              while true; do
+                i=$((i+1))
+                echo "INFO GET /v1/valkyries/roster 200 12ms trace=8f2c1a"
+                echo '{"level":"debug","msg":"cache hit ratio=0.94 keys=18234"}'
+                echo "processing background item $i"          # level-less line
+                echo "WARN slow query: SELECT * FROM missions (412ms)"
+                sleep 1
+              done
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+        - name: istio-proxy
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args: ["while true; do echo 'INFO [envoy] upstream healthy clusters=7'; sleep 3; done"]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+        - name: log-shipper
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args: ["while true; do echo 'INFO shipped 128 log lines to loki'; sleep 5; done"]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+---
+# --- bifrost-gateway: 2-container Deployment (app + sidecar). ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bifrost-gateway
+  namespace: prod
+  labels: { app: bifrost-gateway }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: bifrost-gateway }
+  template:
+    metadata:
+      labels: { app: bifrost-gateway }
+    spec:
+      containers:
+        - name: bifrost-gateway
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do echo 'INFO gateway route matched /api'; sleep 2; done"]
+          resources:
+            requests: { cpu: 20m, memory: 24Mi }
+        - name: istio-proxy
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do echo 'INFO [envoy] request forwarded'; sleep 3; done"]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+---
+# --- yggdrasil-db: 2-replica StatefulSet. ---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: yggdrasil-db
+  namespace: prod
+  labels: { app: yggdrasil-db }
+spec:
+  serviceName: yggdrasil-db
+  replicas: 2
+  selector:
+    matchLabels: { app: yggdrasil-db }
+  template:
+    metadata:
+      labels: { app: yggdrasil-db }
+    spec:
+      containers:
+        - name: postgres
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do echo 'INFO checkpoint complete lsn=0/8F2A'; sleep 4; done"]
+          resources:
+            requests: { cpu: 25m, memory: 48Mi }
+---
+# --- heimdall-auth: a CrashLoopBackOff Deployment (exits 1 after erroring). ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heimdall-auth
+  namespace: prod
+  labels: { app: heimdall-auth }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: heimdall-auth }
+  template:
+    metadata:
+      labels: { app: heimdall-auth }
+    spec:
+      containers:
+        - name: heimdall-auth
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "INFO starting heimdall-auth v2.4.1"
+              echo "ERROR connection refused: dial tcp 10.96.14.30:6379 (auth token cache)"
+              echo "ERROR liveness probe will fail: dependency check timed out"
+              sleep 2
+              exit 1
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+---
+# --- valkyrie-api-canary: a Pending pod (unschedulable: impossible CPU request). ---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: valkyrie-api-canary
+  namespace: staging
+  labels: { app: valkyrie-api-canary }
+spec:
+  containers:
+    - name: valkyrie-api
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      resources:
+        # 1000 cores can never be scheduled on a kind node → stays Pending.
+        requests: { cpu: "1000" }
+---
+# --- grafana: a simple single-container Deployment in monitoring. ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels: { app: grafana }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: grafana }
+  template:
+    metadata:
+      labels: { app: grafana }
+    spec:
+      containers:
+        - name: grafana
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do echo 'INFO dashboard rendered in 34ms'; sleep 4; done"]
+          resources:
+            requests: { cpu: 15m, memory: 24Mi }

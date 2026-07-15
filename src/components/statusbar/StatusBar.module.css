@@ -1,0 +1,26 @@
+/* Status bar (Design §5): 26px, panel background, mono 10px muted, 18px gaps. */
+
+.statusbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 26px;
+  padding: 0 16px;
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-panel);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* The leading "● <cluster>" indicator (green connected / red otherwise). */
+.cluster {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.spacer {
+  flex: 1;
+}

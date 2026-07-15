@@ -1,0 +1,34 @@
+/**
+ * App root — the single-window shell (Design §Overview).
+ *
+ * Layout: Sidebar | (TopBar / content / StatusBar). The content region hosts the
+ * resource table and pod detail panel (added in Epics 4 and 5); for now it shows a
+ * placeholder so the shell (sidebar, top bar, status bar) can be verified.
+ */
+
+import styles from "./App.module.css";
+import { useBootstrap } from "./hooks/useBootstrap";
+import { Sidebar } from "./components/sidebar/Sidebar";
+import { TopBar } from "./components/topbar/TopBar";
+import { StatusBar } from "./components/statusbar/StatusBar";
+import { ResourceTable } from "./components/table/ResourceTable";
+import { DetailPanel } from "./components/detail/DetailPanel";
+
+export default function App() {
+  // Wire provider → store and connect on mount.
+  useBootstrap();
+
+  return (
+    <div className={styles.app}>
+      <Sidebar />
+      <div className={styles.main}>
+        <TopBar />
+        <div className={styles.content}>
+          <ResourceTable />
+          <DetailPanel />
+        </div>
+        <StatusBar />
+      </div>
+    </div>
+  );
+}

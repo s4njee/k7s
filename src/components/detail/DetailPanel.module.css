@@ -1,0 +1,96 @@
+/* Pod detail panel (Design §4): 47% width (min 520px), left border, chrome bg.
+   Opens when a pod is selected. Contains a header, tab strip, and the active tab. */
+
+.panel {
+  width: 47%;
+  min-width: 520px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border-default);
+  background: var(--bg-chrome);
+  /* min-height:0 lets inner scroll regions (logs/yaml) size correctly. */
+  min-height: 0;
+}
+
+/* ---------- Header ---------- */
+
+.header {
+  flex: none;
+  padding: 12px 16px 0;
+}
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.close {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.close:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+
+.meta {
+  display: flex;
+  gap: 14px;
+  margin: 6px 0 10px;
+  padding-left: 18px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.metaVal {
+  color: var(--text-secondary);
+}
+
+/* ---------- Tabs ---------- */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border-default);
+}
+.tab {
+  padding: 7px 14px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover {
+  color: var(--text-primary);
+}
+.tabActive {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
