@@ -10,6 +10,7 @@
 
 import type { Cell, Row, PodMeta, Tone } from "../types";
 import { KIND_META, type ResourceKind } from "../../lib/kinds";
+import { parseCpuMillis, parseMemBytes } from "../../lib/format";
 
 /** Raw pod record, matching the prototype's pod objects. */
 export interface MockPod {
@@ -158,8 +159,9 @@ export function buildPodRows(): Row[] {
       { text: p.ns, tone: "muted" },
       { text: p.ready, tone: readyDegraded ? "warn" : "secondary" },
       { text: String(p.restarts), tone: p.restarts > 5 ? "err" : "secondary" },
-      { text: p.cpu, tone: "secondary" },
-      { text: p.mem, tone: "secondary" },
+      // CPU/MEM carry numeric sort keys since their units aren't lexical.
+      { text: p.cpu, tone: "secondary", sort: parseCpuMillis(p.cpu) },
+      { text: p.mem, tone: "secondary", sort: parseMemBytes(p.mem) },
       { text: p.age, tone: "muted" },
       { text: p.status, tone: statusTone(p.status), dot: true },
     ];

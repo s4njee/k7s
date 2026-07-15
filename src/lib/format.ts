@@ -72,6 +72,44 @@ export function formatCpu(milliCores: number): string {
 }
 
 /**
+ * Parse a CPU string ("212m", "1.5", "500000000n") back to milli-cores. Inverse of
+ * {@link formatCpu}; used to build sort keys for mock rows (real rows get the raw
+ * millis from the metrics feed). Returns undefined for unknown/em-dash values.
+ */
+export function parseCpuMillis(s: string): number | undefined {
+  if (!s || s === "—") return undefined;
+  const v = parseFloat(s);
+  if (Number.isNaN(v)) return undefined;
+  if (s.endsWith("m")) return v;
+  if (s.endsWith("u")) return v / 1e3;
+  if (s.endsWith("n")) return v / 1e6;
+  return v * 1000; // bare number is cores
+}
+
+/**
+ * Parse a memory string ("486Mi", "3.2Gi", "1000k") back to bytes. Inverse of
+ * {@link formatMem}; used for mock sort keys. Returns undefined for "—"/unknown.
+ */
+export function parseMemBytes(s: string): number | undefined {
+  if (!s || s === "—") return undefined;
+  const v = parseFloat(s);
+  if (Number.isNaN(v)) return undefined;
+  const unit = s.replace(/[0-9.\s]/g, "");
+  const mult: Record<string, number> = {
+    "": 1,
+    Ki: 1024,
+    Mi: 1024 ** 2,
+    Gi: 1024 ** 3,
+    Ti: 1024 ** 4,
+    k: 1e3,
+    M: 1e6,
+    G: 1e9,
+    T: 1e12,
+  };
+  return v * (mult[unit] ?? 1);
+}
+
+/**
  * Format a byte count as a binary (Mi/Gi) memory string, matching kubectl.
  * Uses Mi under 1 GiB ("486Mi") and Gi with one decimal above ("3.2Gi").
  */

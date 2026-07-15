@@ -59,6 +59,10 @@ export interface AppState {
   namespace: string;
   /** Free-text name filter for the current table (cleared on nav change). */
   tableFilter: string;
+  /** Column index the table is sorted by, or null for server order. */
+  sortCol: number | null;
+  /** Sort direction when `sortCol` is set. */
+  sortDir: "asc" | "desc";
   /** Which dropdown is open (cluster switcher or ns menu). */
   openMenu: OpenMenu;
 
@@ -88,6 +92,8 @@ export interface AppState {
   setNav: (kind: ResourceKind) => void;
   setNamespace: (ns: string) => void;
   setTableFilter: (q: string) => void;
+  /** Sort by a column: same column toggles direction, a new column starts ascending. */
+  toggleSort: (col: number) => void;
   toggleMenu: (menu: Exclude<OpenMenu, null>) => void;
   closeMenus: () => void;
 
@@ -131,6 +137,8 @@ export const useStore = create<AppState>((set) => ({
   nav: "pods",
   namespace: "all",
   tableFilter: "",
+  sortCol: null,
+  sortDir: "asc",
   openMenu: null,
 
   rows: emptyRows(),
@@ -150,12 +158,26 @@ export const useStore = create<AppState>((set) => ({
   yamlDraft: "",
 
   // ---------- navigation ----------
-  // Switching kind clears the pod selection, any open menu, and the name filter
-  // (the filter is scoped to the kind you typed it for).
-  setNav: (kind) => set({ nav: kind, selectedPod: null, openMenu: null, tableFilter: "" }),
+  // Switching kind clears the pod selection, any open menu, the name filter, and
+  // the sort (all are scoped to the kind you were viewing).
+  setNav: (kind) =>
+    set({
+      nav: kind,
+      selectedPod: null,
+      openMenu: null,
+      tableFilter: "",
+      sortCol: null,
+      sortDir: "asc",
+    }),
   // Changing namespace also clears selection (a pod may no longer be visible).
   setNamespace: (ns) => set({ namespace: ns, openMenu: null, selectedPod: null }),
   setTableFilter: (q) => set({ tableFilter: q }),
+  toggleSort: (col) =>
+    set((s) =>
+      s.sortCol === col
+        ? { sortDir: s.sortDir === "asc" ? "desc" : "asc" }
+        : { sortCol: col, sortDir: "asc" },
+    ),
   // Toggle a menu; opening one closes the other (only one open at a time).
   toggleMenu: (menu) => set((s) => ({ openMenu: s.openMenu === menu ? null : menu })),
   closeMenus: () => set({ openMenu: null }),

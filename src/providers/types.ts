@@ -48,6 +48,13 @@ export interface Cell {
    * ("4d2h") and re-renders it on a periodic tick instead of showing it literally.
    */
   format?: "age";
+  /**
+   * Optional numeric sort key for columns whose display text can't be compared
+   * directly (CPU/MEM, where "3.2Gi" and "486Mi" don't order lexically). Most
+   * columns are sorted by an auto-detected heuristic (see lib/sort.ts); this
+   * overrides it when set.
+   */
+  sort?: number;
 }
 
 /** Extra fields carried only by pod rows, used to drive the detail panel. */

@@ -12,6 +12,7 @@ import { useNow } from "../../hooks/useNow";
 import { toneColor } from "../../lib/tone";
 import { formatAge, formatCpu, formatMem } from "../../lib/format";
 import { CLUSTER_SCOPED, KIND_META, type ResourceKind } from "../../lib/kinds";
+import { sortRows } from "../../lib/sort";
 import type { Cell, NodeMetricsMap, PodMetricsMap, Row } from "../../providers/types";
 
 export function ResourceTable() {
@@ -19,6 +20,9 @@ export function ResourceTable() {
   const namespace = useStore((s) => s.namespace);
   const tableFilter = useStore((s) => s.tableFilter);
   const setTableFilter = useStore((s) => s.setTableFilter);
+  const sortCol = useStore((s) => s.sortCol);
+  const sortDir = useStore((s) => s.sortDir);
+  const toggleSort = useStore((s) => s.toggleSort);
   const allRows = useStore((s) => s.rows[nav]);
   const podMetrics = useStore((s) => s.podMetrics);
   const nodeMetrics = useStore((s) => s.nodeMetrics);
@@ -31,7 +35,8 @@ export function ResourceTable() {
   const columns = KIND_META[nav].columns;
   const isPods = nav === "pods";
 
-  // Namespace filter (cluster-scoped kinds ignore it), name filter, metrics overlay.
+  // Namespace filter (cluster-scoped kinds ignore it), name filter, metrics overlay,
+  // then optional column sort. When no column is chosen, server order is preserved.
   const rows = useMemo(() => {
     const q = tableFilter.trim().toLowerCase();
     const filtered = allRows.filter((r) => {
@@ -42,8 +47,9 @@ export function ResourceTable() {
       // Name filter (case-insensitive substring).
       return !q || r.name.toLowerCase().includes(q);
     });
-    return overlayMetrics(nav, filtered, podMetrics, nodeMetrics);
-  }, [nav, allRows, namespace, tableFilter, podMetrics, nodeMetrics]);
+    const overlaid = overlayMetrics(nav, filtered, podMetrics, nodeMetrics);
+    return sortCol === null ? overlaid : sortRows(overlaid, sortCol, sortDir, now);
+  }, [nav, allRows, namespace, tableFilter, podMetrics, nodeMetrics, sortCol, sortDir, now]);
 
   return (
     <div className={styles.container}>
@@ -63,9 +69,12 @@ export function ResourceTable() {
         <table className={styles.table}>
         <thead>
           <tr>
-            {columns.map((col) => (
-              <th key={col} className={styles.th}>
+            {columns.map((col, i) => (
+              <th key={col} className={styles.th} onClick={() => toggleSort(i)}>
                 {col}
+                {sortCol === i && (
+                  <span className={styles.sortArrow}>{sortDir === "asc" ? " ▲" : " ▼"}</span>
+                )}
               </th>
             ))}
           </tr>
@@ -122,9 +131,10 @@ function overlayMetrics(
       const m = podMetrics[`${r.namespace}/${r.name}`];
       if (!m) return r;
       const cells = r.cells.slice();
-      // Pods columns: NAME,NAMESPACE,READY,RESTARTS,CPU(4),MEM(5),AGE,STATUS
-      cells[4] = { ...cells[4], text: formatCpu(m.cpuMillis) };
-      cells[5] = { ...cells[5], text: formatMem(m.memBytes) };
+      // Pods columns: NAME,NAMESPACE,READY,RESTARTS,CPU(4),MEM(5),AGE,STATUS.
+      // Carry the raw numbers as sort keys (units aren't lexically comparable).
+      cells[4] = { ...cells[4], text: formatCpu(m.cpuMillis), sort: m.cpuMillis };
+      cells[5] = { ...cells[5], text: formatMem(m.memBytes), sort: m.memBytes };
       return { ...r, cells };
     });
   }

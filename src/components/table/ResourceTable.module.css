@@ -71,6 +71,15 @@
   color: var(--text-faint);
   border-bottom: 1px solid var(--border-default);
   white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.th:hover {
+  color: var(--text-secondary);
+}
+/* Active-sort direction indicator. */
+.sortArrow {
+  color: var(--accent);
 }
 
 .row {
