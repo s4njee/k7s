@@ -23,7 +23,7 @@ import type {
 import { KIND_ORDER, type ResourceKind } from "../../lib/kinds";
 import { MOCK_CLUSTERS, buildKindRows } from "./data";
 import { makeLogLine, seedLogLines } from "./logs";
-import { yamlForPodName } from "./yaml";
+import { yamlForPodName, yamlForGeneric } from "./yaml";
 import { eventsForPodName } from "./events";
 
 /** Interval (ms) between mock log lines, matching the prototype's default. */
@@ -90,14 +90,19 @@ export class MockProvider implements DataProvider {
   }
 
   async getYaml(ref: ResourceRef): Promise<string> {
-    const key = `${ref.namespace}/${ref.name}`;
+    const key = `${ref.kind}:${ref.namespace}/${ref.name}`;
     // Return the edited version if the user applied changes this session.
-    return this.yamlCache.get(key) ?? yamlForPodName(ref.name);
+    const cached = this.yamlCache.get(key);
+    if (cached) return cached;
+    // Pods get the full mock manifest; other kinds get a generic stub.
+    return ref.kind === "pods"
+      ? yamlForPodName(ref.name)
+      : yamlForGeneric(ref.kind, ref.namespace, ref.name);
   }
 
   async applyYaml(ref: ResourceRef, text: string): Promise<void> {
     // Persist to the in-memory cache; no validation in demo mode.
-    this.yamlCache.set(`${ref.namespace}/${ref.name}`, text);
+    this.yamlCache.set(`${ref.kind}:${ref.namespace}/${ref.name}`, text);
   }
 
   async getEvents(ref: ResourceRef): Promise<EventItem[]> {

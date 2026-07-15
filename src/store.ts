@@ -71,9 +71,9 @@ export interface AppState {
   podMetrics: PodMetricsMap;
   nodeMetrics: NodeMetricsMap;
 
-  // ---------- pod detail panel ----------
-  /** Selected pod row (null → panel closed). */
-  selectedPod: Row | null;
+  // ---------- detail panel ----------
+  /** Selected row (null → panel closed). Pods also get a Logs tab. */
+  selectedRow: Row | null;
   activeTab: DetailTab;
 
   // logs tab
@@ -108,7 +108,7 @@ export interface AppState {
   resetData: () => void;
 
   // detail panel
-  selectPod: (row: Row) => void;
+  selectRow: (row: Row) => void;
   closeDetail: () => void;
   setActiveTab: (tab: DetailTab) => void;
 
@@ -145,7 +145,7 @@ export const useStore = create<AppState>((set) => ({
   podMetrics: {},
   nodeMetrics: {},
 
-  selectedPod: null,
+  selectedRow: null,
   activeTab: "logs",
 
   logSearch: "",
@@ -163,14 +163,14 @@ export const useStore = create<AppState>((set) => ({
   setNav: (kind) =>
     set({
       nav: kind,
-      selectedPod: null,
+      selectedRow: null,
       openMenu: null,
       tableFilter: "",
       sortCol: null,
       sortDir: "asc",
     }),
   // Changing namespace also clears selection (a pod may no longer be visible).
-  setNamespace: (ns) => set({ namespace: ns, openMenu: null, selectedPod: null }),
+  setNamespace: (ns) => set({ namespace: ns, openMenu: null, selectedRow: null }),
   setTableFilter: (q) => set({ tableFilter: q }),
   toggleSort: (col) =>
     set((s) =>
@@ -196,26 +196,27 @@ export const useStore = create<AppState>((set) => ({
       rows: emptyRows(),
       podMetrics: {},
       nodeMetrics: {},
-      selectedPod: null,
+      selectedRow: null,
       logBuffer: [],
       clusterStatus: null,
       openMenu: null,
     }),
 
   // ---------- detail panel ----------
-  // Selecting a pod opens the panel on the Logs tab and resets log/yaml view state.
-  // (The detail component re-seeds the log stream in response to the selection.)
-  selectPod: (row) =>
+  // Selecting a row opens the panel and resets log/yaml view state. Pods open on
+  // the Logs tab; other kinds have no Logs tab, so they open on YAML.
+  // (The logs component re-seeds the stream in response to a pod selection.)
+  selectRow: (row) =>
     set({
-      selectedPod: row,
-      activeTab: "logs",
+      selectedRow: row,
+      activeTab: row.pod ? "logs" : "yaml",
       yamlEditing: false,
       logBuffer: [],
       logSearch: "",
       containerIndex: 0,
       following: true,
     }),
-  closeDetail: () => set({ selectedPod: null }),
+  closeDetail: () => set({ selectedRow: null }),
   // Switching tabs cancels any in-progress YAML edit (design behavior).
   setActiveTab: (tab) => set({ activeTab: tab, yamlEditing: false }),
 

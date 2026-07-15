@@ -7,8 +7,9 @@ use crate::error::{AppError, AppResult};
 use crate::kube::client::{self, ClusterInfo, ContextInfo};
 use crate::kube::manager::ImportedContext;
 use crate::kube::{logs, mappers, metrics, watchers, ClientManager};
-use k8s_openapi::api::core::v1::{Event, Pod};
-use kube::api::{Api, ListParams, PostParams};
+use k8s_openapi::api::core::v1::Event;
+use kube::api::{Api, ApiResource, DynamicObject, ListParams, PostParams};
+use kube::core::GroupVersionKind;
 use kube::ResourceExt;
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -107,8 +108,46 @@ pub async fn connect(
     })
 }
 
-/// Fetch an object's YAML for the detail panel (pods in v1). Strips
-/// `metadata.managedFields`, which is noise for a human editor.
+/// Map a frontend kind id to its `ApiResource` and whether it is namespaced. The
+/// kind id doubles as the resource plural, so we build the ApiResource directly
+/// (avoiding fragile plural-guessing).
+fn resource_for(kind: &str) -> AppResult<(ApiResource, bool)> {
+    // (group, version, Kind, namespaced)
+    let (group, version, k, namespaced) = match kind {
+        "pods" => ("", "v1", "Pod", true),
+        "deployments" => ("apps", "v1", "Deployment", true),
+        "statefulsets" => ("apps", "v1", "StatefulSet", true),
+        "daemonsets" => ("apps", "v1", "DaemonSet", true),
+        "jobs" => ("batch", "v1", "Job", true),
+        "cronjobs" => ("batch", "v1", "CronJob", true),
+        "services" => ("", "v1", "Service", true),
+        "ingresses" => ("networking.k8s.io", "v1", "Ingress", true),
+        "configmaps" => ("", "v1", "ConfigMap", true),
+        "secrets" => ("", "v1", "Secret", true),
+        "nodes" => ("", "v1", "Node", false),
+        "namespaces" => ("", "v1", "Namespace", false),
+        other => return Err(AppError::Other(format!("unknown kind: {other}"))),
+    };
+    let gvk = GroupVersionKind::gvk(group, version, k);
+    Ok((ApiResource::from_gvk_with_plural(&gvk, kind), namespaced))
+}
+
+/// Build a dynamic API for `kind`, namespaced or cluster-scoped as appropriate.
+fn dynamic_api(
+    client: kube::Client,
+    kind: &str,
+    namespace: &str,
+) -> AppResult<Api<DynamicObject>> {
+    let (ar, namespaced) = resource_for(kind)?;
+    Ok(if namespaced {
+        Api::namespaced_with(client, namespace, &ar)
+    } else {
+        Api::all_with(client, &ar)
+    })
+}
+
+/// Fetch an object's YAML for the detail panel (any kind). Strips
+/// `metadata.managedFields`; Secret values are redacted (see below).
 #[tauri::command]
 pub async fn get_yaml(
     kind: String,
@@ -117,14 +156,28 @@ pub async fn get_yaml(
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<String> {
     let client = require_client(&mgr).await?;
-    if kind != "pods" {
-        return Err(AppError::Other(format!("YAML view for '{kind}' is not supported yet")));
-    }
-    let api: Api<Pod> = Api::namespaced(client, &namespace);
-    let mut pod = api.get(&name).await?;
+    let api = dynamic_api(client, &kind, &namespace)?;
+    let mut obj = api.get(&name).await?;
     // Drop server-managed noise before rendering.
-    pod.metadata.managed_fields = None;
-    Ok(serde_yaml::to_string(&pod)?)
+    obj.metadata.managed_fields = None;
+    // Never surface Secret values; redact them for display (Secrets are read-only,
+    // see apply_yaml). Documented in docs/verification.md.
+    if kind == "secrets" {
+        redact_secret(&mut obj);
+    }
+    Ok(serde_yaml::to_string(&obj)?)
+}
+
+/// Replace `data` values in a Secret with a placeholder so raw values never leave
+/// the backend.
+fn redact_secret(obj: &mut DynamicObject) {
+    for field in ["data", "stringData"] {
+        if let Some(serde_json::Value::Object(map)) = obj.data.get_mut(field) {
+            for v in map.values_mut() {
+                *v = serde_json::Value::String("<redacted>".into());
+            }
+        }
+    }
 }
 
 /// Apply edited YAML back to the cluster via replace (preserving resourceVersion
@@ -138,14 +191,16 @@ pub async fn apply_yaml(
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<()> {
     let client = require_client(&mgr).await?;
-    if kind != "pods" {
-        return Err(AppError::Other(format!("YAML apply for '{kind}' is not supported yet")));
+    // Secrets are shown redacted, so applying edits would clobber their real values
+    // — disallow it (the UI also hides the Edit button for Secrets).
+    if kind == "secrets" {
+        return Err(AppError::Other("editing Secrets is disabled".into()));
     }
-    let pod: Pod = serde_yaml::from_str(&yaml)?;
-    let api: Api<Pod> = Api::namespaced(client, &namespace);
+    let obj: DynamicObject = serde_yaml::from_str(&yaml)?;
+    let api = dynamic_api(client, &kind, &namespace)?;
     // replace() requires the resourceVersion present in the fetched/edited object;
     // a stale value yields a 409 whose message we pass straight through.
-    api.replace(&name, &PostParams::default(), &pod).await?;
+    api.replace(&name, &PostParams::default(), &obj).await?;
     Ok(())
 }
 

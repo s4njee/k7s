@@ -62,6 +62,14 @@ are final/exact), and the choices are noted here per Story 7.2.
    field chrome; the prototype HTML uses `#0d0d0f`. → k7s uses **`#0a0a0c`** (the
    README value), matching the rest of the terminal/log surface.
 
+## Design decisions (backlog features)
+
+- **Secret values are redacted (B1).** The detail panel now covers all kinds
+  (YAML + Events for non-pods; pods keep Logs). Secret `data`/`stringData` values
+  are replaced with `<redacted>` server-side and the YAML tab is **read-only** for
+  Secrets, so raw values never reach the webview and can't be clobbered by an edit.
+  Other kinds are fully editable via Apply.
+
 ## Known follow-ups (out of v1 scope, per plan.md)
 
 - Detail panel (YAML/Events) for non-pod kinds — pods-only in v1 by design.

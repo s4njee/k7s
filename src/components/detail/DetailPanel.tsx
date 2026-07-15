@@ -1,7 +1,8 @@
 /**
- * Pod detail panel (Design §4). Opens for the selected pod; shows a header with
- * status/name/meta, a Logs/YAML/Events tab strip, and the active tab's content.
- * Only pods open this panel in v1 (per the design).
+ * Detail panel (Design §4). Opens for the selected row. Pods get a header with
+ * status/node/age and a Logs/YAML/Events tab strip; other kinds get a simpler
+ * header and YAML/Events only (no logs). The selected row's kind is the current
+ * nav kind, since selection is cleared whenever nav changes.
  */
 
 import styles from "./DetailPanel.module.css";
@@ -9,56 +10,75 @@ import { useStore, type DetailTab } from "../../store";
 import { useNow } from "../../hooks/useNow";
 import { formatAge } from "../../lib/format";
 import { toneColor } from "../../lib/tone";
+import { KIND_META } from "../../lib/kinds";
 import { LogsTab } from "./LogsTab";
 import { YamlTab } from "./YamlTab";
 import { EventsTab } from "./EventsTab";
 
-const TABS: { id: DetailTab; label: string }[] = [
+const ALL_TABS: { id: DetailTab; label: string }[] = [
   { id: "logs", label: "Logs" },
   { id: "yaml", label: "YAML" },
   { id: "events", label: "Events" },
 ];
 
 export function DetailPanel() {
-  const pod = useStore((s) => s.selectedPod);
+  const row = useStore((s) => s.selectedRow);
+  const nav = useStore((s) => s.nav);
   const activeTab = useStore((s) => s.activeTab);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const closeDetail = useStore((s) => s.closeDetail);
   const now = useNow();
 
-  // Panel is closed when no pod is selected.
-  if (!pod || !pod.pod) return null;
-  const meta = pod.pod;
-  const statusColor = toneColor(meta.statusTone);
+  // Panel is closed when nothing is selected.
+  if (!row) return null;
+
+  const meta = row.pod; // present only for pods
+  const isPod = !!meta;
+  // Logs tab is pod-only; other kinds get YAML + Events.
+  const tabs = isPod ? ALL_TABS : ALL_TABS.filter((t) => t.id !== "logs");
+  const statusColor = meta ? toneColor(meta.statusTone) : "var(--text-muted)";
 
   return (
     <div className={styles.panel}>
       <div className={styles.header}>
         <div className={styles.titleRow}>
           <span className={styles.statusDot} style={{ background: statusColor }} />
-          <div className={styles.name} title={pod.name}>
-            {pod.name}
+          <div className={styles.name} title={row.name}>
+            {row.name}
           </div>
           <div className={styles.close} onClick={closeDetail} title="close">
             ×
           </div>
         </div>
 
-        <div className={styles.meta}>
-          <span>
-            ns: <span className={styles.metaVal}>{pod.namespace}</span>
-          </span>
-          <span>
-            node: <span className={styles.metaVal}>{meta.node}</span>
-          </span>
-          <span>
-            age: <span className={styles.metaVal}>{ageText(meta.creationTs, now)}</span>
-          </span>
-          <span style={{ color: statusColor }}>{meta.status}</span>
-        </div>
+        {isPod ? (
+          <div className={styles.meta}>
+            <span>
+              ns: <span className={styles.metaVal}>{row.namespace}</span>
+            </span>
+            <span>
+              node: <span className={styles.metaVal}>{meta.node}</span>
+            </span>
+            <span>
+              age: <span className={styles.metaVal}>{ageText(meta.creationTs, now)}</span>
+            </span>
+            <span style={{ color: statusColor }}>{meta.status}</span>
+          </div>
+        ) : (
+          <div className={styles.meta}>
+            <span>
+              kind: <span className={styles.metaVal}>{KIND_META[nav].label}</span>
+            </span>
+            {row.namespace && (
+              <span>
+                ns: <span className={styles.metaVal}>{row.namespace}</span>
+              </span>
+            )}
+          </div>
+        )}
 
         <div className={styles.tabs}>
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <div
               key={t.id}
               className={`${styles.tab} ${activeTab === t.id ? styles.tabActive : ""}`}
@@ -70,7 +90,7 @@ export function DetailPanel() {
         </div>
       </div>
 
-      {activeTab === "logs" && <LogsTab />}
+      {activeTab === "logs" && isPod && <LogsTab />}
       {activeTab === "yaml" && <YamlTab />}
       {activeTab === "events" && <EventsTab />}
     </div>

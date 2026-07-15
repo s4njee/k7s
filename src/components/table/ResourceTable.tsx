@@ -28,14 +28,13 @@ export function ResourceTable() {
   const nodeMetrics = useStore((s) => s.nodeMetrics);
   // The full pods list, used to derive per-namespace pod counts (B12).
   const podRows = useStore((s) => s.rows.pods);
-  const selectedUid = useStore((s) => s.selectedPod?.uid ?? null);
-  const selectPod = useStore((s) => s.selectPod);
+  const selectedUid = useStore((s) => s.selectedRow?.uid ?? null);
+  const selectRow = useStore((s) => s.selectRow);
 
   // Age columns re-render on a 30s tick.
   const now = useNow();
 
   const columns = KIND_META[nav].columns;
-  const isPods = nav === "pods";
 
   // Namespace filter (cluster-scoped kinds ignore it), name filter, metrics overlay,
   // then optional column sort. When no column is chosen, server order is preserved.
@@ -89,10 +88,10 @@ export function ResourceTable() {
                 key={row.uid}
                 className={[
                   styles.row,
-                  isPods ? styles.rowClickable : "",
+                  styles.rowClickable,
                   selected ? styles.rowSelected : "",
                 ].join(" ")}
-                onClick={isPods ? () => selectPod(row) : undefined}
+                onClick={() => selectRow(row)}
               >
                 {row.cells.map((cell, i) => (
                   <td key={i} className={styles.td} style={{ color: toneColor(cell.tone) }}>

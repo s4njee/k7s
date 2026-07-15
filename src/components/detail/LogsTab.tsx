@@ -29,7 +29,7 @@ export function LogsTab() {
   // Drive the stream for as long as this tab is mounted.
   useLogStream();
 
-  const pod = useStore((s) => s.selectedPod);
+  const pod = useStore((s) => s.selectedRow);
   const logBuffer = useStore((s) => s.logBuffer);
   const logSearch = useStore((s) => s.logSearch);
   const setLogSearch = useStore((s) => s.setLogSearch);

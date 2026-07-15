@@ -17,7 +17,7 @@ import { useStore, LOG_BUFFER_CAP } from "../store";
 import type { LogHandle } from "../providers/types";
 
 export function useLogStream(): void {
-  const pod = useStore((s) => s.selectedPod);
+  const pod = useStore((s) => s.selectedRow);
   const following = useStore((s) => s.following);
   const containerIndex = useStore((s) => s.containerIndex);
   const appendLogs = useStore((s) => s.appendLogs);

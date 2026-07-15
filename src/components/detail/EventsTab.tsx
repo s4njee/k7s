@@ -10,15 +10,16 @@ import { getProvider } from "../../providers";
 import type { EventItem } from "../../providers/types";
 
 export function EventsTab() {
-  const pod = useStore((s) => s.selectedPod);
+  const row = useStore((s) => s.selectedRow);
+  const kind = useStore((s) => s.nav);
   const [events, setEvents] = useState<EventItem[] | null>(null);
 
   useEffect(() => {
-    if (!pod) return;
+    if (!row) return;
     let cancelled = false;
     setEvents(null); // show loading while fetching
     void getProvider()
-      .getEvents({ kind: "pods", namespace: pod.namespace, name: pod.name })
+      .getEvents({ kind, namespace: row.namespace, name: row.name })
       .then((items) => {
         if (!cancelled) setEvents(items);
       })
@@ -28,7 +29,7 @@ export function EventsTab() {
     return () => {
       cancelled = true;
     };
-  }, [pod?.uid, pod?.namespace, pod?.name]);
+  }, [row?.uid, row?.namespace, row?.name, kind]);
 
   if (events === null) {
     return <div className={styles.empty}>loading events…</div>;

@@ -61,3 +61,36 @@ export function yamlForPodName(name: string | null): string {
   const pod = MOCK_PODS.find((p) => p.name === name);
   return pod ? yamlForPod(pod) : "";
 }
+
+/** Singular Kind name for a resource-kind id (best-effort, for the mock stub). */
+function kindName(kind: string): string {
+  const map: Record<string, string> = {
+    deployments: "Deployment",
+    statefulsets: "StatefulSet",
+    daemonsets: "DaemonSet",
+    jobs: "Job",
+    cronjobs: "CronJob",
+    services: "Service",
+    ingresses: "Ingress",
+    configmaps: "ConfigMap",
+    secrets: "Secret",
+    nodes: "Node",
+    namespaces: "Namespace",
+  };
+  return map[kind] ?? "Resource";
+}
+
+/**
+ * A generic YAML stub for non-pod kinds in demo mode, so the YAML tab has content
+ * to show. Secrets get redacted values to mirror the real backend's behavior.
+ */
+export function yamlForGeneric(kind: string, namespace: string | undefined, name: string): string {
+  const meta = namespace
+    ? `metadata:\n  name: ${name}\n  namespace: ${namespace}`
+    : `metadata:\n  name: ${name}`;
+  const body =
+    kind === "secrets"
+      ? `type: Opaque\ndata:\n  username: "<redacted>"\n  password: "<redacted>"`
+      : `spec:\n  # (demo stub — real clusters return the full manifest)\n  selector:\n    app: ${name}`;
+  return `apiVersion: v1\nkind: ${kindName(kind)}\n${meta}\n  labels:\n    app: ${name}\n${body}`;
+}

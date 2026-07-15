@@ -12,7 +12,9 @@ import { CodeEditor } from "./CodeEditor";
 import type { ResourceRef } from "../../providers/types";
 
 export function YamlTab() {
-  const pod = useStore((s) => s.selectedPod);
+  const row = useStore((s) => s.selectedRow);
+  // The selected row's kind is the current nav kind (selection clears on nav change).
+  const kind = useStore((s) => s.nav);
   const yamlEditing = useStore((s) => s.yamlEditing);
   const yamlDraft = useStore((s) => s.yamlDraft);
   const startYamlEdit = useStore((s) => s.startYamlEdit);
@@ -25,11 +27,11 @@ export function YamlTab() {
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
 
-  const ref: ResourceRef | null = pod
-    ? { kind: "pods", namespace: pod.namespace, name: pod.name }
+  const ref: ResourceRef | null = row
+    ? { kind, namespace: row.namespace, name: row.name }
     : null;
 
-  // Fetch YAML on pod change (and on first open of this tab).
+  // Fetch YAML on selection change (and on first open of this tab).
   useEffect(() => {
     if (!ref) return;
     let cancelled = false;
@@ -48,11 +50,16 @@ export function YamlTab() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pod?.uid, pod?.namespace, pod?.name]);
+  }, [row?.uid, row?.namespace, row?.name]);
 
-  if (!pod || !ref) return null;
+  if (!row || !ref) return null;
 
-  const path = `pods/${pod.namespace}/${pod.name}.yaml`;
+  // Secret values are redacted server-side, so editing is disabled for them.
+  const editable = kind !== "secrets";
+  // Namespaced → "kind/ns/name.yaml"; cluster-scoped → "kind/name.yaml".
+  const path = row.namespace
+    ? `${kind}/${row.namespace}/${row.name}.yaml`
+    : `${kind}/${row.name}.yaml`;
 
   const onApply = async () => {
     setApplying(true);
@@ -91,15 +98,17 @@ export function YamlTab() {
             </div>
           </>
         ) : (
-          <div
-            className={styles.editBtn}
-            onClick={() => {
-              setError(null);
-              startYamlEdit(yamlText);
-            }}
-          >
-            ✎ Edit
-          </div>
+          editable && (
+            <div
+              className={styles.editBtn}
+              onClick={() => {
+                setError(null);
+                startYamlEdit(yamlText);
+              }}
+            >
+              ✎ Edit
+            </div>
+          )
         )}
       </div>
 
@@ -107,11 +116,11 @@ export function YamlTab() {
 
       {yamlEditing ? (
         <div className={`${styles.editorWrap} ${styles.editing}`}>
-          <CodeEditor key={`edit:${pod.uid}`} value={yamlText} editable onChange={setYamlDraft} />
+          <CodeEditor key={`edit:${row.uid}`} value={yamlText} editable onChange={setYamlDraft} />
         </div>
       ) : (
         <div className={styles.editorWrap}>
-          <CodeEditor key={`read:${pod.uid}:${nonce}`} value={yamlText} editable={false} />
+          <CodeEditor key={`read:${row.uid}:${nonce}`} value={yamlText} editable={false} />
         </div>
       )}
     </>

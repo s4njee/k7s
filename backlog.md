@@ -17,6 +17,8 @@ with the manager.
 
 ---
 
+> **Progress:** B1, B2, B5, B12 done (branch `feat/backlog-qol`).
+
 ## B1 — Detail panel for all resource kinds
 *The design handoff names this the natural follow-up ("extending YAML/Events to all
 kinds"). Pods keep their Logs tab; every other kind gets YAML + Events.*

@@ -11,7 +11,7 @@ import type { LogLine, Row } from "./providers/types";
 beforeEach(() => {
   useStore.setState({
     logBuffer: [],
-    selectedPod: null,
+    selectedRow: null,
     nav: "pods",
     following: true,
     openMenu: null,
@@ -58,24 +58,39 @@ describe("log ring buffer", () => {
   });
 });
 
+/** A non-pod row (no `pod` meta). */
+const plainRow = (name: string): Row => ({
+  uid: `svc:prod/${name}`,
+  name,
+  namespace: "prod",
+  cells: [],
+});
+
 describe("selection & nav reset", () => {
-  it("selectPod opens the panel on the logs tab and clears log/view state", () => {
+  it("selectRow opens a pod on the logs tab and clears log/view state", () => {
     useStore.setState({ activeTab: "yaml", logBuffer: [line("old")], containerIndex: 3 });
-    useStore.getState().selectPod(podRow("valkyrie"));
+    useStore.getState().selectRow(podRow("valkyrie"));
     const s = useStore.getState();
-    expect(s.selectedPod?.name).toBe("valkyrie");
+    expect(s.selectedRow?.name).toBe("valkyrie");
     expect(s.activeTab).toBe("logs");
     expect(s.logBuffer).toEqual([]);
     expect(s.containerIndex).toBe(0);
     expect(s.following).toBe(true);
   });
 
-  it("setNav clears the pod selection, menus, and the table filter", () => {
-    useStore.setState({ selectedPod: podRow("valkyrie"), openMenu: "ns", tableFilter: "valk" });
+  it("selectRow opens a non-pod row on the yaml tab (no logs)", () => {
+    useStore.getState().selectRow(plainRow("valkyrie-api"));
+    const s = useStore.getState();
+    expect(s.selectedRow?.name).toBe("valkyrie-api");
+    expect(s.activeTab).toBe("yaml");
+  });
+
+  it("setNav clears the selection, menus, and the table filter", () => {
+    useStore.setState({ selectedRow: podRow("valkyrie"), openMenu: "ns", tableFilter: "valk" });
     useStore.getState().setNav("nodes");
     const s = useStore.getState();
     expect(s.nav).toBe("nodes");
-    expect(s.selectedPod).toBeNull();
+    expect(s.selectedRow).toBeNull();
     expect(s.openMenu).toBeNull();
     expect(s.tableFilter).toBe("");
   });
