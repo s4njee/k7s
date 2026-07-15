@@ -26,6 +26,8 @@ export function ResourceTable() {
   const allRows = useStore((s) => s.rows[nav]);
   const podMetrics = useStore((s) => s.podMetrics);
   const nodeMetrics = useStore((s) => s.nodeMetrics);
+  // The full pods list, used to derive per-namespace pod counts (B12).
+  const podRows = useStore((s) => s.rows.pods);
   const selectedUid = useStore((s) => s.selectedPod?.uid ?? null);
   const selectPod = useStore((s) => s.selectPod);
 
@@ -47,9 +49,9 @@ export function ResourceTable() {
       // Name filter (case-insensitive substring).
       return !q || r.name.toLowerCase().includes(q);
     });
-    const overlaid = overlayMetrics(nav, filtered, podMetrics, nodeMetrics);
+    const overlaid = overlayMetrics(nav, filtered, podMetrics, nodeMetrics, podRows);
     return sortCol === null ? overlaid : sortRows(overlaid, sortCol, sortDir, now);
-  }, [nav, allRows, namespace, tableFilter, podMetrics, nodeMetrics, sortCol, sortDir, now]);
+  }, [nav, allRows, namespace, tableFilter, podMetrics, nodeMetrics, podRows, sortCol, sortDir, now]);
 
   return (
     <div className={styles.container}>
@@ -115,16 +117,17 @@ function renderCell(cell: Cell, now: number): string {
 }
 
 /**
- * Overlay live metrics onto pod (CPU/MEM) and node (CPU/MEMORY) rows. Rows arrive
- * with "—" placeholders in real mode; the metrics feed (keyed separately) fills
- * them in here. In demo mode the metrics maps are empty and the baked-in values
- * are kept.
+ * Overlay live values that aren't carried on the row itself:
+ *  - pods CPU/MEM and node CPU/MEMORY from the metrics feed (real mode; demo keeps
+ *    the baked-in values), and
+ *  - the Namespaces PODS count, derived from the live pods list (B12).
  */
 function overlayMetrics(
   kind: ResourceKind,
   rows: Row[],
   podMetrics: PodMetricsMap,
   nodeMetrics: NodeMetricsMap,
+  podRows: Row[],
 ): Row[] {
   if (kind === "pods") {
     return rows.map((r) => {
@@ -146,6 +149,21 @@ function overlayMetrics(
       // Nodes columns: NAME,STATUS,ROLES,CPU(3),MEMORY(4),VERSION
       cells[3] = { ...cells[3], text: `${Math.round(m.cpuPercent)}%` };
       cells[4] = { ...cells[4], text: `${Math.round(m.memPercent)}%` };
+      return { ...r, cells };
+    });
+  }
+  if (kind === "namespaces") {
+    // Count pods per namespace across all watched pods (watchers are cluster-wide,
+    // so this is the true count). Row name is the namespace name.
+    const counts = new Map<string, number>();
+    for (const p of podRows) {
+      counts.set(p.namespace ?? "", (counts.get(p.namespace ?? "") ?? 0) + 1);
+    }
+    return rows.map((r) => {
+      const cells = r.cells.slice();
+      // Namespaces columns: NAME,STATUS,PODS(2),AGE
+      const count = counts.get(r.name) ?? 0;
+      cells[2] = { ...cells[2], text: String(count), sort: count };
       return { ...r, cells };
     });
   }
