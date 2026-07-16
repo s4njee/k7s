@@ -203,6 +203,22 @@ a sticky header doesn't give for free.*
 **Do:** `tauri-plugin-window-state` (size/position/monitor), gated out of demo
 builds. **Accept:** relaunch restores window geometry.
 
+**Accept:** *(shipped)*
+- [x] Relaunch restores window geometry — verified by seeding a distinctive
+      1100x700 at (240,160), relaunching, and confirming the app restored it and
+      saved it back unchanged (a failed restore would have re-saved the 1440x900
+      default). Stable across three launches, with no HiDPI size-doubling.
+- [x] Nothing to gate for demo: it runs as a plain browser page with no Tauri
+      backend, so this code isn't in that build at all.
+
+*Two things this needed beyond adding the plugin. `rust-version = "1.77"` was
+stale enough that cargo silently resolved the plugin to a **v0.1.1 built for
+Tauri v1** rather than complaining — the real requirement is 1.77.2 (our
+toolchain is 1.94). And the plugin only saves when the app quits through Tauri,
+which SIGTERM isn't — so `dev/run.sh` (B24) would have thrown the geometry away
+every session, leaving B22 dead in exactly the workflow B24 standardised. The app
+now saves on SIGTERM too.*
+
 ### B23 — Settings panel
 **Do:** A small settings surface (gear in the sidebar footer) for: log ring-buffer
 cap, metrics/status poll intervals, default namespace filter, and the shell

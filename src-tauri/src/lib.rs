@@ -36,12 +36,18 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         // The dialog plugin backs the native file picker for "Import kubeconfig".
         .plugin(tauri_plugin_dialog::init())
+        // Remembers the window's size, position and monitor across launches (B22),
+        // saving on exit and restoring on show. There's nothing to gate for demo
+        // mode: that runs as a plain browser page with no Tauri backend at all, so
+        // this code isn't in the build to begin with.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
             // The ClientManager owns the active client and all connection-scoped
             // tasks. It needs an AppHandle (to emit events), which only exists once
             // setup runs — so it's constructed here and put into managed state.
             let manager = Arc::new(ClientManager::new(app.handle().clone()));
             app.manage(manager);
+            save_window_state_on_sigterm(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -76,3 +82,35 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running k7s application");
 }
+
+/// Save window geometry when the process is asked to terminate (B22).
+///
+/// The window-state plugin saves when the app quits *through Tauri* — Cmd+Q, or
+/// closing the window. It never sees a SIGTERM, which is exactly how `dev/run.sh`
+/// stops the app, so without this the geometry would never survive a development
+/// session: B22 would be dead in the workflow B24 standardised.
+///
+/// Unix-only, which is every platform this ships on today; elsewhere the
+/// plugin's own save-on-quit is the whole story.
+#[cfg(unix)]
+fn save_window_state_on_sigterm(app: tauri::AppHandle) {
+    use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+
+    tauri::async_runtime::spawn(async move {
+        let Ok(mut term) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        else {
+            // Nothing to do if the handler can't be installed; the app still exits
+            // on SIGTERM, just without remembering where it was.
+            return;
+        };
+        term.recv().await;
+        if let Err(e) = app.save_window_state(StateFlags::all()) {
+            tracing::warn!("could not save window state on SIGTERM: {e}");
+        }
+        // Exit through Tauri so the rest of its shutdown still runs.
+        app.exit(0);
+    });
+}
+
+#[cfg(not(unix))]
+fn save_window_state_on_sigterm(_app: tauri::AppHandle) {}

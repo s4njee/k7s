@@ -9,6 +9,7 @@
     "core:window:default",
     "core:webview:default",
     "shell:allow-open",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "window-state:default"
   ]
 }
