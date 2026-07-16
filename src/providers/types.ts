@@ -186,6 +186,14 @@ export interface DataProvider {
   applyYaml(ref: ResourceRef, text: string): Promise<void>;
   getEvents(ref: ResourceRef): Promise<EventItem[]>;
 
+  // ---- mutations (B3); all reject with the API error message on failure ----
+  /** Delete a resource of any kind. */
+  deleteResource(ref: ResourceRef): Promise<void>;
+  /** Scale a Deployment/StatefulSet to `replicas`. */
+  scaleResource(ref: ResourceRef, replicas: number): Promise<void>;
+  /** Cordon or uncordon a node. */
+  setCordon(node: string, unschedulable: boolean): Promise<void>;
+
   // ---- push subscriptions (return an unsubscribe fn) ----
   onResourceUpdate(cb: (kind: ResourceKind, rows: Row[]) => void): Unsub;
   onPodMetrics(cb: (metrics: PodMetricsMap) => void): Unsub;

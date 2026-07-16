@@ -109,6 +109,12 @@ export class MockProvider implements DataProvider {
     return eventsForPodName(ref.name);
   }
 
+  // Mutations are no-ops in demo mode (the data is static) — they resolve so the
+  // UI flow can be exercised without a cluster.
+  async deleteResource(_ref: ResourceRef): Promise<void> {}
+  async scaleResource(_ref: ResourceRef, _replicas: number): Promise<void> {}
+  async setCordon(_node: string, _unschedulable: boolean): Promise<void> {}
+
   // ---- push subscriptions ----
   //
   // The mock has no live resource stream (data is static), so onResourceUpdate

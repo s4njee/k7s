@@ -8,7 +8,9 @@ use crate::kube::client::{self, ClusterInfo, ContextInfo};
 use crate::kube::manager::ImportedContext;
 use crate::kube::{logs, mappers, metrics, watchers, ClientManager};
 use k8s_openapi::api::core::v1::Event;
-use kube::api::{Api, ApiResource, DynamicObject, ListParams, PostParams};
+use kube::api::{
+    Api, ApiResource, DeleteParams, DynamicObject, ListParams, Patch, PatchParams, PostParams,
+};
 use kube::core::GroupVersionKind;
 use kube::ResourceExt;
 use serde::Serialize;
@@ -201,6 +203,51 @@ pub async fn apply_yaml(
     // replace() requires the resourceVersion present in the fetched/edited object;
     // a stale value yields a 409 whose message we pass straight through.
     api.replace(&name, &PostParams::default(), &obj).await?;
+    Ok(())
+}
+
+/// Delete a resource of any kind. The frontend confirms first; API errors are
+/// returned verbatim.
+#[tauri::command]
+pub async fn delete_resource(
+    kind: String,
+    namespace: String,
+    name: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<()> {
+    let client = require_client(&mgr).await?;
+    let api = dynamic_api(client, &kind, &namespace)?;
+    api.delete(&name, &DeleteParams::default()).await?;
+    Ok(())
+}
+
+/// Scale a Deployment/StatefulSet by patching `spec.replicas`.
+#[tauri::command]
+pub async fn scale_resource(
+    kind: String,
+    namespace: String,
+    name: String,
+    replicas: i32,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<()> {
+    let client = require_client(&mgr).await?;
+    let api = dynamic_api(client, &kind, &namespace)?;
+    let patch = Patch::Merge(serde_json::json!({ "spec": { "replicas": replicas } }));
+    api.patch(&name, &PatchParams::default(), &patch).await?;
+    Ok(())
+}
+
+/// Cordon or uncordon a node by patching `spec.unschedulable`.
+#[tauri::command]
+pub async fn set_cordon(
+    name: String,
+    unschedulable: bool,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<()> {
+    let client = require_client(&mgr).await?;
+    let api = dynamic_api(client, "nodes", "")?;
+    let patch = Patch::Merge(serde_json::json!({ "spec": { "unschedulable": unschedulable } }));
+    api.patch(&name, &PatchParams::default(), &patch).await?;
     Ok(())
 }
 

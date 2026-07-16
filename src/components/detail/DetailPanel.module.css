@@ -58,6 +58,132 @@
   color: var(--text-primary);
 }
 
+/* ---------- Actions menu (⋯) ---------- */
+
+.actionsWrap {
+  position: relative;
+  flex: none;
+}
+.actionsButton {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+}
+.actionsButton:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.actionsMenu {
+  position: absolute;
+  right: 0;
+  top: 28px;
+  z-index: 60;
+  min-width: 150px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-menu);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  overflow: hidden;
+  padding: 4px 0;
+}
+.actionsRow {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.actionsRow:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.actionsDanger {
+  color: var(--status-err);
+}
+.actionsDanger:hover {
+  color: var(--status-err);
+}
+
+/* Confirm / scale sub-panels inside the menu. */
+.actionsConfirm {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.actionsConfirmText {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.actionsConfirmRow {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.deleteBtn {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--bg-app);
+  background: var(--status-err);
+}
+.deleteBtn:hover {
+  filter: brightness(1.1);
+}
+
+/* Replica stepper. */
+.scaleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
+}
+.stepBtn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  border: 1px solid var(--border-control);
+  color: var(--text-primary);
+  font-size: 14px;
+  user-select: none;
+}
+.stepBtn:hover {
+  border-color: var(--border-hover);
+}
+.scaleValue {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-primary);
+  min-width: 24px;
+  text-align: center;
+}
+
+/* Action error banner (below the title row). */
+.actionError {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--status-err);
+  background: rgba(247, 118, 142, 0.08);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .meta {
   display: flex;
   gap: 14px;

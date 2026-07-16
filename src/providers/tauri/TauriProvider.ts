@@ -104,6 +104,27 @@ export class TauriProvider implements DataProvider {
     });
   }
 
+  deleteResource(ref: ResourceRef): Promise<void> {
+    return invoke<void>("delete_resource", {
+      kind: ref.kind,
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+    });
+  }
+
+  scaleResource(ref: ResourceRef, replicas: number): Promise<void> {
+    return invoke<void>("scale_resource", {
+      kind: ref.kind,
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+      replicas,
+    });
+  }
+
+  setCordon(node: string, unschedulable: boolean): Promise<void> {
+    return invoke<void>("set_cordon", { name: node, unschedulable });
+  }
+
   // ---- push subscriptions ----
 
   onResourceUpdate(cb: (kind: ResourceKind, rows: Row[]) => void): Unsub {

@@ -5,6 +5,7 @@
  * nav kind, since selection is cleared whenever nav changes.
  */
 
+import { useState } from "react";
 import styles from "./DetailPanel.module.css";
 import { useStore, type DetailTab } from "../../store";
 import { useNow } from "../../hooks/useNow";
@@ -14,6 +15,7 @@ import { KIND_META } from "../../lib/kinds";
 import { LogsTab } from "./LogsTab";
 import { YamlTab } from "./YamlTab";
 import { EventsTab } from "./EventsTab";
+import { ActionsMenu } from "./ActionsMenu";
 
 const ALL_TABS: { id: DetailTab; label: string }[] = [
   { id: "logs", label: "Logs" },
@@ -28,6 +30,9 @@ export function DetailPanel() {
   const setActiveTab = useStore((s) => s.setActiveTab);
   const closeDetail = useStore((s) => s.closeDetail);
   const now = useNow();
+
+  // Error from an action (delete/scale/cordon), shown as a header banner.
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Panel is closed when nothing is selected.
   if (!row) return null;
@@ -46,10 +51,17 @@ export function DetailPanel() {
           <div className={styles.name} title={row.name}>
             {row.name}
           </div>
+          <ActionsMenu kind={nav} row={row} onError={setActionError} onDeleted={closeDetail} />
           <div className={styles.close} onClick={closeDetail} title="close">
             ×
           </div>
         </div>
+
+        {actionError && (
+          <div className={styles.actionError} onClick={() => setActionError(null)}>
+            {actionError}
+          </div>
+        )}
 
         {isPod ? (
           <div className={styles.meta}>
