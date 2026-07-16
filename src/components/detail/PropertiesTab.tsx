@@ -94,9 +94,11 @@ function SectionView({ section, now }: { section: Section; now: number }) {
                 <tr key={i}>
                   {cells.map((cell, j) => (
                     <td
-                      // The first column is the row's name; later ones may hold
-                      // long text (images, messages) that should wrap.
-                      className={`${styles.td} ${j === 0 ? styles.tdName : styles.tdWrap}`}
+                      className={[
+                        styles.td,
+                        j === 0 ? styles.tdName : "",
+                        wraps(cell) ? styles.tdWrap : "",
+                      ].join(" ")}
                       key={j}
                       style={{ color: toneColor(cell.tone) }}
                     >
@@ -138,4 +140,24 @@ function FieldRow({ label, value, now }: { label: string; value: Cell; now: numb
 /** Cell text, formatting age cells like the resource tables do. */
 function cellText(cell: Cell, now: number): string {
   return cell.format === "age" ? formatAge(cell.text, now) : cell.text;
+}
+
+/**
+ * Length past which a value is allowed to wrap instead of holding the column open.
+ * Sized to sit above the values that should stay on one line ("100m / 1",
+ * "8080/TCP", "ReadWriteOnce") and below the ones that shouldn't hold a column
+ * open (images, PV names, mount paths, condition messages).
+ */
+const WRAP_AT = 24;
+
+/**
+ * Whether a cell may wrap. Decided by the value, not the column: the renderer is
+ * generic, so it can't know that column 2 is an image here and a phase there —
+ * but it can see that "registry.freya.io/valkyrie-api:2.14.0" needs to wrap and
+ * "Running" does not. Wrapping short values would let them break mid-token.
+ */
+function wraps(cell: Cell): boolean {
+  // Ages are rendered short ("4d2h") whatever the timestamp's length.
+  if (cell.format === "age") return false;
+  return cell.text.length > WRAP_AT;
 }

@@ -66,10 +66,14 @@
 .tdName {
   color: var(--text-primary);
 }
-/* Long values (image, mount paths) may wrap rather than blow out the panel. */
+/* Long values (images, mount paths, condition messages) wrap rather than blow out
+   the panel — applied per value, not per column (see `wraps` in PropertiesTab).
+   `anywhere` breaks at spaces first and only splits a token when it has no other
+   choice, which keeps prose messages readable while still taming a long image
+   reference that contains no spaces at all. */
 .tdWrap {
   white-space: normal;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 /* Label / annotation chips. */
