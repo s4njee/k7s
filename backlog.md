@@ -226,6 +226,23 @@ command override. Persist via the existing Prefs file; live-apply where cheap.
 **Accept:** changing the ring buffer cap visibly changes log retention without
 restart; values survive relaunch.
 
+**Accept:** *(shipped)*
+- [x] The ring-buffer cap applies immediately: shrinking it trims the existing
+      buffer rather than waiting for the next line (covered by store tests).
+- [x] Values survive relaunch — verified by seeding all five into prefs.json,
+      running the app, and confirming it restored them and saved them back
+      unchanged (a failed restore would have written the defaults back).
+- [x] Poll intervals apply on next connect and say so in the panel; the shell
+      override applies to the next shell opened. Both are read by the backend
+      from the same prefs file, so there's one copy of the truth.
+
+*This found a silent data-loss bug: `save_prefs` round-trips the frontend's
+object **through the Rust `Prefs` struct**, and serde drops unknown fields — so
+any frontend-only setting was deleted on the first save. `logBufferCap` and
+`defaultNamespace` were being wiped while the backend's own three survived. The
+struct is the schema of prefs.json, not just the part Rust reads; a new
+frontend-only setting must be added there too.*
+
 ### B24 — Dev launch hygiene
 *We hit this: orphaned `tauri dev` watchers + a dead vite made the app silently
 fall back to a stale bundled `dist/`, which looked like missing features.*

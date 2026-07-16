@@ -239,6 +239,15 @@ export interface Prefs {
   showTimestamps?: boolean | null;
   /** Kubeconfig files imported by the user, re-imported on boot (B17). */
   importedFiles?: string[] | null;
+  // ---- settings (B23) ----
+  // Flat rather than nested so an older prefs.json keeps loading: serde and
+  // JSON.parse both just leave absent fields undefined, and sanitizeSettings
+  // fills them with defaults.
+  logBufferCap?: number | null;
+  metricsIntervalSecs?: number | null;
+  statusIntervalSecs?: number | null;
+  defaultNamespace?: string | null;
+  shellCommand?: string | null;
 }
 
 /** Identifies a specific object for YAML/events/log commands. */

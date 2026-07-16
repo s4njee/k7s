@@ -12,6 +12,7 @@ import { getProvider, IS_DEMO } from "../providers";
 import { useStore } from "../store";
 import { connectTo } from "../lib/connect";
 import { isCustomKind, KIND_META } from "../lib/kinds";
+import { sanitizeSettings } from "../lib/settings";
 
 export function useBootstrap(): void {
   useEffect(() => {
@@ -86,13 +87,25 @@ export function useBootstrap(): void {
         // Restore last nav/namespace/timestamps before connecting.
         if (prefs) {
           const restore: Partial<ReturnType<typeof useStore.getState>> = {};
+          // Settings first: the default namespace below is only a fallback for
+          // when no namespace was persisted, and it comes from here (B23).
+          restore.settings = sanitizeSettings({
+            logBufferCap: prefs.logBufferCap ?? undefined,
+            metricsIntervalSecs: prefs.metricsIntervalSecs ?? undefined,
+            statusIntervalSecs: prefs.statusIntervalSecs ?? undefined,
+            defaultNamespace: prefs.defaultNamespace ?? undefined,
+            shellCommand: prefs.shellCommand ?? undefined,
+          });
           // Custom kinds aren't in KIND_META and aren't discovered yet at this
           // point, so accept any custom-looking id; if this cluster turns out not
           // to have that CRD, the table just renders empty (B15).
           if (prefs.nav && (prefs.nav in KIND_META || isCustomKind(prefs.nav))) {
             restore.nav = prefs.nav;
           }
-          if (typeof prefs.namespace === "string") restore.namespace = prefs.namespace;
+          // Where you left off wins; the configured default is what a fresh
+          // profile (or a cleared namespace) falls back to.
+          restore.namespace =
+            typeof prefs.namespace === "string" ? prefs.namespace : restore.settings.defaultNamespace;
           if (typeof prefs.showTimestamps === "boolean") restore.showTimestamps = prefs.showTimestamps;
           if (Object.keys(restore).length) useStore.setState(restore);
         }
@@ -123,6 +136,9 @@ export function useBootstrap(): void {
             showTimestamps: s.showTimestamps,
             // Persisted so imported contexts survive a relaunch (B17).
             importedFiles: s.importedFiles,
+            // Settings (B23). The backend reads the poll intervals and shell
+            // command straight out of this same file.
+            ...s.settings,
           };
           const key = JSON.stringify(prefs);
           if (key === lastSaved) return;

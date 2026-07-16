@@ -5,6 +5,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { useStore, LOG_BUFFER_CAP } from "./store";
+import { DEFAULT_SETTINGS } from "./lib/settings";
 import type { LogLine, Row } from "./providers/types";
 
 // Reset to a clean slate before each test (Zustand store is a singleton).
@@ -16,6 +17,9 @@ beforeEach(() => {
     following: true,
     openMenu: null,
     tableFilter: "",
+    // Settings are now part of that slate: a test that raises the log cap would
+    // otherwise leak it into every test that runs after it (B23).
+    settings: DEFAULT_SETTINGS,
   });
 });
 
@@ -55,6 +59,40 @@ describe("log ring buffer", () => {
     const batch = Array.from({ length: LOG_BUFFER_CAP + 10 }, (_, i) => line(`b-${i}`));
     appendLogs(batch);
     expect(useStore.getState().logBuffer.length).toBe(LOG_BUFFER_CAP);
+  });
+
+  // B23's accept criterion: the cap is a setting, and a setting that only takes
+  // effect after a restart isn't one.
+  it("shrinking the cap trims the existing buffer immediately", () => {
+    const { appendLogs, setSettings } = useStore.getState();
+    appendLogs(Array.from({ length: 200 }, (_, i) => line(`m-${i}`)));
+    expect(useStore.getState().logBuffer.length).toBe(200);
+
+    setSettings({ logBufferCap: 50 });
+
+    const buf = useStore.getState().logBuffer;
+    expect(buf.length).toBe(50);
+    // It keeps the newest, which is what you're looking at.
+    expect(buf[buf.length - 1].msg).toBe("m-199");
+    expect(buf[0].msg).toBe("m-150");
+  });
+
+  it("respects a raised cap on subsequent appends", () => {
+    const { appendLogs, setSettings } = useStore.getState();
+    setSettings({ logBufferCap: 500 });
+    appendLogs(Array.from({ length: 400 }, (_, i) => line(`r-${i}`)));
+    expect(useStore.getState().logBuffer.length).toBe(400);
+  });
+
+  it("raising the cap does not resurrect already-dropped lines", () => {
+    const { appendLogs, setSettings } = useStore.getState();
+    setSettings({ logBufferCap: 50 });
+    appendLogs(Array.from({ length: 100 }, (_, i) => line(`d-${i}`)));
+    expect(useStore.getState().logBuffer.length).toBe(50);
+
+    setSettings({ logBufferCap: 500 });
+    // They're gone from memory, not hidden — the buffer stays at what survived.
+    expect(useStore.getState().logBuffer.length).toBe(50);
   });
 });
 

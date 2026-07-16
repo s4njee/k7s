@@ -19,9 +19,13 @@ import type {
   Row,
 } from "./providers/types";
 import { KIND_ORDER } from "./lib/kinds";
+import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
 
-/** Ring-buffer cap for the log view (design default). */
-export const LOG_BUFFER_CAP = 200;
+/**
+ * Ring-buffer cap for the log view (the design default, and the starting value
+ * of the user-editable setting — see lib/settings.ts).
+ */
+export const LOG_BUFFER_CAP = DEFAULT_SETTINGS.logBufferCap;
 
 /** Detail-panel tab identifiers. */
 export type DetailTab = "logs" | "properties" | "shell" | "yaml" | "events";
@@ -92,6 +96,10 @@ export interface AppState {
   rows: RowMap;
   /** CRD-backed kinds discovered on connect (B15); empty when disconnected. */
   customKinds: CustomKind[];
+  /** User settings (B23). Persisted via prefs; the log cap applies live. */
+  settings: Settings;
+  /** Whether the settings panel is open. */
+  settingsOpen: boolean;
   podMetrics: PodMetricsMap;
   nodeMetrics: NodeMetricsMap;
   /** Active port-forwards (B6). */
@@ -143,6 +151,9 @@ export interface AppState {
   setNodeMetrics: (m: NodeMetricsMap) => void;
   setPortForwards: (list: ForwardInfo[]) => void;
   setDrain: (progress: DrainProgress) => void;
+  /** Merge a settings change (already sanitised by the caller). */
+  setSettings: (patch: Partial<Settings>) => void;
+  setSettingsOpen: (open: boolean) => void;
   resetData: () => void;
 
   // detail panel
@@ -182,6 +193,8 @@ export const useStore = create<AppState>((set) => ({
 
   rows: emptyRows(),
   customKinds: [],
+  settings: DEFAULT_SETTINGS,
+  settingsOpen: false,
   podMetrics: {},
   nodeMetrics: {},
   portForwards: [],
@@ -240,6 +253,18 @@ export const useStore = create<AppState>((set) => ({
   setNodeMetrics: (m) => set({ nodeMetrics: m }),
   setPortForwards: (list) => set({ portForwards: list }),
   setDrain: (p) => set((s) => ({ drains: { ...s.drains, [p.node]: p } })),
+  setSettings: (patch) =>
+    set((s) => {
+      const settings = { ...s.settings, ...patch };
+      // Shrinking the cap has to bite immediately, not at the next log line —
+      // that's the difference between a setting and a promise (B23).
+      const logBuffer =
+        s.logBuffer.length > settings.logBufferCap
+          ? s.logBuffer.slice(-settings.logBufferCap)
+          : s.logBuffer;
+      return { settings, logBuffer };
+    }),
+  setSettingsOpen: (open) => set({ settingsOpen: open }),
   // Wipe all live data on disconnect/context-switch (Story 6.1). The backend also
   // aborts every forward/shell on reset, so we clear the local list here too.
   resetData: () =>
@@ -287,11 +312,12 @@ export const useStore = create<AppState>((set) => ({
   toggleTimestamps: () => set((s) => ({ showTimestamps: !s.showTimestamps })),
   toggleFollow: () => set((s) => ({ following: !s.following })),
   setFollowing: (value) => set({ following: value }),
-  // Append new lines, capping the buffer at LOG_BUFFER_CAP (drop oldest).
+  // Append new lines, capping the buffer at the configured size (drop oldest).
   appendLogs: (lines) =>
     set((s) => {
+      const cap = s.settings.logBufferCap;
       const next = s.logBuffer.concat(lines);
-      return { logBuffer: next.length > LOG_BUFFER_CAP ? next.slice(-LOG_BUFFER_CAP) : next };
+      return { logBuffer: next.length > cap ? next.slice(-cap) : next };
     }),
   clearLogs: () => set({ logBuffer: [] }),
 

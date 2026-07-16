@@ -286,7 +286,31 @@
 .footerDot {
   width: 6px;
   height: 6px;
+  flex: none;
   border-radius: 50%;
   background: var(--dot-watch);
   animation: livePulse 2s infinite;
+}
+.footerText {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Settings gear (B23) — the only affordance in the footer, so it earns its place
+   at the far edge rather than competing with the watch count. */
+.gear {
+  flex: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+}
+.gear:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }

@@ -16,6 +16,7 @@ import { StatusBar } from "./components/statusbar/StatusBar";
 import { ResourceTable } from "./components/table/ResourceTable";
 import { DetailPanel } from "./components/detail/DetailPanel";
 import { ForwardsBar } from "./components/forwards/ForwardsBar";
+import { SettingsPanel } from "./components/settings/SettingsPanel";
 
 export default function App() {
   // Wire provider → store and connect on mount.
@@ -37,6 +38,8 @@ export default function App() {
         <ForwardsBar />
         <StatusBar />
       </div>
+      {/* Modal, so it sits outside the layout flow (B23). */}
+      <SettingsPanel />
     </div>
   );
 }

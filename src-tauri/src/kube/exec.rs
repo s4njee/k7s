@@ -39,6 +39,20 @@ const SHELL_CMD: [&str; 3] = [
     "if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi",
 ];
 
+/// The command to exec, honouring the user's override (B23).
+///
+/// An override still runs through `/bin/sh -c` rather than being exec'd directly:
+/// people type things like `env TERM=xterm bash -l`, and running that as a bare
+/// argv would look for a binary with spaces in its name. It also keeps the same
+/// shape as the default, whose whole job is to be a shell snippet.
+fn shell_cmd(override_cmd: &str) -> Vec<String> {
+    let trimmed = override_cmd.trim();
+    if trimmed.is_empty() {
+        return SHELL_CMD.iter().map(|s| s.to_string()).collect();
+    }
+    vec!["/bin/sh".into(), "-c".into(), format!("exec {trimmed}")]
+}
+
 /// Run a shell session until the process exits or the task is aborted.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_shell(
@@ -48,6 +62,8 @@ pub async fn run_shell(
     namespace: String,
     pod: String,
     container: String,
+    // The user's shell override, or empty for the default probe (B23).
+    command: String,
     mut input_rx: mpsc::Receiver<Vec<u8>>,
     mut resize_rx: mpsc::Receiver<(u16, u16)>,
 ) {
@@ -59,6 +75,7 @@ pub async fn run_shell(
         &namespace,
         &pod,
         &container,
+        &command,
         &mut input_rx,
         &mut resize_rx,
     )
@@ -78,6 +95,7 @@ async fn exec_pump(
     namespace: &str,
     pod: &str,
     container: &str,
+    command: &str,
     input_rx: &mut mpsc::Receiver<Vec<u8>>,
     resize_rx: &mut mpsc::Receiver<(u16, u16)>,
 ) -> Result<String, AppError> {
@@ -90,7 +108,7 @@ async fn exec_pump(
         .container(container.to_string());
 
     let mut proc = api
-        .exec(pod, SHELL_CMD, &ap)
+        .exec(pod, shell_cmd(command), &ap)
         .await
         .map_err(|e| AppError::Kube(e.to_string()))?;
 
@@ -131,5 +149,43 @@ async fn exec_pump(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// No override → the bash-or-sh probe, unchanged.
+    #[test]
+    fn empty_override_uses_the_default_probe() {
+        assert_eq!(shell_cmd(""), SHELL_CMD.to_vec());
+        assert_eq!(shell_cmd("   "), SHELL_CMD.to_vec());
+    }
+
+    /// An override runs through `sh -c`, not as a bare argv: people type command
+    /// lines ("env TERM=xterm bash -l"), and exec'ing that directly would look for
+    /// a binary whose name contains spaces.
+    #[test]
+    fn override_runs_through_a_shell() {
+        assert_eq!(shell_cmd("/bin/zsh"), vec!["/bin/sh", "-c", "exec /bin/zsh"]);
+        assert_eq!(
+            shell_cmd("env TERM=xterm bash -l"),
+            vec!["/bin/sh", "-c", "exec env TERM=xterm bash -l"]
+        );
+    }
+
+    /// `exec` replaces the shell, so the session ends when the command does —
+    /// without it, an extra /bin/sh would linger between the user and their shell.
+    #[test]
+    fn override_is_exec_ed() {
+        let cmd = shell_cmd("bash");
+        assert!(cmd[2].starts_with("exec "), "override must replace the wrapping shell");
+    }
+
+    /// Surrounding whitespace from the settings field doesn't reach the container.
+    #[test]
+    fn override_is_trimmed() {
+        assert_eq!(shell_cmd("  bash  "), vec!["/bin/sh", "-c", "exec bash"]);
     }
 }

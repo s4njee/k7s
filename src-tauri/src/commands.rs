@@ -36,6 +36,52 @@ pub struct Prefs {
     pub show_timestamps: Option<bool>,
     /// Kubeconfig files the user imported, re-imported on boot (B17).
     pub imported_files: Option<Vec<String>>,
+    // ---- settings (B23) ----
+    /// Seconds between metrics polls; None uses the built-in default.
+    pub metrics_interval_secs: Option<u64>,
+    /// Seconds between cluster-status polls; None uses the built-in default.
+    pub status_interval_secs: Option<u64>,
+    /// Shell command override for exec; None/empty uses the bash-or-sh probe.
+    pub shell_command: Option<String>,
+    // The two below are never read here — they're the frontend's business. They
+    // exist because `save_prefs` round-trips the frontend's object *through this
+    // struct*, and serde drops fields it doesn't know about. Leaving them out
+    // doesn't "let the frontend own them"; it silently deletes them on the first
+    // save, which is exactly what happened before this was written down.
+    //
+    // So: this struct is the schema of prefs.json, not just the part Rust uses.
+    // A new frontend-only setting must be added here too.
+    /// Log ring-buffer size. Frontend-only; carried so it survives a save.
+    pub log_buffer_cap: Option<u32>,
+    /// Namespace selected on connect. Frontend-only; carried so it survives a save.
+    pub default_namespace: Option<String>,
+}
+
+/// Read persisted prefs, or defaults when absent/unreadable.
+///
+/// The backend reads the same prefs file the frontend writes rather than having
+/// settings passed in per call: there's then exactly one copy of the truth, and
+/// no way for a command to be invoked with settings that disagree with what the
+/// user last saved.
+fn read_prefs(app: &tauri::AppHandle) -> Prefs {
+    prefs_path(app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+/// Poll intervals from prefs, clamped to the same bounds the settings panel
+/// enforces — a hand-edited prefs.json shouldn't be able to hammer the API server.
+fn poll_intervals(app: &tauri::AppHandle) -> metrics::PollIntervals {
+    let prefs = read_prefs(app);
+    let clamp = |v: Option<u64>, default: std::time::Duration| {
+        v.map(|s| std::time::Duration::from_secs(s.clamp(5, 300))).unwrap_or(default)
+    };
+    metrics::PollIntervals {
+        metrics: clamp(prefs.metrics_interval_secs, metrics::METRICS_INTERVAL),
+        status: clamp(prefs.status_interval_secs, metrics::STATUS_INTERVAL),
+    }
 }
 
 /// Path to the prefs file under the app config dir (created on demand).
@@ -176,7 +222,11 @@ pub async fn connect(
     let watcher_count = watchers::spawn_all(&manager, kube_client.clone()).await;
 
     // Start the metrics + status pollers and register them too.
-    let (metrics_task, status_task) = metrics::spawn_pollers(manager.app(), kube_client.clone());
+    // Poll intervals come from the user's settings (B23). Read at connect, so a
+    // change takes effect on the next connection rather than restarting live
+    // pollers for a value measured in seconds.
+    let (metrics_task, status_task) =
+        metrics::spawn_pollers(manager.app(), kube_client.clone(), poll_intervals(&manager.app()));
     manager.push_task(metrics_task).await;
     manager.push_task(status_task).await;
 
@@ -513,10 +563,23 @@ pub async fn start_shell(
     let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>(64);
     let (resize_tx, resize_rx) = mpsc::channel::<(u16, u16)>(8);
     let app = manager.app();
+    // Read per-session, so changing the override applies to the next shell you
+    // open rather than needing a reconnect (B23).
+    let shell_override = read_prefs(&app).shell_command.unwrap_or_default();
     let id_for_task = id.clone();
     let task = tokio::spawn(async move {
-        exec::run_shell(client, app, id_for_task, namespace, pod, container, input_rx, resize_rx)
-            .await;
+        exec::run_shell(
+            client,
+            app,
+            id_for_task,
+            namespace,
+            pod,
+            container,
+            shell_override,
+            input_rx,
+            resize_rx,
+        )
+        .await;
     });
 
     manager

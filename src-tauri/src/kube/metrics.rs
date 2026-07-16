@@ -21,8 +21,24 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 use tokio::time::{interval, Duration, Instant};
 
-const METRICS_INTERVAL: Duration = Duration::from_secs(15);
-const STATUS_INTERVAL: Duration = Duration::from_secs(10);
+/// Default poll intervals. Both are user-configurable (B23); these are the
+/// values used when nothing has been saved.
+pub const METRICS_INTERVAL: Duration = Duration::from_secs(15);
+pub const STATUS_INTERVAL: Duration = Duration::from_secs(10);
+
+/// How often the pollers run. Read from prefs on connect (B23), so a change
+/// takes effect the next time a connection is established.
+#[derive(Clone, Copy)]
+pub struct PollIntervals {
+    pub metrics: Duration,
+    pub status: Duration,
+}
+
+impl Default for PollIntervals {
+    fn default() -> Self {
+        PollIntervals { metrics: METRICS_INTERVAL, status: STATUS_INTERVAL }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Wire payloads
@@ -102,17 +118,28 @@ type SharedClusterPct = Arc<Mutex<Option<(f64, f64)>>>;
 pub fn spawn_pollers(
     app: AppHandle,
     client: Client,
+    intervals: PollIntervals,
 ) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
     let shared: SharedClusterPct = Arc::new(Mutex::new(None));
 
-    let metrics_task = tokio::spawn(metrics_loop(app.clone(), client.clone(), shared.clone()));
-    let status_task = tokio::spawn(status_loop(app, client, shared));
+    let metrics_task = tokio::spawn(metrics_loop(
+        app.clone(),
+        client.clone(),
+        shared.clone(),
+        intervals.metrics,
+    ));
+    let status_task = tokio::spawn(status_loop(app, client, shared, intervals.status));
     (metrics_task, status_task)
 }
 
 /// Poll pod/node metrics on an interval; emit events; track availability.
-async fn metrics_loop(app: AppHandle, client: Client, shared: SharedClusterPct) {
-    let mut tick = interval(METRICS_INTERVAL);
+async fn metrics_loop(
+    app: AppHandle,
+    client: Client,
+    shared: SharedClusterPct,
+    every: Duration,
+) {
+    let mut tick = interval(every);
     // When the metrics API is missing we back off probing to ~60s.
     let mut miss_streak = 0u32;
 
@@ -214,8 +241,8 @@ async fn fetch_node_metrics(
 }
 
 /// Poll cluster status on an interval: version, latency, nodes ready, cpu/mem %.
-async fn status_loop(app: AppHandle, client: Client, shared: SharedClusterPct) {
-    let mut tick = interval(STATUS_INTERVAL);
+async fn status_loop(app: AppHandle, client: Client, shared: SharedClusterPct, every: Duration) {
+    let mut tick = interval(every);
     loop {
         tick.tick().await;
 
