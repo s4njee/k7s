@@ -8,9 +8,10 @@
  */
 
 import { useEffect } from "react";
-import { getProvider } from "../providers";
+import { getProvider, IS_DEMO } from "../providers";
 import { useStore } from "../store";
 import { connectTo } from "../lib/connect";
+import { KIND_META } from "../lib/kinds";
 
 export function useBootstrap(): void {
   useEffect(() => {
@@ -54,25 +55,59 @@ export function useBootstrap(): void {
       provider.onWatchStatus(setWatchCount),
     ];
 
-    // Discover contexts, then connect to the current one (instant in demo mode).
+    // Discover contexts, restore saved preferences, then connect (B11).
     setConnection({ phase: "connecting" });
     void (async () => {
       try {
         const contexts = await provider.listContexts();
         setContexts(contexts);
-        const current = contexts.find((c) => c.current) ?? contexts[0];
-        if (!current) {
+
+        // Restore last nav/namespace/timestamps before connecting.
+        const prefs = await provider.loadPrefs();
+        if (prefs) {
+          const restore: Partial<ReturnType<typeof useStore.getState>> = {};
+          if (prefs.nav && prefs.nav in KIND_META) restore.nav = prefs.nav;
+          if (typeof prefs.namespace === "string") restore.namespace = prefs.namespace;
+          if (typeof prefs.showTimestamps === "boolean") restore.showTimestamps = prefs.showTimestamps;
+          if (Object.keys(restore).length) useStore.setState(restore);
+        }
+
+        // Prefer the saved context if it still exists, else the current-context.
+        const saved = prefs?.context ? contexts.find((c) => c.name === prefs.context) : undefined;
+        const target = saved ?? contexts.find((c) => c.current) ?? contexts[0];
+        if (!target) {
           setConnection({ phase: "error", error: "no kubeconfig contexts found" });
           return;
         }
-        await connectTo(current.name);
+        await connectTo(target.name);
       } catch (e) {
         setConnection({ phase: "error", error: e instanceof Error ? e.message : String(e) });
       }
     })();
 
+    // Persist relevant state changes (debounced). No-op in demo mode.
+    let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastSaved = "";
+    const unsubSave = IS_DEMO
+      ? () => {}
+      : useStore.subscribe((s) => {
+          const prefs = {
+            context: s.connection.context,
+            nav: s.nav,
+            namespace: s.namespace,
+            showTimestamps: s.showTimestamps,
+          };
+          const key = JSON.stringify(prefs);
+          if (key === lastSaved) return;
+          lastSaved = key;
+          clearTimeout(saveTimer);
+          saveTimer = setTimeout(() => void provider.savePrefs(prefs), 500);
+        });
+
     return () => {
       for (const off of unsubs) off();
+      unsubSave();
+      clearTimeout(saveTimer);
     };
     // Empty deps: run exactly once for the app's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps

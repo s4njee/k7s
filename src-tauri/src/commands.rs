@@ -21,6 +21,47 @@ use tauri::State;
 /// Monotonic counter for generating unique log-stream ids.
 static STREAM_SEQ: AtomicU64 = AtomicU64::new(1);
 
+/// Persisted UI preferences (B11): where the user left off. Written to
+/// `<app_config_dir>/prefs.json`.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Prefs {
+    pub context: Option<String>,
+    pub nav: Option<String>,
+    pub namespace: Option<String>,
+    pub show_timestamps: Option<bool>,
+}
+
+/// Path to the prefs file under the app config dir (created on demand).
+fn prefs_path(app: &tauri::AppHandle) -> AppResult<std::path::PathBuf> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| AppError::Other(format!("no config dir: {e}")))?;
+    Ok(dir.join("prefs.json"))
+}
+
+/// Load persisted preferences, or None if absent/unreadable.
+#[tauri::command]
+pub fn load_prefs(app: tauri::AppHandle) -> Option<Prefs> {
+    let path = prefs_path(&app).ok()?;
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Save preferences (best-effort; creates the config dir if needed).
+#[tauri::command]
+pub fn save_prefs(app: tauri::AppHandle, prefs: Prefs) -> AppResult<()> {
+    let path = prefs_path(&app)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| AppError::Other(e.to_string()))?;
+    }
+    let text = serde_json::to_string_pretty(&prefs).map_err(|e| AppError::Other(e.to_string()))?;
+    std::fs::write(path, text).map_err(|e| AppError::Other(e.to_string()))?;
+    Ok(())
+}
+
 /// List kubeconfig contexts for the cluster switcher.
 #[tauri::command]
 pub fn list_contexts() -> AppResult<Vec<ContextInfo>> {

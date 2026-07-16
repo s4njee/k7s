@@ -20,6 +20,7 @@ import type {
   LogOptions,
   NodeMetricsMap,
   PodMetricsMap,
+  Prefs,
   ResourceKind,
   ResourceRef,
   Row,
@@ -123,6 +124,14 @@ export class TauriProvider implements DataProvider {
 
   setCordon(node: string, unschedulable: boolean): Promise<void> {
     return invoke<void>("set_cordon", { name: node, unschedulable });
+  }
+
+  loadPrefs(): Promise<Prefs | null> {
+    return invoke<Prefs | null>("load_prefs");
+  }
+
+  savePrefs(prefs: Prefs): Promise<void> {
+    return invoke<void>("save_prefs", { prefs });
   }
 
   // ---- push subscriptions ----

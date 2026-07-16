@@ -46,6 +46,8 @@ pub fn run() {
             commands::list_contexts,
             commands::default_kubeconfig_path,
             commands::import_kubeconfig,
+            commands::load_prefs,
+            commands::save_prefs,
             commands::connect,
             commands::get_yaml,
             commands::apply_yaml,

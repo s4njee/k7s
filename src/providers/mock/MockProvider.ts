@@ -16,6 +16,7 @@ import type {
   LogOptions,
   NodeMetricsMap,
   PodMetricsMap,
+  Prefs,
   ResourceRef,
   Row,
   Unsub,
@@ -114,6 +115,12 @@ export class MockProvider implements DataProvider {
   async deleteResource(_ref: ResourceRef): Promise<void> {}
   async scaleResource(_ref: ResourceRef, _replicas: number): Promise<void> {}
   async setCordon(_node: string, _unschedulable: boolean): Promise<void> {}
+
+  // Demo mode doesn't persist anything.
+  async loadPrefs(): Promise<Prefs | null> {
+    return null;
+  }
+  async savePrefs(_prefs: Prefs): Promise<void> {}
 
   // ---- push subscriptions ----
   //

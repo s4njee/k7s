@@ -148,6 +148,14 @@ export interface NodeMetrics {
 }
 export type NodeMetricsMap = Record<string, NodeMetrics>;
 
+/** Persisted UI preferences (B11) — where the user left off. */
+export interface Prefs {
+  context?: string | null;
+  nav?: ResourceKind | null;
+  namespace?: string | null;
+  showTimestamps?: boolean | null;
+}
+
 /** Identifies a specific object for YAML/events/log commands. */
 export interface ResourceRef {
   kind: ResourceKind;
@@ -195,6 +203,12 @@ export interface DataProvider {
   scaleResource(ref: ResourceRef, replicas: number): Promise<void>;
   /** Cordon or uncordon a node. */
   setCordon(node: string, unschedulable: boolean): Promise<void>;
+
+  // ---- persisted preferences (B11) ----
+  /** Load persisted UI preferences, or null if none / not supported (demo). */
+  loadPrefs(): Promise<Prefs | null>;
+  /** Persist UI preferences (no-op in demo mode). */
+  savePrefs(prefs: Prefs): Promise<void>;
 
   // ---- push subscriptions (return an unsubscribe fn) ----
   onResourceUpdate(cb: (kind: ResourceKind, rows: Row[]) => void): Unsub;
