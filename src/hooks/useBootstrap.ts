@@ -66,11 +66,21 @@ export function useBootstrap(): void {
     setConnection({ phase: "connecting" });
     void (async () => {
       try {
+        // Prefs first: imported kubeconfigs must be re-registered *before* the
+        // context list is fetched, or their contexts wouldn't be in it (B17).
+        const prefs = await provider.loadPrefs();
+
+        if (prefs?.importedFiles?.length) {
+          // Files that no longer parse are dropped from what we persist, so a
+          // deleted kubeconfig prunes itself instead of warning forever.
+          const alive = await provider.restoreImports(prefs.importedFiles);
+          useStore.getState().setImportedFiles(alive);
+        }
+
         const contexts = await provider.listContexts();
         setContexts(contexts);
 
         // Restore last nav/namespace/timestamps before connecting.
-        const prefs = await provider.loadPrefs();
         if (prefs) {
           const restore: Partial<ReturnType<typeof useStore.getState>> = {};
           // Custom kinds aren't in KIND_META and aren't discovered yet at this
@@ -108,6 +118,8 @@ export function useBootstrap(): void {
             nav: s.nav,
             namespace: s.namespace,
             showTimestamps: s.showTimestamps,
+            // Persisted so imported contexts survive a relaunch (B17).
+            importedFiles: s.importedFiles,
           };
           const key = JSON.stringify(prefs);
           if (key === lastSaved) return;

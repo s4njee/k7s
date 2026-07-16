@@ -33,6 +33,8 @@ pub struct Prefs {
     pub nav: Option<String>,
     pub namespace: Option<String>,
     pub show_timestamps: Option<bool>,
+    /// Kubeconfig files the user imported, re-imported on boot (B17).
+    pub imported_files: Option<Vec<String>>,
 }
 
 /// Path to the prefs file under the app config dir (created on demand).
@@ -65,10 +67,44 @@ pub fn save_prefs(app: tauri::AppHandle, prefs: Prefs) -> AppResult<()> {
     Ok(())
 }
 
-/// List kubeconfig contexts for the cluster switcher.
+/// List contexts for the cluster switcher: the default kubeconfig's plus any
+/// imported ones (B17 — imports are restored on boot, so this must be merged or
+/// they'd vanish on relaunch).
 #[tauri::command]
-pub fn list_contexts() -> AppResult<Vec<ContextInfo>> {
-    client::list_contexts()
+pub async fn list_contexts(mgr: State<'_, Arc<ClientManager>>) -> AppResult<Vec<ContextInfo>> {
+    Ok(merged_contexts(&mgr).await)
+}
+
+/// Re-register kubeconfig files imported in a previous session (B17), returning
+/// the paths that still parse.
+///
+/// Files that have moved or become unreadable are dropped rather than failing the
+/// boot: the user deleting a kubeconfig shouldn't leave the app stuck on an error
+/// about it. The caller persists the returned list, which prunes them for good.
+#[tauri::command]
+pub async fn restore_imports(
+    paths: Vec<String>,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<Vec<String>> {
+    let manager: Arc<ClientManager> = (*mgr).clone();
+    let mut alive = Vec::new();
+    for path in paths {
+        match client::contexts_from_file(&path) {
+            Ok(contexts) => {
+                for ctx in contexts {
+                    manager
+                        .add_import(
+                            ctx.name.clone(),
+                            ImportedContext { path: path.clone(), cluster: ctx.cluster.clone() },
+                        )
+                        .await;
+                }
+                alive.push(path);
+            }
+            Err(e) => tracing::warn!("dropping imported kubeconfig {path}: {e}"),
+        }
+    }
+    Ok(alive)
 }
 
 /// The default kubeconfig path (kubectl's), used to pre-point the import dialog.

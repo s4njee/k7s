@@ -149,6 +149,14 @@ export interface ContextInfo {
   current: boolean;
 }
 
+/** Result of a successful kubeconfig import. */
+export interface ImportResult {
+  /** The merged switcher list: default kubeconfig contexts + all imported ones. */
+  contexts: ContextInfo[];
+  /** The file that was imported, persisted so it survives a relaunch (B17). */
+  path: string;
+}
+
 /** Result of a successful {@link DataProvider.connect}. */
 export interface ClusterInfo {
   context: string;
@@ -251,6 +259,8 @@ export interface Prefs {
   nav?: KindId | null;
   namespace?: string | null;
   showTimestamps?: boolean | null;
+  /** Kubeconfig files imported by the user, re-imported on boot (B17). */
+  importedFiles?: string[] | null;
 }
 
 /** Identifies a specific object for YAML/events/log commands. */
@@ -307,13 +317,20 @@ export type Unsub = () => void;
  */
 export interface DataProvider {
   // ---- one-shot commands ----
+  /** The switcher list: default kubeconfig contexts plus any imported ones. */
   listContexts(): Promise<ContextInfo[]>;
   connect(context: string): Promise<ClusterInfo>;
   /**
    * Import contexts from a kubeconfig file (via a native file picker). Returns the
-   * merged context list to replace the switcher's, or null if the user cancelled.
+   * merged list and the imported path, or null if the user cancelled.
    */
-  importKubeconfig(): Promise<ContextInfo[] | null>;
+  importKubeconfig(): Promise<ImportResult | null>;
+  /**
+   * Re-register previously imported kubeconfig files on boot (B17). Returns the
+   * paths that still parse — callers should persist that, dropping the rest.
+   * Must run before {@link listContexts} for imports to appear in the switcher.
+   */
+  restoreImports(paths: string[]): Promise<string[]>;
   getYaml(ref: ResourceRef): Promise<string>;
   /** Rejects with the API error message (shown inline) on failure. */
   applyYaml(ref: ResourceRef, text: string): Promise<void>;

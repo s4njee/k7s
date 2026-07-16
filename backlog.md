@@ -16,7 +16,10 @@ one-shots, events for streams, abortable tasks registered in `ClientManager`
 
 ---
 
-## P0 — highest priority
+## P0 — highest priority — **all shipped**
+
+*B14 → B17 are done and verified against freya. P1 (B18) is now the top of the
+list; see [Suggested order](#suggested-order).*
 
 ### B14 — Cluster-wide Events view
 *Why first: per-pod events expire after ~1h, so the per-pod tab is usually empty
@@ -100,11 +103,14 @@ path only), re-run `import_kubeconfig` for each saved path before the initial
 `listContexts` merge; drop paths that no longer parse (with a console warning,
 not an error). Save whenever an import succeeds.
 
-**Accept:**
-- [ ] Import a kubeconfig, relaunch → its contexts are still in the switcher and
-      connectable.
-- [ ] Deleting the file then relaunching drops it silently; default-kubeconfig
-      contexts always win name collisions (existing merge rule).
+**Accept:** *(shipped)*
+- [x] Import a kubeconfig, relaunch → its contexts are still in the switcher and
+      connectable. `list_contexts` now returns the merged list, and imports are
+      restored *before* it is called.
+- [x] Deleting the file then relaunching drops it silently; default-kubeconfig
+      contexts always win name collisions (existing merge rule). Covered by
+      `cargo test`: a missing/unparseable kubeconfig errors, which `restore_imports`
+      turns into a drop, and the pruned list is what gets persisted.
 
 ## P1 — next
 
@@ -210,6 +216,9 @@ chart/version/status; secrets remain redacted elsewhere.
 
 ## Suggested order
 
-B14 → B15 → B16 → B17 (P0, in order) → B18 → B19 → B20 → B21 → B22–B26 as
-convenient. Only hard dependency: **B16** builds on B6's forward plumbing
-(shipped); **B18** builds on B13's pattern (shipped).
+~~B14 → B15 → B16 → B17 (P0, in order)~~ **shipped** → B18 → B19 → B20 → B21 →
+B22–B26 as convenient. Only hard dependency: **B18** builds on B13's pattern
+(shipped).
+
+*B24 (dev launch hygiene) is worth pulling forward: the stale-dist trap it
+describes bit us again while verifying B14.*

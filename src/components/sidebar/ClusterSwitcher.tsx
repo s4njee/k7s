@@ -24,6 +24,7 @@ export function ClusterSwitcher() {
   const toggleMenu = useStore((s) => s.toggleMenu);
   const closeMenus = useStore((s) => s.closeMenus);
   const setContexts = useStore((s) => s.setContexts);
+  const addImportedFile = useStore((s) => s.addImportedFile);
 
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, closeMenus, open);
@@ -32,8 +33,11 @@ export function ClusterSwitcher() {
   // the switcher list. A null result means the user cancelled the dialog.
   const onImport = async () => {
     closeMenus();
-    const merged = await getProvider().importKubeconfig();
-    if (merged) setContexts(merged);
+    const result = await getProvider().importKubeconfig();
+    if (!result) return;
+    setContexts(result.contexts);
+    // Remember the file so its contexts come back on the next launch (B17).
+    addImportedFile(result.path);
   };
 
   // Display name: the connected cluster, else the selected context, else a stub.

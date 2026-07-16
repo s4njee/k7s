@@ -66,6 +66,11 @@ export interface AppState {
   watchCount: number;
   /** Available kubeconfig contexts (cluster switcher entries). */
   contexts: ContextInfo[];
+  /**
+   * Kubeconfig files imported by the user (B17). Persisted via prefs and
+   * re-imported on boot, so imported contexts survive a relaunch.
+   */
+  importedFiles: string[];
 
   // ---------- navigation & filtering ----------
   /** Active resource kind (drives the table + breadcrumb); a custom id for CRDs. */
@@ -120,6 +125,9 @@ export interface AppState {
   // connection/data setters (called by provider event handlers)
   setConnection: (c: Partial<ConnectionState>) => void;
   setContexts: (contexts: ContextInfo[]) => void;
+  setImportedFiles: (paths: string[]) => void;
+  /** Remember an imported kubeconfig path (no-op if already known). */
+  addImportedFile: (path: string) => void;
   setClusterStatus: (s: ClusterStatus) => void;
   setWatchCount: (n: number) => void;
   setRows: (kind: KindId, rows: Row[]) => void;
@@ -155,6 +163,7 @@ export const useStore = create<AppState>((set) => ({
   clusterStatus: null,
   watchCount: 0,
   contexts: [],
+  importedFiles: [],
 
   nav: "pods",
   namespace: "all",
@@ -209,6 +218,11 @@ export const useStore = create<AppState>((set) => ({
   // ---------- connection/data setters ----------
   setConnection: (c) => set((s) => ({ connection: { ...s.connection, ...c } })),
   setContexts: (contexts) => set({ contexts }),
+  setImportedFiles: (paths) => set({ importedFiles: paths }),
+  addImportedFile: (path) =>
+    set((s) =>
+      s.importedFiles.includes(path) ? s : { importedFiles: [...s.importedFiles, path] },
+    ),
   setClusterStatus: (status) => set({ clusterStatus: status }),
   setWatchCount: (n) => set({ watchCount: n }),
   setRows: (kind, rows) => set((s) => ({ rows: { ...s.rows, [kind]: rows } })),

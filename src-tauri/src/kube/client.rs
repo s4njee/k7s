@@ -143,3 +143,72 @@ pub async fn probe_version(client: &Client) -> AppResult<String> {
     let info = client.apiserver_version().await?;
     Ok(info.git_version)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// Write `body` to a uniquely-named temp file and return its path.
+    fn temp_file(tag: &str, body: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "k7s-test-{tag}-{}-{:?}.yaml",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(body.as_bytes()).unwrap();
+        path
+    }
+
+    const KUBECONFIG: &str = r#"
+apiVersion: v1
+kind: Config
+current-context: alpha
+clusters:
+  - name: alpha-cluster
+    cluster: { server: https://alpha.example:6443 }
+  - name: beta-cluster
+    cluster: { server: https://beta.example:6443 }
+contexts:
+  - name: alpha
+    context: { cluster: alpha-cluster, user: alpha-user }
+  - name: beta
+    context: { cluster: beta-cluster, user: beta-user }
+users:
+  - name: alpha-user
+    user: {}
+  - name: beta-user
+    user: {}
+"#;
+
+    /// An imported file contributes each of its contexts, tagged with its cluster.
+    #[test]
+    fn reads_contexts_from_a_kubeconfig_file() {
+        let path = temp_file("ok", KUBECONFIG);
+        let contexts = contexts_from_file(path.to_str().unwrap()).unwrap();
+        let names: Vec<&str> = contexts.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["alpha", "beta"]);
+        assert_eq!(contexts[0].cluster, "alpha-cluster");
+        // current-context belongs to the *default* kubeconfig; an imported file
+        // never claims to be current (the merge in commands.rs relies on this).
+        assert!(contexts.iter().all(|c| !c.current));
+        std::fs::remove_file(path).ok();
+    }
+
+    /// A file that has been deleted since it was imported errors rather than
+    /// panicking — restore_imports (B17) turns this into a silent drop on boot.
+    #[test]
+    fn missing_file_is_an_error() {
+        let path = std::env::temp_dir().join("k7s-test-definitely-absent.yaml");
+        assert!(contexts_from_file(path.to_str().unwrap()).is_err());
+    }
+
+    /// So does a file that is no longer a kubeconfig.
+    #[test]
+    fn unparseable_file_is_an_error() {
+        let path = temp_file("junk", "this is not a kubeconfig at all\n\t- [");
+        assert!(contexts_from_file(path.to_str().unwrap()).is_err());
+        std::fs::remove_file(path).ok();
+    }
+}

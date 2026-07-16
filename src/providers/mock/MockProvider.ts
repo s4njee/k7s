@@ -12,6 +12,7 @@ import type {
   DataProvider,
   EventItem,
   ForwardInfo,
+  ImportResult,
   LogHandle,
   LogLine,
   LogOptions,
@@ -77,7 +78,7 @@ export class MockProvider implements DataProvider {
     return { context, clusterName: context, server: "https://mock.local:6443", version: "v1.31" };
   }
 
-  async importKubeconfig(): Promise<ContextInfo[] | null> {
+  async importKubeconfig(): Promise<ImportResult | null> {
     // No real file dialog in demo mode; simulate importing a context so the flow
     // is demonstrable. Appended once (idempotent).
     const base = MOCK_CLUSTERS.map((c) => ({ name: c.name, cluster: c.name, current: c.active }));
@@ -86,7 +87,13 @@ export class MockProvider implements DataProvider {
       cluster: "team-eks",
       current: false,
     };
-    return [...base, imported];
+    return { contexts: [...base, imported], path: "/mock/team-cluster.kubeconfig" };
+  }
+
+  async restoreImports(_paths: string[]): Promise<string[]> {
+    // Demo mode persists nothing (loadPrefs returns null), so there's never
+    // anything to restore.
+    return [];
   }
 
   /** Emit a fresh snapshot of every kind to all resource subscribers. */

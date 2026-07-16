@@ -16,6 +16,7 @@ import type {
   DataProvider,
   EventItem,
   ForwardInfo,
+  ImportResult,
   LogHandle,
   LogLine,
   LogOptions,
@@ -70,7 +71,11 @@ export class TauriProvider implements DataProvider {
     return invoke<ClusterInfo>("connect", { context });
   }
 
-  async importKubeconfig(): Promise<ContextInfo[] | null> {
+  restoreImports(paths: string[]): Promise<string[]> {
+    return invoke<string[]>("restore_imports", { paths });
+  }
+
+  async importKubeconfig(): Promise<ImportResult | null> {
     // Lazy-import the dialog plugin so it isn't pulled into demo bundles.
     const { open } = await import("@tauri-apps/plugin-dialog");
     // Pre-point the dialog at kubectl's default kubeconfig for one-click import.
@@ -83,7 +88,10 @@ export class TauriProvider implements DataProvider {
     });
     // User cancelled, or (defensively) a multi-selection came back.
     if (!selected || Array.isArray(selected)) return null;
-    return invoke<ContextInfo[]>("import_kubeconfig", { path: selected });
+    const contexts = await invoke<ContextInfo[]>("import_kubeconfig", { path: selected });
+    // The path goes back to the caller so it can be persisted (B17); only the
+    // provider knows it, since the picker lives here.
+    return { contexts, path: selected };
   }
 
   getYaml(ref: ResourceRef): Promise<string> {
