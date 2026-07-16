@@ -5,8 +5,9 @@
 
 use crate::error::{AppError, AppResult};
 use crate::kube::client::{self, ClusterInfo, ContextInfo};
-use crate::kube::manager::ImportedContext;
-use crate::kube::{logs, mappers, metrics, watchers, ClientManager};
+use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
+use crate::kube::{exec, logs, mappers, metrics, portforward, watchers, ClientManager};
+use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::core::v1::Event;
 use kube::api::{
     Api, ApiResource, DeleteParams, DynamicObject, ListParams, Patch, PatchParams, PostParams,
@@ -369,6 +370,118 @@ pub async fn stop_log_stream(
 ) -> AppResult<()> {
     mgr.remove_log(&stream_id).await;
     Ok(())
+}
+
+// --------------------------------------------------------------------------
+// Shell / exec (B4)
+// --------------------------------------------------------------------------
+
+/// Start an interactive shell in a pod container; returns the session id.
+#[tauri::command]
+pub async fn start_shell(
+    namespace: String,
+    pod: String,
+    container: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<String> {
+    let client = require_client(&mgr).await?;
+    let manager: Arc<ClientManager> = (*mgr).clone();
+
+    let id = format!("sh-{}-{}", pod, STREAM_SEQ.fetch_add(1, Ordering::Relaxed));
+    let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>(64);
+    let (resize_tx, resize_rx) = mpsc::channel::<(u16, u16)>(8);
+    let app = manager.app();
+    let id_for_task = id.clone();
+    let task = tokio::spawn(async move {
+        exec::run_shell(client, app, id_for_task, namespace, pod, container, input_rx, resize_rx)
+            .await;
+    });
+
+    manager
+        .add_shell(id.clone(), ShellSession { task, input_tx, resize_tx })
+        .await;
+    Ok(id)
+}
+
+/// Send keystrokes to a shell session.
+#[tauri::command]
+pub async fn shell_input(
+    stream_id: String,
+    data: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<()> {
+    mgr.shell_input(&stream_id, data.into_bytes()).await;
+    Ok(())
+}
+
+/// Resize a shell session's terminal.
+#[tauri::command]
+pub async fn shell_resize(
+    stream_id: String,
+    cols: u16,
+    rows: u16,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<()> {
+    mgr.shell_resize(&stream_id, cols, rows).await;
+    Ok(())
+}
+
+/// Stop a shell session (idempotent).
+#[tauri::command]
+pub async fn stop_shell(stream_id: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+    mgr.remove_shell(&stream_id).await;
+    Ok(())
+}
+
+// --------------------------------------------------------------------------
+// Port-forwarding (B6)
+// --------------------------------------------------------------------------
+
+/// Start forwarding a pod port to a local TCP port; returns the forward (with the
+/// chosen local port). Errors if the pod doesn't exist or the listener can't bind.
+#[tauri::command]
+pub async fn start_port_forward(
+    namespace: String,
+    pod: String,
+    remote_port: u16,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<ForwardDto> {
+    let client = require_client(&mgr).await?;
+    let manager: Arc<ClientManager> = (*mgr).clone();
+
+    // Fail fast with a clear message if the pod is gone.
+    portforward::ensure_pod(client.clone(), &namespace, &pod).await?;
+
+    let (ready_tx, ready_rx) = oneshot::channel::<Result<u16, String>>();
+    let ns = namespace.clone();
+    let p = pod.clone();
+    let task = tokio::spawn(async move {
+        portforward::run_port_forward(client, ns, p, remote_port, ready_tx).await;
+    });
+
+    // Wait for the listener to bind (or report the bind error).
+    let local_port = ready_rx
+        .await
+        .map_err(|_| AppError::Other("port-forward task ended before binding".into()))?
+        .map_err(AppError::Kube)?;
+
+    let id = format!("pf-{}-{}", pod, STREAM_SEQ.fetch_add(1, Ordering::Relaxed));
+    let dto = ForwardDto { id, namespace, pod, remote_port, local_port };
+    manager.add_forward(dto.clone(), task).await;
+    Ok(dto)
+}
+
+/// Stop a port-forward (idempotent).
+#[tauri::command]
+pub async fn stop_port_forward(id: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+    mgr.remove_forward(&id).await;
+    Ok(())
+}
+
+/// List active port-forwards.
+#[tauri::command]
+pub async fn list_port_forwards(mgr: State<'_, Arc<ClientManager>>) -> AppResult<Vec<ForwardDto>> {
+    Ok(mgr.list_forwards().await)
 }
 
 // --------------------------------------------------------------------------

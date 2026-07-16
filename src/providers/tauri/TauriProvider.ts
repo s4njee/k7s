@@ -15,6 +15,7 @@ import type {
   ContextInfo,
   DataProvider,
   EventItem,
+  ForwardInfo,
   LogHandle,
   LogLine,
   LogOptions,
@@ -23,6 +24,7 @@ import type {
   Prefs,
   ResourceKind,
   ResourceRef,
+  ShellHandle,
   Row,
   Unsub,
 } from "../types";
@@ -189,5 +191,54 @@ export class TauriProvider implements DataProvider {
         void invoke("stop_log_stream", { streamId });
       },
     };
+  }
+
+  // ---- shell / exec ----
+
+  async startShell(
+    ref: ResourceRef,
+    container: string,
+    onOutput: (data: string) => void,
+    onClosed: (reason: string) => void,
+  ): Promise<ShellHandle> {
+    const streamId = await invoke<string>("start_shell", {
+      namespace: ref.namespace ?? "",
+      pod: ref.name,
+      container,
+    });
+    const offOut = subscribe<{ data: string }>(`shell-out:${streamId}`, (p) => onOutput(p.data));
+    const offClosed = subscribe<string>(`shell-closed:${streamId}`, onClosed);
+
+    let stopped = false;
+    return {
+      input: (data: string) => void invoke("shell_input", { streamId, data }),
+      resize: (cols: number, rows: number) =>
+        void invoke("shell_resize", { streamId, cols, rows }),
+      stop: () => {
+        if (stopped) return;
+        stopped = true;
+        offOut();
+        offClosed();
+        void invoke("stop_shell", { streamId });
+      },
+    };
+  }
+
+  // ---- port-forwarding ----
+
+  startPortForward(ref: ResourceRef, remotePort: number): Promise<ForwardInfo> {
+    return invoke<ForwardInfo>("start_port_forward", {
+      namespace: ref.namespace ?? "",
+      pod: ref.name,
+      remotePort,
+    });
+  }
+
+  stopPortForward(id: string): Promise<void> {
+    return invoke<void>("stop_port_forward", { id });
+  }
+
+  listPortForwards(): Promise<ForwardInfo[]> {
+    return invoke<ForwardInfo[]>("list_port_forwards");
   }
 }

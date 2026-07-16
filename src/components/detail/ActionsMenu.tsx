@@ -8,6 +8,7 @@
 import { useRef, useState } from "react";
 import styles from "./DetailPanel.module.css";
 import { getProvider } from "../../providers";
+import { useStore } from "../../store";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import type { ResourceKind, Row } from "../../providers/types";
 
@@ -20,13 +21,15 @@ interface ActionsMenuProps {
   onDeleted: () => void;
 }
 
-type Mode = "menu" | "confirmDelete" | "scale";
+type Mode = "menu" | "confirmDelete" | "scale" | "forward";
 
 export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("menu");
   const [replicas, setReplicas] = useState(() => currentReplicas(row));
+  const [port, setPort] = useState(8080);
   const [busy, setBusy] = useState(false);
+  const setPortForwards = useStore((s) => s.setPortForwards);
 
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, () => close(), open);
@@ -35,7 +38,8 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
   const canDelete = kind !== "nodes" && kind !== "namespaces";
   const canScale = kind === "deployments" || kind === "statefulsets";
   const canCordon = kind === "nodes";
-  if (!canDelete && !canScale && !canCordon) return null;
+  const canForward = kind === "pods";
+  if (!canDelete && !canScale && !canCordon && !canForward) return null;
 
   function close() {
     setOpen(false);
@@ -80,6 +84,11 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
         <div className={styles.actionsMenu}>
           {mode === "menu" && (
             <>
+              {canForward && (
+                <div className={styles.actionsRow} onClick={() => setMode("forward")}>
+                  Forward…
+                </div>
+              )}
               {canScale && (
                 <div className={styles.actionsRow} onClick={() => setMode("scale")}>
                   Scale…
@@ -162,6 +171,37 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
                   }
                 >
                   Apply
+                </div>
+              </div>
+            </div>
+          )}
+
+          {mode === "forward" && (
+            <div className={styles.actionsConfirm}>
+              <div className={styles.actionsConfirmText}>Forward pod port</div>
+              <input
+                className={styles.portInput}
+                type="number"
+                min={1}
+                max={65535}
+                value={port}
+                onChange={(e) => setPort(Number(e.target.value))}
+              />
+              <div className={styles.actionsConfirmRow}>
+                <div className={styles.cancelBtn} onClick={() => setMode("menu")}>
+                  Cancel
+                </div>
+                <div
+                  className={styles.applyBtn}
+                  aria-disabled={busy}
+                  onClick={() =>
+                    run(async () => {
+                      await getProvider().startPortForward(ref3, port);
+                      setPortForwards(await getProvider().listPortForwards());
+                    }, close)
+                  }
+                >
+                  Forward
                 </div>
               </div>
             </div>

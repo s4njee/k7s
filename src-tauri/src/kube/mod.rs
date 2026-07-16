@@ -6,10 +6,12 @@
 
 pub mod client;
 pub mod dto;
+pub mod exec;
 pub mod logs;
 pub mod manager;
 pub mod mappers;
 pub mod metrics;
+pub mod portforward;
 pub mod watchers;
 
 use serde::{Deserialize, Serialize};

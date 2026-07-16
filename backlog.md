@@ -17,7 +17,7 @@ with the manager.
 
 ---
 
-> **Progress:** B1, B2, B3, B5, B7, B10, B11, B12 done. B11 persists context/nav/namespace/timestamps; re-importing saved kubeconfig paths is deferred. (branch `feat/backlog-qol`).
+> **Progress:** B1–B3, B5, B7, B10, B11, B12 done, plus B4 (shell/exec) and B6 (port-forwarding) — verified live against the freya cluster. Only B8 (CRDs) and B9 (events view) remain.
 
 ## B1 — Detail panel for all resource kinds
 *The design handoff names this the natural follow-up ("extending YAML/Events to all

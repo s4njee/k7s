@@ -9,6 +9,7 @@ import { create } from "zustand";
 import type {
   ClusterStatus,
   ContextInfo,
+  ForwardInfo,
   LogLine,
   NodeMetricsMap,
   PodMetricsMap,
@@ -20,7 +21,7 @@ import { KIND_ORDER, type ResourceKind } from "./lib/kinds";
 export const LOG_BUFFER_CAP = 200;
 
 /** Detail-panel tab identifiers. */
-export type DetailTab = "logs" | "yaml" | "events";
+export type DetailTab = "logs" | "shell" | "yaml" | "events";
 
 /** Which dropdown menu (if any) is currently open — only one at a time. */
 export type OpenMenu = "cluster" | "ns" | null;
@@ -70,6 +71,8 @@ export interface AppState {
   rows: Record<ResourceKind, Row[]>;
   podMetrics: PodMetricsMap;
   nodeMetrics: NodeMetricsMap;
+  /** Active port-forwards (B6). */
+  portForwards: ForwardInfo[];
 
   // ---------- detail panel ----------
   /** Selected row (null → panel closed). Pods also get a Logs tab. */
@@ -105,6 +108,7 @@ export interface AppState {
   setRows: (kind: ResourceKind, rows: Row[]) => void;
   setPodMetrics: (m: PodMetricsMap) => void;
   setNodeMetrics: (m: NodeMetricsMap) => void;
+  setPortForwards: (list: ForwardInfo[]) => void;
   resetData: () => void;
 
   // detail panel
@@ -144,6 +148,7 @@ export const useStore = create<AppState>((set) => ({
   rows: emptyRows(),
   podMetrics: {},
   nodeMetrics: {},
+  portForwards: [],
 
   selectedRow: null,
   activeTab: "logs",
@@ -190,12 +195,15 @@ export const useStore = create<AppState>((set) => ({
   setRows: (kind, rows) => set((s) => ({ rows: { ...s.rows, [kind]: rows } })),
   setPodMetrics: (m) => set({ podMetrics: m }),
   setNodeMetrics: (m) => set({ nodeMetrics: m }),
-  // Wipe all live data on disconnect/context-switch (Story 6.1).
+  setPortForwards: (list) => set({ portForwards: list }),
+  // Wipe all live data on disconnect/context-switch (Story 6.1). The backend also
+  // aborts every forward/shell on reset, so we clear the local list here too.
   resetData: () =>
     set({
       rows: emptyRows(),
       podMetrics: {},
       nodeMetrics: {},
+      portForwards: [],
       selectedRow: null,
       logBuffer: [],
       clusterStatus: null,

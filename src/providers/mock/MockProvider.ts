@@ -11,6 +11,7 @@ import type {
   ContextInfo,
   DataProvider,
   EventItem,
+  ForwardInfo,
   LogHandle,
   LogLine,
   LogOptions,
@@ -18,6 +19,7 @@ import type {
   PodMetricsMap,
   Prefs,
   ResourceRef,
+  ShellHandle,
   Row,
   Unsub,
 } from "../types";
@@ -193,5 +195,48 @@ export class MockProvider implements DataProvider {
         clearInterval(timer);
       },
     };
+  }
+
+  // ---- shell / exec (demo: a local echo shell) ----
+
+  async startShell(
+    _ref: ResourceRef,
+    container: string,
+    onOutput: (data: string) => void,
+    _onClosed: (reason: string) => void,
+  ): Promise<ShellHandle> {
+    const prompt = `\x1b[32m${container}\x1b[0m:/# `;
+    onOutput(`demo shell — echoes input (no real container)\r\n${prompt}`);
+    return {
+      input: (data: string) => {
+        // Enter → newline + prompt; otherwise echo the keystroke.
+        onOutput(data === "\r" ? `\r\n${prompt}` : data);
+      },
+      resize: () => {},
+      stop: () => {},
+    };
+  }
+
+  // ---- port-forwarding (demo: fake local ports) ----
+  private forwards: ForwardInfo[] = [];
+
+  async startPortForward(ref: ResourceRef, remotePort: number): Promise<ForwardInfo> {
+    const fwd: ForwardInfo = {
+      id: `pf-${ref.name}-${remotePort}-${this.forwards.length}`,
+      namespace: ref.namespace ?? "",
+      pod: ref.name,
+      remotePort,
+      localPort: 20000 + Math.floor(Math.random() * 10000),
+    };
+    this.forwards.push(fwd);
+    return fwd;
+  }
+
+  async stopPortForward(id: string): Promise<void> {
+    this.forwards = this.forwards.filter((f) => f.id !== id);
+  }
+
+  async listPortForwards(): Promise<ForwardInfo[]> {
+    return this.forwards;
   }
 }

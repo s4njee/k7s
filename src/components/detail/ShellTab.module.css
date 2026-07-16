@@ -1,0 +1,8 @@
+/* Shell tab (B4): an xterm terminal filling the detail panel body. */
+.shell {
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-terminal);
+  padding: 6px 8px 4px;
+  overflow: hidden;
+}

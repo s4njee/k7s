@@ -170,6 +170,21 @@
   text-align: center;
 }
 
+/* Port input for the forward action. */
+.portInput {
+  width: 100%;
+  background: var(--bg-terminal);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.portInput:focus {
+  border-color: var(--border-hover);
+}
+
 /* Action error banner (below the title row). */
 .actionError {
   margin: 8px 0 0;

@@ -14,6 +14,7 @@ import { TopBar } from "./components/topbar/TopBar";
 import { StatusBar } from "./components/statusbar/StatusBar";
 import { ResourceTable } from "./components/table/ResourceTable";
 import { DetailPanel } from "./components/detail/DetailPanel";
+import { ForwardsBar } from "./components/forwards/ForwardsBar";
 
 export default function App() {
   // Wire provider → store and connect on mount.
@@ -30,6 +31,7 @@ export default function App() {
           <ResourceTable />
           <DetailPanel />
         </div>
+        <ForwardsBar />
         <StatusBar />
       </div>
     </div>

@@ -57,6 +57,13 @@ pub fn run() {
             commands::get_events,
             commands::start_log_stream,
             commands::stop_log_stream,
+            commands::start_shell,
+            commands::shell_input,
+            commands::shell_resize,
+            commands::stop_shell,
+            commands::start_port_forward,
+            commands::stop_port_forward,
+            commands::list_port_forwards,
         ])
         .run(tauri::generate_context!())
         .expect("error while running k7s application");

@@ -176,6 +176,25 @@ export interface LogHandle {
   stop(): void;
 }
 
+/** Handle for an interactive shell session (B4). */
+export interface ShellHandle {
+  /** Send keystrokes to the container. */
+  input(data: string): void;
+  /** Notify the container of a terminal resize. */
+  resize(cols: number, rows: number): void;
+  /** End the session. */
+  stop(): void;
+}
+
+/** An active port-forward (B6). */
+export interface ForwardInfo {
+  id: string;
+  namespace: string;
+  pod: string;
+  remotePort: number;
+  localPort: number;
+}
+
 /** Unsubscribe function returned by the `on*` event subscriptions. */
 export type Unsub = () => void;
 
@@ -225,4 +244,17 @@ export interface DataProvider {
     onLines: (lines: LogLine[]) => void,
     onClosed: (reason: string) => void,
   ): Promise<LogHandle>;
+
+  // ---- shell / exec (B4) ----
+  startShell(
+    ref: ResourceRef,
+    container: string,
+    onOutput: (data: string) => void,
+    onClosed: (reason: string) => void,
+  ): Promise<ShellHandle>;
+
+  // ---- port-forwarding (B6) ----
+  startPortForward(ref: ResourceRef, remotePort: number): Promise<ForwardInfo>;
+  stopPortForward(id: string): Promise<void>;
+  listPortForwards(): Promise<ForwardInfo[]>;
 }
