@@ -73,6 +73,9 @@ fn skip_reason(pod: &Pod) -> Option<&'static str> {
     {
         return Some("static/mirror pod");
     }
+    if pod.metadata.deletion_timestamp.is_some() {
+        return Some("already terminating");
+    }
     match pod.status.as_ref().and_then(|s| s.phase.as_deref()) {
         Some("Succeeded") => Some("already Succeeded"),
         Some("Failed") => Some("already Failed"),

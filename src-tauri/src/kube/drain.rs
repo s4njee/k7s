@@ -61,7 +61,7 @@ pub async fn cordon(client: Client, node: &str) -> AppResult<()> {
 /// Assumes the node is already cordoned (see [`cordon`]) — otherwise the
 /// scheduler could place new pods on it while we're evicting.
 pub async fn run_drain(client: Client, app: AppHandle, node: String) {
-    let pods: Api<Pod> = Api::all(client);
+    let pods: Api<Pod> = Api::all(client.clone());
     // Only this node's pods. Field-selected server-side: a big cluster shouldn't
     // ship every pod over the wire to filter locally.
     let lp = ListParams::default().fields(&format!("spec.nodeName={node}"));
@@ -96,7 +96,10 @@ pub async fn run_drain(client: Client, app: AppHandle, node: String) {
     for pod in targets {
         let name = pod.name_any();
         let ns = pod.namespace().unwrap_or_default();
-        let api: Api<Pod> = Api::namespaced(pods.clone().into_client(), &ns);
+        // Eviction is namespaced, and a node's pods span namespaces, so the Api is
+        // per-pod — but it's built from a cheap Client clone rather than by
+        // unwrapping the listing Api each time round.
+        let api: Api<Pod> = Api::namespaced(client.clone(), &ns);
         match api.evict(&name, &ep).await {
             Ok(_) => progress.evicted += 1,
             Err(e) => {
@@ -127,7 +130,13 @@ fn emit(app: &AppHandle, p: DrainProgress) {
 
 /// True when this pod should be evicted as part of a drain.
 fn is_evictable(pod: &Pod) -> bool {
-    !is_daemonset_pod(pod) && !is_mirror_pod(pod) && !is_finished(pod)
+    !is_daemonset_pod(pod) && !is_mirror_pod(pod) && !is_finished(pod) && !is_terminating(pod)
+}
+
+/// Already being deleted — the disruption has happened, and evicting it again
+/// would just fail and be reported as a drain failure. kubectl skips these too.
+fn is_terminating(pod: &Pod) -> bool {
+    pod.metadata.deletion_timestamp.is_some()
 }
 
 /// DaemonSet-owned: the controller would put it straight back on this node.
@@ -217,6 +226,18 @@ mod tests {
             }));
             assert!(!is_evictable(&p), "{phase} pods should be skipped");
         }
+    }
+
+    /// A pod already being deleted is left alone: the disruption has happened,
+    /// and re-evicting it would fail and be reported as a drain failure.
+    #[test]
+    fn terminating_pods_are_skipped() {
+        let p = pod_json(json!({
+            "metadata": { "name": "api", "namespace": "prod",
+                          "deletionTimestamp": "2026-07-16T09:00:00Z" },
+            "status": { "phase": "Running" },
+        }));
+        assert!(!is_evictable(&p));
     }
 
     /// A pod with no owner (created by hand) still drains — kubectl warns about
