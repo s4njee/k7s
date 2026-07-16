@@ -495,7 +495,7 @@ pub async fn stop_shell(stream_id: String, mgr: State<'_, Arc<ClientManager>>) -
 }
 
 // --------------------------------------------------------------------------
-// Port-forwarding (B6)
+// Port-forwarding (B6, B16)
 // --------------------------------------------------------------------------
 
 /// Start forwarding a pod port to a local TCP port; returns the forward (with the
@@ -513,11 +513,50 @@ pub async fn start_port_forward(
     // Fail fast with a clear message if the pod is gone.
     portforward::ensure_pod(client.clone(), &namespace, &pod).await?;
 
+    spawn_forward(manager, client, namespace, pod, None, remote_port).await
+}
+
+/// Start forwarding a *Service* port (B16): pick a Ready backing pod and resolve
+/// the service port's targetPort, then forward to that pod exactly as above.
+///
+/// This is what `kubectl port-forward svc/x` does — Kubernetes has no service-level
+/// forward — so the forward follows one pod and does not load-balance.
+#[tauri::command]
+pub async fn start_service_port_forward(
+    namespace: String,
+    service: String,
+    remote_port: u16,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<ForwardDto> {
+    let client = require_client(&mgr).await?;
+    let manager: Arc<ClientManager> = (*mgr).clone();
+
+    let (pod, target_port) =
+        portforward::resolve_service(client.clone(), &namespace, &service, remote_port).await?;
+
+    spawn_forward(manager, client, namespace, pod, Some(service), target_port).await
+}
+
+/// Bind a local listener, spawn the forward's accept loop, and register it.
+/// Shared by the pod and Service paths — by this point a Service forward *is* a
+/// pod forward.
+async fn spawn_forward(
+    manager: Arc<ClientManager>,
+    client: kube::Client,
+    namespace: String,
+    pod: String,
+    service: Option<String>,
+    remote_port: u16,
+) -> AppResult<ForwardDto> {
     let (ready_tx, ready_rx) = oneshot::channel::<Result<u16, String>>();
+    // Bounded: per-connection errors are for display, so a full channel just means
+    // the failure is already reported.
+    let (err_tx, mut err_rx) = mpsc::channel::<String>(8);
+
     let ns = namespace.clone();
     let p = pod.clone();
     let task = tokio::spawn(async move {
-        portforward::run_port_forward(client, ns, p, remote_port, ready_tx).await;
+        portforward::run_port_forward(client, ns, p, remote_port, ready_tx, err_tx).await;
     });
 
     // Wait for the listener to bind (or report the bind error).
@@ -526,9 +565,22 @@ pub async fn start_port_forward(
         .map_err(|_| AppError::Other("port-forward task ended before binding".into()))?
         .map_err(AppError::Kube)?;
 
-    let id = format!("pf-{}-{}", pod, STREAM_SEQ.fetch_add(1, Ordering::Relaxed));
-    let dto = ForwardDto { id, namespace, pod, remote_port, local_port };
+    let label = service.clone().unwrap_or_else(|| pod.clone());
+    let id = format!("pf-{}-{}", label, STREAM_SEQ.fetch_add(1, Ordering::Relaxed));
+    let dto =
+        ForwardDto { id: id.clone(), namespace, pod, service, remote_port, local_port, error: None };
     manager.add_forward(dto.clone(), task).await;
+
+    // Relay per-connection failures onto the forward for the UI. Ends on its own
+    // when the forward task is aborted and drops the sender.
+    let relay_mgr = manager.clone();
+    let relay = tokio::spawn(async move {
+        while let Some(e) = err_rx.recv().await {
+            relay_mgr.set_forward_error(&id, e).await;
+        }
+    });
+    manager.push_task(relay).await;
+
     Ok(dto)
 }
 

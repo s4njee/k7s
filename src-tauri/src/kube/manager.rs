@@ -26,9 +26,21 @@ pub struct ShellSession {
 pub struct ForwardDto {
     pub id: String,
     pub namespace: String,
+    /// The pod traffic actually reaches — for a Service forward, the one that was
+    /// selected (B16).
     pub pod: String,
+    /// Set when this forward was started from a Service: the service's name, which
+    /// is what the user asked for and what the strip shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    /// The port on the pod. For a Service forward this is the resolved targetPort,
+    /// which may differ from the service port the user typed.
     pub remote_port: u16,
     pub local_port: u16,
+    /// Last per-connection failure, if any (B16). The listener stays up, so this
+    /// is how a forward whose pod died surfaces instead of silently timing out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// A running port-forward: its accept-loop task plus the DTO for listing.
@@ -137,6 +149,8 @@ impl ClientManager {
         inner.watcher_count = 0;
         drop(inner);
         self.emit_watch().await;
+        // Forwards are gone with the connection; tell the strip so it empties.
+        self.emit_forwards().await;
     }
 
     /// Record a freshly established connection. Watchers are registered separately
@@ -227,6 +241,7 @@ impl ClientManager {
             inner.forwards.insert(dto.id.clone(), ForwardEntry { task, dto });
         }
         self.emit_watch().await;
+        self.emit_forwards().await;
     }
 
     /// Abort a port-forward by id (idempotent).
@@ -237,12 +252,38 @@ impl ClientManager {
         };
         if existed {
             self.emit_watch().await;
+            self.emit_forwards().await;
+        }
+    }
+
+    /// Record a per-connection failure against a forward and push it to the UI
+    /// (B16). The forward keeps running: its listener is still bound, and the pod
+    /// may well come back.
+    pub async fn set_forward_error(&self, id: &str, error: String) {
+        let changed = {
+            let mut inner = self.inner.write().await;
+            match inner.forwards.get_mut(id) {
+                Some(f) => {
+                    f.dto.error = Some(error);
+                    true
+                }
+                None => false,
+            }
+        };
+        if changed {
+            self.emit_forwards().await;
         }
     }
 
     /// Snapshot of active port-forwards for the UI list.
     pub async fn list_forwards(&self) -> Vec<ForwardDto> {
         self.inner.read().await.forwards.values().map(|f| f.dto.clone()).collect()
+    }
+
+    /// Push the current forwards to the UI.
+    async fn emit_forwards(&self) {
+        let list = self.list_forwards().await;
+        let _ = self.app.emit(events::FORWARDS_UPDATE, list);
     }
 
     // ---- custom (CRD-backed) kinds (B15) ----

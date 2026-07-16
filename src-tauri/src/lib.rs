@@ -67,6 +67,7 @@ pub fn run() {
             commands::shell_resize,
             commands::stop_shell,
             commands::start_port_forward,
+            commands::start_service_port_forward,
             commands::stop_port_forward,
             commands::list_port_forwards,
         ])

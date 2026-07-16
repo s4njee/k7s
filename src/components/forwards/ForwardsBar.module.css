@@ -26,8 +26,21 @@
   background: var(--bg-control);
   flex: none;
 }
+/* A forward whose connections are failing (B16) — still listed, but flagged. */
+.itemError {
+  border-color: var(--status-err);
+}
+.errorMark {
+  color: var(--status-err);
+  font-weight: 700;
+}
+
 .local {
   color: var(--accent);
+  cursor: pointer;
+}
+.local:hover {
+  text-decoration: underline;
 }
 .arrow {
   color: var(--text-faint);

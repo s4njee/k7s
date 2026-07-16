@@ -60,6 +60,7 @@ export class MockProvider implements DataProvider {
   private statusCbs = new Set<(s: ClusterStatus) => void>();
   private watchCbs = new Set<(n: number) => void>();
   private customKindCbs = new Set<(k: CustomKind[]) => void>();
+  private forwardCbs = new Set<(f: ForwardInfo[]) => void>();
 
   // ---- one-shot commands ----
 
@@ -334,22 +335,40 @@ export class MockProvider implements DataProvider {
   private forwards: ForwardInfo[] = [];
 
   async startPortForward(ref: ResourceRef, remotePort: number): Promise<ForwardInfo> {
+    const isService = ref.kind === "services";
     const fwd: ForwardInfo = {
       id: `pf-${ref.name}-${remotePort}-${this.forwards.length}`,
       namespace: ref.namespace ?? "",
-      pod: ref.name,
+      // A Service forward resolves to a backing pod; the mock fakes one so the
+      // strip shows the same "service (via pod)" shape as the real thing (B16).
+      pod: isService ? `${ref.name}-6c8d9-mn4p` : ref.name,
+      service: isService ? ref.name : undefined,
       remotePort,
       localPort: 20000 + Math.floor(Math.random() * 10000),
     };
     this.forwards.push(fwd);
+    this.emitForwards();
     return fwd;
   }
 
   async stopPortForward(id: string): Promise<void> {
     this.forwards = this.forwards.filter((f) => f.id !== id);
+    this.emitForwards();
   }
 
   async listPortForwards(): Promise<ForwardInfo[]> {
     return this.forwards;
+  }
+
+  onForwards(cb: (forwards: ForwardInfo[]) => void): Unsub {
+    this.forwardCbs.add(cb);
+    return () => {
+      this.forwardCbs.delete(cb);
+    };
+  }
+
+  /** Push the current forwards, mirroring the backend's forwards-update event. */
+  private emitForwards(): void {
+    for (const cb of this.forwardCbs) cb([...this.forwards]);
   }
 }

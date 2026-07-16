@@ -288,9 +288,15 @@ export interface ShellHandle {
 export interface ForwardInfo {
   id: string;
   namespace: string;
+  /** The pod traffic reaches — for a Service forward, the one selected (B16). */
   pod: string;
+  /** Set for Service forwards: the service name, which is what the strip shows. */
+  service?: string;
+  /** Port on the pod (a Service forward's resolved targetPort). */
   remotePort: number;
   localPort: number;
+  /** Last per-connection failure; the forward stays up (B16). */
+  error?: string;
 }
 
 /** Unsubscribe function returned by the `on*` event subscriptions. */
@@ -364,8 +370,15 @@ export interface DataProvider {
     onClosed: (reason: string) => void,
   ): Promise<ShellHandle>;
 
-  // ---- port-forwarding (B6) ----
+  // ---- port-forwarding (B6, B16) ----
+  /**
+   * Forward a port. `ref.kind` selects the strategy: a pod forwards directly; a
+   * Service resolves to a Ready backing pod first, and `remotePort` is then the
+   * *service* port rather than the pod's (B16).
+   */
   startPortForward(ref: ResourceRef, remotePort: number): Promise<ForwardInfo>;
   stopPortForward(id: string): Promise<void>;
   listPortForwards(): Promise<ForwardInfo[]>;
+  /** Active forwards, pushed on add/remove/failure (B16). */
+  onForwards(cb: (forwards: ForwardInfo[]) => void): Unsub;
 }

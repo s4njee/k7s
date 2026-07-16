@@ -27,7 +27,7 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("menu");
   const [replicas, setReplicas] = useState(() => currentReplicas(row));
-  const [port, setPort] = useState(8080);
+  const [port, setPort] = useState(() => defaultPort(row, kind));
   const [busy, setBusy] = useState(false);
   const setPortForwards = useStore((s) => s.setPortForwards);
 
@@ -38,7 +38,9 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
   const canDelete = kind !== "nodes" && kind !== "namespaces";
   const canScale = kind === "deployments" || kind === "statefulsets";
   const canCordon = kind === "nodes";
-  const canForward = kind === "pods";
+  // Services forward via a resolved backing pod (B16).
+  const isService = kind === "services";
+  const canForward = kind === "pods" || isService;
   if (!canDelete && !canScale && !canCordon && !canForward) return null;
 
   function close() {
@@ -73,6 +75,7 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
         title="actions"
         onClick={() => {
           setReplicas(currentReplicas(row));
+          setPort(defaultPort(row, kind));
           setMode("menu");
           setOpen((o) => !o);
         }}
@@ -178,7 +181,9 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
 
           {mode === "forward" && (
             <div className={styles.actionsConfirm}>
-              <div className={styles.actionsConfirmText}>Forward pod port</div>
+              <div className={styles.actionsConfirmText}>
+                {isService ? "Forward service port" : "Forward pod port"}
+              </div>
               <input
                 className={styles.portInput}
                 type="number"
@@ -196,8 +201,12 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
                   aria-disabled={busy}
                   onClick={() =>
                     run(async () => {
-                      await getProvider().startPortForward(ref3, port);
+                      const fwd = await getProvider().startPortForward(ref3, port);
                       setPortForwards(await getProvider().listPortForwards());
+                      // The address is the whole point of starting a forward, so
+                      // put it on the clipboard rather than making the user
+                      // transcribe an OS-assigned port from the strip.
+                      await copyToClipboard(`localhost:${fwd.localPort}`);
                     }, close)
                   }
                 >
@@ -219,4 +228,29 @@ function currentReplicas(row: Row): number {
     if (m) return parseInt(m[2], 10); // desired = denominator
   }
   return 1;
+}
+
+/**
+ * Port to pre-fill the forward dialog with. For a Service, its first published
+ * port (read off the PORTS column, e.g. "8080/TCP" or "80/TCP, 443/TCP") — that's
+ * almost always the one wanted, and guessing wrong just means an error. Pods have
+ * no port column to read, so they keep the 8080 default.
+ */
+function defaultPort(row: Row, kind: KindId): number {
+  if (kind !== "services") return 8080;
+  // Services columns: NAME, NAMESPACE, TYPE, CLUSTER-IP, PORTS(4), AGE.
+  const m = /(\d+)/.exec(row.cells[4]?.text ?? "");
+  return m ? parseInt(m[1], 10) : 8080;
+}
+
+/**
+ * Copy text to the clipboard, ignoring failure — a forward that started is still
+ * useful (the address is shown in the strip) even if the clipboard is unavailable.
+ */
+async function copyToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Non-fatal; the strip still shows the address.
+  }
 }

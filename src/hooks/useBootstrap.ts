@@ -25,6 +25,7 @@ export function useBootstrap(): void {
       setConnection,
       setContexts,
       setCustomKinds,
+      setPortForwards,
     } = useStore.getState();
 
     // Reconcile cluster-status into the connection lifecycle (Story 6.2): a live
@@ -56,6 +57,9 @@ export function useBootstrap(): void {
       provider.onWatchStatus(setWatchCount),
       // CRD-backed kinds, re-emitted on every connect (B15).
       provider.onCustomKinds(setCustomKinds),
+      // Forwards are pushed on add/remove/failure, so a forward that starts
+      // failing turns red without the strip polling for it (B16).
+      provider.onForwards(setPortForwards),
     ];
 
     // Discover contexts, restore saved preferences, then connect (B11).

@@ -77,11 +77,19 @@ Forward… action to Service rows' detail (ActionsMenu `canForward` for
 and show it in the forwards strip immediately; forward errors (pod gone,
 connection refused per-connection) surface in the strip item as a red tone.
 
-**Accept:**
-- [ ] Forwarding the freya `grafana` Service opens a working local tunnel
-      (`curl localhost:<port>` responds) without picking a pod manually.
-- [ ] Named targetPort services resolve correctly; stopping works; context
-      switch kills all forwards (existing reset path).
+**Accept:** *(shipped)*
+- [x] Forwarding a Service opens a working local tunnel without picking a pod
+      manually. freya has no `grafana`, so verified with `cargo run --example
+      svc_forward_check` against `csearch-redis`: resolved to a Ready pod and a
+      Redis PING through the tunnel returned `+PONG`.
+- [x] Named targetPort services resolve correctly (`csearch-redis` 6379 →
+      `"redis"`); numeric remaps too (`argocd-server` 80 → 8080); selector-less
+      Services (`kubernetes`) and unpublished ports fail with readable messages.
+- [x] Stopping works; context switch kills all forwards (existing reset path).
+
+*Note: a Service forward follows one pod and does not load-balance — Kubernetes
+has no service-level forward primitive, so `kubectl port-forward svc/x` behaves
+the same way.*
 
 ### B17 — Persist imported kubeconfigs
 *Why: deferred from B11 — imported contexts vanish on relaunch, which makes the

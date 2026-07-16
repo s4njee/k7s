@@ -251,11 +251,24 @@ export class TauriProvider implements DataProvider {
   // ---- port-forwarding ----
 
   startPortForward(ref: ResourceRef, remotePort: number): Promise<ForwardInfo> {
+    // Services need a backing pod resolved first, so they take a different
+    // command; `remotePort` is the service port there, not the pod's (B16).
+    if (ref.kind === "services") {
+      return invoke<ForwardInfo>("start_service_port_forward", {
+        namespace: ref.namespace ?? "",
+        service: ref.name,
+        remotePort,
+      });
+    }
     return invoke<ForwardInfo>("start_port_forward", {
       namespace: ref.namespace ?? "",
       pod: ref.name,
       remotePort,
     });
+  }
+
+  onForwards(cb: (forwards: ForwardInfo[]) => void): Unsub {
+    return subscribe<ForwardInfo[]>("forwards-update", cb);
   }
 
   stopPortForward(id: string): Promise<void> {

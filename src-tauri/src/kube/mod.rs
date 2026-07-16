@@ -78,6 +78,9 @@ pub mod events {
     pub const CLUSTER_STATUS: &str = "cluster-status";
     /// Count of live watcher + log-stream tasks (sidebar footer).
     pub const WATCH_STATUS: &str = "watch-status";
+    /// The active port-forwards, pushed whenever one is added, removed, or fails
+    /// (B16) — so the strip reflects failures without the UI polling for them.
+    pub const FORWARDS_UPDATE: &str = "forwards-update";
     /// Log lines for a stream: emitted as `log-line:{streamId}`.
     pub const LOG_LINE_PREFIX: &str = "log-line:";
     /// Stream end/error: emitted as `log-closed:{streamId}`.
