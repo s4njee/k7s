@@ -27,6 +27,10 @@ pub struct LogLine {
     /// Normalized level: "DEBUG" | "INFO" | "WARN" | "ERROR" | "".
     pub level: &'static str,
     pub msg: String,
+    /// Source container name. Empty for a single-container stream; set when
+    /// streaming all containers of a pod (B7) so the UI can tag each line.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub container: String,
 }
 
 /// Batch payload for a `log-line:{id}` event.
@@ -57,7 +61,13 @@ pub async fn run_log_stream(
     opts: LogStreamOptions,
 ) {
     let closed_event = format!("{}{}", events::LOG_CLOSED_PREFIX, stream_id);
-    match stream_inner(client, &app, &stream_id, &namespace, &pod, &container, opts).await {
+    // Empty container = stream every container of the pod, interleaved (B7).
+    let result = if container.is_empty() {
+        stream_all(client, &app, &stream_id, &namespace, &pod, opts).await
+    } else {
+        stream_one(client, &app, &stream_id, &namespace, &pod, &container, opts).await
+    };
+    match result {
         Ok(reason) => {
             let _ = app.emit(&closed_event, reason);
         }
@@ -68,19 +78,8 @@ pub async fn run_log_stream(
     }
 }
 
-/// Inner streaming loop; returns the close reason on normal end.
-async fn stream_inner(
-    client: Client,
-    app: &AppHandle,
-    stream_id: &str,
-    namespace: &str,
-    pod: &str,
-    container: &str,
-    opts: LogStreamOptions,
-) -> AppResult<String> {
-    let api: Api<Pod> = Api::namespaced(client, namespace);
-
-    // Always request timestamps so we can render (and let the UI toggle) them.
+/// Build the LogParams shared by single- and multi-container streams.
+fn log_params(container: &str, opts: &LogStreamOptions) -> LogParams {
     let mut lp = LogParams {
         follow: true,
         timestamps: true,
@@ -94,11 +93,22 @@ async fn stream_inner(
             lp.since_time = Some(dt.with_timezone(&Utc));
         }
     }
+    lp
+}
 
-    // log_stream yields a futures AsyncBufRead; .lines() turns it into a Stream of
-    // io::Result<String>.
+/// Stream a single container's logs, tagging each line with the container name.
+async fn stream_one(
+    client: Client,
+    app: &AppHandle,
+    stream_id: &str,
+    namespace: &str,
+    pod: &str,
+    container: &str,
+    opts: LogStreamOptions,
+) -> AppResult<String> {
+    let api: Api<Pod> = Api::namespaced(client, namespace);
     let reader = api
-        .log_stream(pod, &lp)
+        .log_stream(pod, &log_params(container, &opts))
         .await
         .map_err(|e| AppError::Kube(e.to_string()))?;
     let mut lines = reader.lines();
@@ -109,30 +119,91 @@ async fn stream_inner(
 
     loop {
         tokio::select! {
-            // Next raw line (or end/error).
             next = lines.next() => match next {
-                Some(Ok(raw)) => batch.push(parse_log_line(&raw)),
+                Some(Ok(raw)) => {
+                    let mut line = parse_log_line(&raw);
+                    line.container = container.to_string();
+                    batch.push(line);
+                }
                 None => {
-                    // Stream ended cleanly; flush any tail and report.
-                    if !batch.is_empty() {
-                        let _ = app.emit(&line_event, LogBatch { lines: std::mem::take(&mut batch) });
-                    }
+                    flush_batch(app, &line_event, &mut batch);
                     return Ok("stream ended".to_string());
                 }
                 Some(Err(e)) => {
-                    if !batch.is_empty() {
-                        let _ = app.emit(&line_event, LogBatch { lines: std::mem::take(&mut batch) });
-                    }
+                    flush_batch(app, &line_event, &mut batch);
                     return Err(AppError::Kube(e.to_string()));
                 }
             },
-            // Periodic flush of whatever has accumulated.
-            _ = flush.tick() => {
-                if !batch.is_empty() {
-                    let _ = app.emit(&line_event, LogBatch { lines: std::mem::take(&mut batch) });
+            _ = flush.tick() => flush_batch(app, &line_event, &mut batch),
+        }
+    }
+}
+
+/// Stream every container of the pod, interleaved. One reader task per container
+/// feeds a shared channel; the batcher drains it. Reader tasks live in a JoinSet
+/// so aborting this stream (dropping the JoinSet) aborts them too.
+async fn stream_all(
+    client: Client,
+    app: &AppHandle,
+    stream_id: &str,
+    namespace: &str,
+    pod: &str,
+    opts: LogStreamOptions,
+) -> AppResult<String> {
+    // Discover the pod's containers.
+    let api: Api<Pod> = Api::namespaced(client.clone(), namespace);
+    let pod_obj = api.get(pod).await?;
+    let containers: Vec<String> = pod_obj
+        .spec
+        .map(|s| s.containers.into_iter().map(|c| c.name).collect())
+        .unwrap_or_default();
+    if containers.is_empty() {
+        return Ok("no containers".to_string());
+    }
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<LogLine>(256);
+    let mut readers = tokio::task::JoinSet::new();
+    for container in containers {
+        let api = api.clone();
+        let lp = log_params(&container, &opts);
+        let tx = tx.clone();
+        let pod_name = pod.to_string();
+        readers.spawn(async move {
+            if let Ok(reader) = api.log_stream(&pod_name, &lp).await {
+                let mut lines = reader.lines();
+                while let Some(Ok(raw)) = lines.next().await {
+                    let mut line = parse_log_line(&raw);
+                    line.container = container.clone();
+                    if tx.send(line).await.is_err() {
+                        break; // batcher gone
+                    }
                 }
             }
+        });
+    }
+    drop(tx); // so rx closes once all readers finish
+
+    let line_event = format!("{}{}", events::LOG_LINE_PREFIX, stream_id);
+    let mut batch: Vec<LogLine> = Vec::new();
+    let mut flush = interval(FLUSH);
+    loop {
+        tokio::select! {
+            got = rx.recv() => match got {
+                Some(line) => batch.push(line),
+                None => {
+                    flush_batch(app, &line_event, &mut batch);
+                    return Ok("stream ended".to_string());
+                }
+            },
+            _ = flush.tick() => flush_batch(app, &line_event, &mut batch),
         }
+    }
+}
+
+/// Emit and clear the batch if non-empty.
+fn flush_batch(app: &AppHandle, line_event: &str, batch: &mut Vec<LogLine>) {
+    if !batch.is_empty() {
+        let _ = app.emit(line_event, LogBatch { lines: std::mem::take(batch) });
     }
 }
 
@@ -149,7 +220,7 @@ pub fn parse_log_line(raw: &str) -> LogLine {
         },
         None => (String::new(), raw),
     };
-    LogLine { ts, level: detect_level(msg), msg: msg.to_string() }
+    LogLine { ts, level: detect_level(msg), msg: msg.to_string(), container: String::new() }
 }
 
 /// Detect a log level from the message: a JSON `"level"` field first, then a

@@ -40,8 +40,13 @@ export function LogsTab() {
   const containerIndex = useStore((s) => s.containerIndex);
   const cycleContainer = useStore((s) => s.cycleContainer);
 
+  // Multi-container pods get an "all" option ("") first; "(all)" is its label and
+  // turns on the per-line container tag column.
   const containers = pod?.pod?.containers ?? [];
-  const container = containers.length ? containers[containerIndex % containers.length] : "";
+  const options = containers.length > 1 ? [...containers, ""] : containers;
+  const current = options.length ? options[containerIndex % options.length] : "";
+  const containerLabel = current === "" ? "(all)" : current;
+  const showContainerTag = current === "" && containers.length > 1;
 
   // Client-side filter on message + level (buffer itself is untouched).
   const filtered = useMemo(() => {
@@ -81,11 +86,11 @@ export function LogsTab() {
           />
         </div>
 
-        {/* Container cycler (cycles through the pod's containers). */}
+        {/* Container cycler (cycles through the pod's containers, plus "all"). */}
         <div className={styles.button} onClick={cycleContainer} title="container">
           <span className={styles.buttonGlyph}>▣</span>
-          {container}
-          {containers.length > 1 && <span className={styles.buttonChevron}>▼</span>}
+          {containerLabel}
+          {options.length > 1 && <span className={styles.buttonChevron}>▼</span>}
         </div>
 
         {/* Timestamp toggle. */}
@@ -107,13 +112,13 @@ export function LogsTab() {
 
       <div className={styles.viewport} ref={viewportRef}>
         {filtered.map((line, i) => (
-          <LogRow key={i} line={line} showTs={showTimestamps} />
+          <LogRow key={i} line={line} showTs={showTimestamps} showContainer={showContainerTag} />
         ))}
       </div>
 
       <div className={styles.footer}>
         <span>{filtered.length} lines</span>
-        <span>container: {container}</span>
+        <span>container: {containerLabel}</span>
         <span style={{ color: following ? "var(--status-ok)" : "var(--status-warn)" }}>
           {following ? "● streaming" : "⏸ paused"}
         </span>
@@ -122,11 +127,21 @@ export function LogsTab() {
   );
 }
 
-/** A single log line row: timestamp (optional), level column, message. */
-function LogRow({ line, showTs }: { line: LogLine; showTs: boolean }) {
+/** A single log line row: timestamp (optional), container tag (in "all" mode),
+ *  level column, message. */
+function LogRow({
+  line,
+  showTs,
+  showContainer,
+}: {
+  line: LogLine;
+  showTs: boolean;
+  showContainer: boolean;
+}) {
   return (
     <div className={styles.line}>
       {showTs && <span className={styles.lineTs}>{line.ts}</span>}
+      {showContainer && <span className={styles.lineContainer}>{line.container}</span>}
       <span className={styles.lineLevel} style={{ color: LEVEL_COLOR[line.level] ?? "var(--text-muted)" }}>
         {line.level}
       </span>

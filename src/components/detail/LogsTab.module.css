@@ -124,6 +124,15 @@
   flex: none;
   color: var(--text-log-ts);
 }
+/* Container tag column, shown only when streaming all containers. */
+.lineContainer {
+  flex: none;
+  width: 96px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .lineLevel {
   flex: none;
   width: 42px;

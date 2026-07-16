@@ -130,6 +130,8 @@ export interface LogLine {
   /** Normalized level; "" when no level could be detected. */
   level: "" | "DEBUG" | "INFO" | "WARN" | "ERROR";
   msg: string;
+  /** Source container — set only when streaming all containers (B7). */
+  container?: string;
 }
 
 /** Per-pod resource usage, keyed by "namespace/name". */

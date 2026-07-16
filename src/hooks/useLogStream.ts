@@ -23,8 +23,12 @@ export function useLogStream(): void {
   const appendLogs = useStore((s) => s.appendLogs);
   const setFollowing = useStore((s) => s.setFollowing);
 
+  // For multi-container pods, add an "all" option ("") after each container, so the
+  // default (index 0) is still the first container.
   const containers = pod?.pod?.containers ?? [];
-  const container = containers.length ? containers[containerIndex % containers.length] : null;
+  const options = containers.length > 1 ? [...containers, ""] : containers;
+  // null → no pod; "" → all containers; else a specific container name.
+  const container = options.length ? options[containerIndex % options.length] : null;
 
   // Wall-clock time of the last received line, used as the resume anchor. Reset
   // whenever the pod or container changes (a genuinely new stream, not a resume).
@@ -34,7 +38,8 @@ export function useLogStream(): void {
   }, [pod?.uid, container]);
 
   useEffect(() => {
-    if (!pod || !pod.pod || !container || !following) return;
+    // container === "" is valid (all containers); only null means "no pod".
+    if (!pod || !pod.pod || container === null || !following) return;
 
     const provider = getProvider();
     let handle: LogHandle | null = null;

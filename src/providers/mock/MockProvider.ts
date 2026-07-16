@@ -21,7 +21,7 @@ import type {
   Unsub,
 } from "../types";
 import { KIND_ORDER, type ResourceKind } from "../../lib/kinds";
-import { MOCK_CLUSTERS, buildKindRows } from "./data";
+import { MOCK_CLUSTERS, MOCK_PODS, buildKindRows } from "./data";
 import { makeLogLine, seedLogLines } from "./logs";
 import { yamlForPodName, yamlForGeneric } from "./yaml";
 import { eventsForPodName } from "./events";
@@ -163,15 +163,22 @@ export class MockProvider implements DataProvider {
 
   async startLogs(
     ref: ResourceRef,
-    _container: string,
+    container: string,
     _opts: LogOptions,
     onLines: (lines: LogLine[]) => void,
     _onClosed: (reason: string) => void,
   ): Promise<LogHandle> {
+    // In "all" mode (container === "") tag each line with a rotating container name.
+    const pod = MOCK_PODS.find((p) => p.name === ref.name);
+    const containers = pod?.containers ?? ["app"];
+    const tag = () =>
+      container === "" ? containers[Math.floor(Math.random() * containers.length)] : container;
+    const withTag = (lines: LogLine[]) => lines.map((l) => ({ ...l, container: tag() }));
+
     // Seed with history immediately, then tick a new line every LOG_TICK_MS.
-    onLines(seedLogLines(ref.name));
+    onLines(withTag(seedLogLines(ref.name)));
     const timer = setInterval(() => {
-      onLines([makeLogLine(ref.name)]);
+      onLines(withTag([makeLogLine(ref.name)]));
     }, LOG_TICK_MS);
 
     return {
