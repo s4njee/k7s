@@ -30,6 +30,10 @@ npm install
 # no cluster or Rust build needed. Best for UI work / pixel comparison.
 VITE_DEMO=1 npm run dev        # → http://localhost:1420
 
+# Same, but with the pods table padded out to 5000 synthetic rows — the fixture
+# for checking that large tables still scroll smoothly (B21).
+VITE_DEMO=1 VITE_STRESS=5000 npm run dev
+
 # Real app — Rust backend + webview against your current kubeconfig context.
 npm run tauri:dev
 ```

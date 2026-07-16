@@ -3,9 +3,13 @@
  * the kind's metadata; rows come from the store and are namespace-filtered,
  * metrics-overlaid (pods/nodes), and tone-colored. Rows open the detail panel on
  * click, except the read-only Events feed (B14).
+ *
+ * Large tables render only the rows near the viewport (B21). Filtering, metrics
+ * overlay and sorting all still run over the full dataset — only what reaches the
+ * DOM is windowed. See `VIRTUAL_THRESHOLD` for why small tables opt out entirely.
  */
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./ResourceTable.module.css";
 import { rowsFor, useStore } from "../../store";
 import { useNow } from "../../hooks/useNow";
@@ -14,6 +18,7 @@ import { toneColor } from "../../lib/tone";
 import { formatAge, formatCpu, formatMem } from "../../lib/format";
 import { isClusterScoped, kindMeta, type KindId } from "../../lib/kinds";
 import { sortRows } from "../../lib/sort";
+import { rowWindow, scrollToShow, type RowWindow } from "../../lib/virtual";
 import type { Cell, NodeMetricsMap, PodMetricsMap, Row } from "../../providers/types";
 
 export function ResourceTable() {
@@ -85,6 +90,26 @@ export function ResourceTable() {
   const filterRef = useRef<HTMLInputElement>(null);
   const highlight = useTableKeys(rows, onSelect, () => filterRef.current?.focus(), nav);
 
+  // Windowing (B21). Sorting/filtering above still run over the full dataset;
+  // only what reaches the DOM is trimmed.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const { virtual, window: win } = useVirtualRows(scrollRef, rows.length);
+  const visible = virtual ? rows.slice(win.start, win.end) : rows;
+
+  // Keep the keyboard highlight on screen. Virtualized rows may not exist in the
+  // DOM at all, so the position is computed rather than scrollIntoView'd.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || highlight < 0) return;
+    if (virtual) {
+      const to = scrollToShow(highlight, el.scrollTop, el.clientHeight, ROW_HEIGHT, headerHeight(el));
+      if (to !== null) el.scrollTop = to;
+    } else {
+      // Natural row heights here, so let the browser measure it.
+      el.querySelector(`[data-row-index="${highlight}"]`)?.scrollIntoView({ block: "nearest" });
+    }
+  }, [highlight, virtual]);
+
   return (
     <div className={styles.container}>
       <div className={styles.toolbar}>
@@ -100,8 +125,8 @@ export function ResourceTable() {
           />
         </div>
       </div>
-      <div className={styles.wrap}>
-        <table className={styles.table}>
+      <div className={styles.wrap} ref={scrollRef}>
+        <table className={`${styles.table} ${virtual ? styles.tableFixed : ""}`}>
         <thead>
           <tr>
             {columns.map((col, i) => (
@@ -115,33 +140,114 @@ export function ResourceTable() {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => {
+          {/* Spacers stand in for the rows outside the window, so the scrollbar
+              reflects the whole list rather than what's rendered. */}
+          {win.padTop > 0 && <tr style={{ height: win.padTop }} />}
+          {visible.map((row, i) => {
+            const index = virtual ? win.start + i : i;
             const selected = row.uid === selectedUid;
             return (
               <tr
                 key={row.uid}
+                data-row-index={index}
                 className={[
                   styles.row,
+                  virtual ? styles.rowFixed : "",
                   clickable ? styles.rowClickable : "",
                   selected ? styles.rowSelected : "",
-                  i === highlight ? styles.rowHighlight : "",
+                  index === highlight ? styles.rowHighlight : "",
                 ].join(" ")}
                 onClick={() => onSelect(row)}
               >
-                {row.cells.map((cell, i) => (
-                  <td key={i} className={styles.td} style={{ color: toneColor(cell.tone) }}>
+                {row.cells.map((cell, j) => (
+                  <td key={j} className={styles.td} style={{ color: toneColor(cell.tone) }}>
                     {renderCell(cell, now)}
                   </td>
                 ))}
               </tr>
             );
           })}
+          {win.padBottom > 0 && <tr style={{ height: win.padBottom }} />}
         </tbody>
         </table>
         {rows.length === 0 && <div className={styles.empty}>no resources match filter</div>}
       </div>
     </div>
   );
+}
+
+/**
+ * Row height used by the windowing math, enforced by `.rowFixed` (B21). The
+ * design's rows are 28px; virtualized rows are pinned to exactly that so the
+ * spacer arithmetic can't drift out of step with the real layout.
+ */
+const ROW_HEIGHT = 28;
+
+/** Rows kept beyond each edge of the viewport, so fast scrolling stays filled. */
+const OVERSCAN = 20;
+
+/**
+ * Row count above which the table windows its rendering.
+ *
+ * Below it, every row is rendered exactly as before — which is what keeps the
+ * table pixel-identical at ordinary cluster sizes (freya's largest kind is 71
+ * rows). That matters because windowing forces `table-layout: fixed`: with the
+ * default auto layout, column widths are computed from the *rendered* rows, so a
+ * windowed table would visibly re-jig its columns as you scrolled.
+ */
+const VIRTUAL_THRESHOLD = 200;
+
+/** The sticky header's height, so a row isn't scrolled to sit behind it. */
+function headerHeight(scrollEl: HTMLElement): number {
+  return scrollEl.querySelector("thead")?.getBoundingClientRect().height ?? 0;
+}
+
+/**
+ * Track scroll position and viewport height, and derive the row window from them.
+ * Returns `virtual: false` for lists short enough to render whole.
+ */
+function useVirtualRows(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  total: number,
+): { virtual: boolean; window: RowWindow } {
+  const virtual = total > VIRTUAL_THRESHOLD;
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportH, setViewportH] = useState(0);
+
+  // A ref, so the scroll handler doesn't have to be re-attached when it flips.
+  const virtualRef = useRef(virtual);
+  virtualRef.current = virtual;
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const onScroll = () => {
+      // Short lists render whole; re-rendering them on every scroll event would
+      // be pure waste.
+      if (virtualRef.current) setScrollTop(el.scrollTop);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+
+    const ro = new ResizeObserver(() => setViewportH(el.clientHeight));
+    ro.observe(el);
+    setViewportH(el.clientHeight);
+
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      ro.disconnect();
+    };
+  }, [scrollRef]);
+
+  const window = useMemo(
+    () =>
+      virtual
+        ? rowWindow(total, scrollTop, viewportH, ROW_HEIGHT, OVERSCAN)
+        : { start: 0, end: total, padTop: 0, padBottom: 0 },
+    [virtual, total, scrollTop, viewportH],
+  );
+
+  return { virtual, window };
 }
 
 /** Render a cell's text: format age timestamps, prefix a status dot when set. */

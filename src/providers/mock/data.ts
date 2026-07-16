@@ -142,7 +142,7 @@ export function statusTone(status: string): Tone {
 
 /** Build the Pods table rows with the prototype's exact per-cell coloring. */
 export function buildPodRows(): Row[] {
-  return MOCK_PODS.map((p) => {
+  return stressPods(MOCK_PODS).map((p) => {
     // READY "a/b" is amber when not all containers are ready (a===0 or a!==b).
     const readyDegraded = p.ready[0] === "0" || p.ready[0] !== p.ready[2];
     const meta: PodMeta = {
@@ -288,6 +288,27 @@ export function buildCustomRows(id: string): Row[] {
     cells.push({ text: age, tone: "muted" });
     return { uid: `${id}:${ns}/${name}`, name, namespace: ns === "" ? undefined : ns, cells };
   });
+}
+
+/**
+ * Table-virtualization fixture (B21): with `VITE_STRESS=<n>` set, pad the pod list
+ * out to n synthetic pods so the windowed path can actually be scrolled and
+ * measured. There's no honest way to check a 5k-row table stays smooth without a
+ * 5k-row table. Off by default, and demo-only.
+ */
+function stressPods(pods: MockPod[]): MockPod[] {
+  const want = Number(import.meta.env.VITE_STRESS ?? 0);
+  if (!Number.isFinite(want) || want <= pods.length) return pods;
+
+  const out = pods.slice();
+  // Cycle the real pods so the synthetic rows keep a realistic spread of
+  // statuses, restart counts and name lengths (which is what column layout and
+  // tone rendering actually cost).
+  for (let i = pods.length; i < want; i++) {
+    const base = pods[i % pods.length];
+    out.push({ ...base, name: `${base.name}-${String(i).padStart(5, "0")}` });
+  }
+  return out;
 }
 
 /** Build rows for a non-pod kind from MOCK_RESOURCES with the prototype's coloring. */

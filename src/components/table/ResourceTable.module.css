@@ -82,8 +82,25 @@
   color: var(--accent);
 }
 
+/* Windowed tables only (B21): with the default auto layout, column widths are
+   derived from the rendered rows, so they'd visibly re-jig as you scrolled a
+   windowed table. Small tables keep auto layout and are unaffected. */
+.tableFixed {
+  table-layout: fixed;
+}
+.tableFixed .td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .row {
   background: transparent;
+}
+
+/* Pins windowed rows to exactly the height the spacer math assumes (ROW_HEIGHT).
+   A row even a pixel off would drift the window out of step with the scrollbar. */
+.rowFixed {
+  height: 28px;
 }
 /* Row hover uses #17171a (the control background, per Design §3). */
 .rowClickable {

@@ -181,9 +181,21 @@ bundled locally): fixed row height (design rows are 28px), overscan ~20, sticky
 header preserved, keyboard highlight (B10) keeps the highlighted row scrolled
 into view. Ensure sorting/filtering still operate on the full dataset.
 
-**Accept:**
-- [ ] A synthetic 5k-row mock kind scrolls at 60fps with j/k navigation working;
-      no visual change at freya's scale.
+**Accept:** *(shipped — the fps claim needs your eyes)*
+- [x] A synthetic 5k-row mock kind exists to test against:
+      `VITE_DEMO=1 VITE_STRESS=5000 npm run dev` pads the mock pods list to 5000.
+- [x] j/k navigation works and keeps the highlight on screen (computed for
+      windowed rows, which may not be in the DOM at all).
+- [x] No visual change at freya's scale: tables under 200 rows render exactly as
+      before, windowing off. That threshold isn't just caution — windowing forces
+      `table-layout: fixed`, since auto layout sizes columns from the *rendered*
+      rows and would re-jig them as you scroll.
+- [ ] **Not measured:** the 60fps claim. The windowing math is unit-tested
+      (`src/lib/virtual.test.ts`), but frame rate needs the app in front of you.
+
+*Note: no dependency added — with a fixed row height the windowing is ~40 lines,
+and `@tanstack/react-virtual` assumes absolute positioning that a `<table>` with
+a sticky header doesn't give for free.*
 
 ## P2 — quality of life
 
