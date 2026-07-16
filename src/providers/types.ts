@@ -9,7 +9,11 @@
  * whole UI can run against mock data for pixel-fidelity work without a cluster.
  */
 
-/** The twelve Kubernetes resource kinds the app navigates. */
+/**
+ * The Kubernetes resource kinds the app navigates. "events" is a read-only
+ * cluster-wide feed rather than a managed resource (B14), but it rides the same
+ * row/table plumbing as the rest.
+ */
 export type ResourceKind =
   | "pods"
   | "deployments"
@@ -22,7 +26,8 @@ export type ResourceKind =
   | "configmaps"
   | "secrets"
   | "nodes"
-  | "namespaces";
+  | "namespaces"
+  | "events";
 
 /**
  * The one coloring channel exposed by providers. The backend decides semantics

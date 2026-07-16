@@ -42,6 +42,11 @@ pub struct Cell {
     /// k8s-style age and re-renders it on a tick.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<&'static str>,
+    /// Optional numeric sort key for columns whose text isn't comparable
+    /// (mirrors the frontend `Cell.sort`). Also used for backend-side default
+    /// ordering, e.g. the Events feed sorts by last-seen epoch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<f64>,
 }
 
 /// serde skip helper (serialize `dot` only when true).
@@ -53,12 +58,12 @@ fn is_false(b: &bool) -> bool {
 impl Cell {
     /// A plain text cell with a tone.
     pub fn new(text: impl Into<String>, tone: Tone) -> Self {
-        Cell { text: text.into(), tone, dot: false, format: None }
+        Cell { text: text.into(), tone, dot: false, format: None, sort: None }
     }
 
     /// A status cell: tone + a leading colored dot.
     pub fn status(text: impl Into<String>, tone: Tone) -> Self {
-        Cell { text: text.into(), tone, dot: true, format: None }
+        Cell { text: text.into(), tone, dot: true, format: None, sort: None }
     }
 
     /// An age cell carrying an RFC3339 timestamp for the frontend to format.
@@ -70,9 +75,16 @@ impl Cell {
                 tone: Tone::Muted,
                 dot: false,
                 format: Some("age"),
+                sort: None,
             },
             _ => Cell::new("—", Tone::Muted),
         }
+    }
+
+    /// Attach a numeric sort key (builder style).
+    pub fn with_sort(mut self, key: f64) -> Self {
+        self.sort = Some(key);
+        self
     }
 }
 

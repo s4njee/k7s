@@ -1,8 +1,8 @@
 /**
- * The generic resource table (Design §3), used for all twelve kinds. Columns come
- * from the kind's metadata; rows come from the store and are namespace-filtered,
- * metrics-overlaid (pods/nodes), and tone-colored. Pod rows are clickable and open
- * the detail panel; other kinds are not interactive.
+ * The generic resource table (Design §3), used for every kind. Columns come from
+ * the kind's metadata; rows come from the store and are namespace-filtered,
+ * metrics-overlaid (pods/nodes), and tone-colored. Rows open the detail panel on
+ * click, except the read-only Events feed (B14).
  */
 
 import { useMemo, useRef } from "react";
@@ -37,17 +37,29 @@ export function ResourceTable() {
 
   const columns = KIND_META[nav].columns;
 
-  // Namespace filter (cluster-scoped kinds ignore it), name filter, metrics overlay,
-  // then optional column sort. When no column is chosen, server order is preserved.
+  // The Events feed is a read-only view (B14): rows have no detail panel, so they
+  // neither select on click nor on Enter.
+  const clickable = nav !== "events";
+  const onSelect = clickable ? selectRow : () => {};
+
+  // Namespace filter (cluster-scoped kinds ignore it), text filter, metrics overlay,
+  // then optional column sort. When no column is chosen, server order is preserved
+  // (which is what orders the Events feed — Warnings first, then newest).
   const rows = useMemo(() => {
     const q = tableFilter.trim().toLowerCase();
     const filtered = allRows.filter((r) => {
-      // Namespace filter — cluster-scoped kinds ignore it.
+      // Namespace filter — cluster-scoped kinds ignore it. Events are namespaced
+      // (despite living in the Cluster nav group), so the filter narrows them.
       if (!CLUSTER_SCOPED.has(nav) && namespace !== "all" && r.namespace !== namespace) {
         return false;
       }
-      // Name filter (case-insensitive substring).
-      return !q || r.name.toLowerCase().includes(q);
+      if (!q) return true;
+      // Text filter: name substring for real resources. An event's name is an
+      // opaque id ("my-pod.17c3f…"), so match its cells instead — that's what
+      // makes filtering by reason/object/message work.
+      return nav === "events"
+        ? r.cells.some((c) => c.text.toLowerCase().includes(q))
+        : r.name.toLowerCase().includes(q);
     });
     const overlaid = overlayMetrics(nav, filtered, podMetrics, nodeMetrics, podRows);
     return sortCol === null ? overlaid : sortRows(overlaid, sortCol, sortDir, now);
@@ -55,7 +67,7 @@ export function ResourceTable() {
 
   // Keyboard navigation: highlighted row index + `/`-to-focus the filter.
   const filterRef = useRef<HTMLInputElement>(null);
-  const highlight = useTableKeys(rows, selectRow, () => filterRef.current?.focus(), nav);
+  const highlight = useTableKeys(rows, onSelect, () => filterRef.current?.focus(), nav);
 
   return (
     <div className={styles.container}>
@@ -94,11 +106,11 @@ export function ResourceTable() {
                 key={row.uid}
                 className={[
                   styles.row,
-                  styles.rowClickable,
+                  clickable ? styles.rowClickable : "",
                   selected ? styles.rowSelected : "",
                   i === highlight ? styles.rowHighlight : "",
                 ].join(" ")}
-                onClick={() => selectRow(row)}
+                onClick={() => onSelect(row)}
               >
                 {row.cells.map((cell, i) => (
                   <td key={i} className={styles.td} style={{ color: toneColor(cell.tone) }}>

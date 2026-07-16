@@ -37,6 +37,8 @@ pub enum ResourceKind {
     Secrets,
     Nodes,
     Namespaces,
+    /// Cluster-wide event feed (B14) — a read-only view, not a managed resource.
+    Events,
 }
 
 impl ResourceKind {
@@ -55,6 +57,7 @@ impl ResourceKind {
             ResourceKind::Secrets => "secrets",
             ResourceKind::Nodes => "nodes",
             ResourceKind::Namespaces => "namespaces",
+            ResourceKind::Events => "events",
         }
     }
 }

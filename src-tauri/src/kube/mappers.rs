@@ -468,6 +468,74 @@ pub fn map_namespace(ns: &Namespace) -> Row {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Events (cluster-wide feed, B14)
+// ---------------------------------------------------------------------------
+
+/// Events: TYPE, REASON, OBJECT, NAMESPACE, AGE, COUNT, MESSAGE.
+///
+/// The AGE cell carries a last-seen epoch as its sort key, which the watcher's
+/// post-processing uses to order the feed (Warnings first, then newest).
+pub fn map_event(e: &k8s_openapi::api::core::v1::Event) -> Row {
+    let type_ = e.type_.clone().unwrap_or_else(|| "Normal".into());
+    // Warning is the only tone that should draw the eye; Normal reads green.
+    let tone = if type_ == "Warning" { Tone::Bad } else { Tone::Good };
+
+    let last = event_last_seen(e);
+    let object = format!(
+        "{}/{}",
+        e.involved_object.kind.clone().unwrap_or_default(),
+        e.involved_object.name.clone().unwrap_or_default()
+    );
+
+    let cells = vec![
+        Cell::new(&type_, tone),
+        Cell::new(e.reason.clone().unwrap_or_default(), Tone::Primary),
+        Cell::new(object, Tone::Secondary),
+        Cell::new(e.namespace().unwrap_or_default(), Tone::Muted),
+        // Age from last-seen (not creation): events repeat and update lastTimestamp.
+        Cell::age(Some(last.to_rfc3339())).with_sort(last.timestamp_millis() as f64),
+        Cell::new(format!("×{}", e.count.unwrap_or(1)), Tone::Secondary),
+        Cell::new(e.message.clone().unwrap_or_default(), Tone::Secondary),
+    ];
+
+    Row {
+        uid: uid_of(e),
+        name: e.name_any(),
+        namespace: e.namespace(),
+        cells,
+        pod: None,
+    }
+}
+
+/// Best "last seen" time for an event: lastTimestamp, else eventTime, else creation.
+fn event_last_seen(e: &k8s_openapi::api::core::v1::Event) -> chrono::DateTime<chrono::Utc> {
+    if let Some(t) = &e.last_timestamp {
+        return t.0;
+    }
+    if let Some(t) = &e.event_time {
+        return t.0;
+    }
+    e.creation_timestamp()
+        .map(|t| t.0)
+        .unwrap_or_else(chrono::Utc::now)
+}
+
+/// Order the events feed: Warnings first, then most-recent first, capped.
+/// Applied to the whole snapshot by the events watcher before emitting.
+pub fn sort_events(mut rows: Vec<Row>, cap: usize) -> Vec<Row> {
+    rows.sort_by(|a, b| {
+        let warn = |r: &Row| r.cells.first().map(|c| c.text == "Warning").unwrap_or(false);
+        let seen = |r: &Row| r.cells.get(4).and_then(|c| c.sort).unwrap_or(0.0);
+        // Warnings before Normals, then newest first.
+        warn(b)
+            .cmp(&warn(a))
+            .then(seen(b).partial_cmp(&seen(a)).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    rows.truncate(cap);
+    rows
+}
+
 /// Build a namespaced Row from prebuilt cells (shared by the simple kinds).
 fn simple_row<K: ResourceExt>(obj: &K, cells: Vec<Cell>) -> Row {
     Row {
@@ -582,5 +650,84 @@ mod tests {
         assert!(row.cells[1].dot);
         assert_eq!(row.cells[2].text, "worker");
         assert_eq!(row.cells[5].text, "v1.31.2");
+    }
+
+    // ---- Events feed (B14) ----
+
+    /// Build an Event with a given type/reason and last-seen time.
+    fn event(type_: &str, reason: &str, last: &str) -> k8s_openapi::api::core::v1::Event {
+        serde_json::from_value(json!({
+            "metadata": { "name": format!("obj.{reason}"), "namespace": "prod", "uid": reason },
+            "type": type_,
+            "reason": reason,
+            "count": 3,
+            "message": "something happened",
+            "lastTimestamp": last,
+            "involvedObject": { "kind": "Pod", "name": "my-pod", "namespace": "prod" },
+        }))
+        .unwrap()
+    }
+
+    /// Columns TYPE, REASON, OBJECT, NAMESPACE, AGE, COUNT, MESSAGE; Warning tones red.
+    #[test]
+    fn warning_event_columns() {
+        let row = map_event(&event("Warning", "FailedMount", "2026-07-16T09:00:00Z"));
+        assert_eq!(row.cells[0].text, "Warning");
+        assert_eq!(row.cells[0].tone, Tone::Bad);
+        assert_eq!(row.cells[1].text, "FailedMount");
+        assert_eq!(row.cells[2].text, "Pod/my-pod", "OBJECT is kind/name");
+        assert_eq!(row.cells[3].text, "prod");
+        assert_eq!(row.cells[4].format, Some("age"), "AGE is formatted by the frontend");
+        assert!(row.cells[4].sort.is_some(), "AGE carries the last-seen sort key");
+        assert_eq!(row.cells[5].text, "×3");
+    }
+
+    /// Normal events read green.
+    #[test]
+    fn normal_event_tone() {
+        let row = map_event(&event("Normal", "Pulled", "2026-07-16T09:00:00Z"));
+        assert_eq!(row.cells[0].tone, Tone::Good);
+    }
+
+    /// The feed puts every Warning above every Normal, and newest first within each.
+    #[test]
+    fn feed_orders_warnings_then_newest() {
+        let rows = vec![
+            map_event(&event("Normal", "NewNormal", "2026-07-16T09:00:00Z")),
+            map_event(&event("Warning", "OldWarn", "2026-07-16T08:00:00Z")),
+            map_event(&event("Normal", "OldNormal", "2026-07-16T07:00:00Z")),
+            map_event(&event("Warning", "NewWarn", "2026-07-16T08:30:00Z")),
+        ];
+        let sorted = sort_events(rows, 500);
+        let reasons: Vec<&str> = sorted.iter().map(|r| r.cells[1].text.as_str()).collect();
+        assert_eq!(reasons, ["NewWarn", "OldWarn", "NewNormal", "OldNormal"]);
+    }
+
+    /// The cap bounds the payload, keeping the highest-priority rows.
+    #[test]
+    fn feed_truncates_to_cap() {
+        let rows = vec![
+            map_event(&event("Warning", "Keep", "2026-07-16T09:00:00Z")),
+            map_event(&event("Normal", "Drop", "2026-07-16T08:00:00Z")),
+        ];
+        let sorted = sort_events(rows, 1);
+        assert_eq!(sorted.len(), 1);
+        assert_eq!(sorted[0].cells[1].text, "Keep");
+    }
+
+    /// lastTimestamp is preferred, but events that only carry eventTime still sort.
+    #[test]
+    fn event_time_fallback() {
+        let e: k8s_openapi::api::core::v1::Event = serde_json::from_value(json!({
+            "metadata": { "name": "e", "namespace": "prod", "uid": "u" },
+            "type": "Normal",
+            "reason": "Started",
+            "eventTime": "2026-07-16T09:00:00.000000Z",
+            "involvedObject": { "kind": "Pod", "name": "p" },
+        }))
+        .unwrap();
+        let row = map_event(&e);
+        assert!(row.cells[4].sort.is_some());
+        assert_eq!(row.cells[5].text, "×1", "missing count defaults to 1");
     }
 }

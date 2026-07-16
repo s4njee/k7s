@@ -169,9 +169,55 @@ export function buildPodRows(): Row[] {
   });
 }
 
+/**
+ * The demo events feed (B14), already in the order the real backend emits:
+ * Warnings first, then newest. Mirrors the warnings the mock pods imply
+ * (heimdall-auth crash-looping, the canary unschedulable).
+ */
+const MOCK_EVENTS: {
+  type: "Warning" | "Normal";
+  reason: string;
+  object: string;
+  ns: string;
+  age: string;
+  count: number;
+  message: string;
+}[] = [
+  { type: "Warning", reason: "BackOff", object: "Pod/heimdall-auth-7d9f4-x2k1", ns: "prod", age: "12s", count: 41, message: "Back-off restarting failed container auth in pod heimdall-auth-7d9f4-x2k1" },
+  { type: "Warning", reason: "FailedScheduling", object: "Pod/valkyrie-api-canary-5b8-qq7z", ns: "staging", age: "38s", count: 9, message: "0/6 nodes are available: 6 Insufficient memory. preemption: 0/6 nodes are available." },
+  { type: "Warning", reason: "Unhealthy", object: "Pod/heimdall-auth-7d9f4-x2k1", ns: "prod", age: "1m", count: 23, message: "Readiness probe failed: HTTP probe failed with statuscode: 503" },
+  { type: "Warning", reason: "FailedMount", object: "Pod/report-gen-28661-lx4d", ns: "prod", age: "6h", count: 2, message: "MountVolume.SetUp failed for volume \"reports\": timed out waiting for the condition" },
+  { type: "Normal", reason: "Scheduled", object: "Pod/valkyrie-api-6c8d9-mn4p", ns: "prod", age: "4m", count: 1, message: "Successfully assigned prod/valkyrie-api-6c8d9-mn4p to freya-node-02" },
+  { type: "Normal", reason: "Pulled", object: "Pod/valkyrie-api-6c8d9-mn4p", ns: "prod", age: "4m", count: 1, message: "Container image \"registry.freya.io/valkyrie-api:2.14.0\" already present on machine" },
+  { type: "Normal", reason: "Created", object: "Pod/valkyrie-api-6c8d9-mn4p", ns: "prod", age: "4m", count: 1, message: "Created container api" },
+  { type: "Normal", reason: "Started", object: "Pod/valkyrie-api-6c8d9-mn4p", ns: "prod", age: "4m", count: 1, message: "Started container api" },
+  { type: "Normal", reason: "SuccessfulCreate", object: "Job/report-gen-28661", ns: "prod", age: "6h", count: 1, message: "Created pod: report-gen-28661-lx4d" },
+  { type: "Normal", reason: "ScalingReplicaSet", object: "Deployment/valkyrie-api", ns: "prod", age: "4d2h", count: 1, message: "Scaled up replica set valkyrie-api-6c8d9 to 2" },
+];
+
+/** Build the demo events feed. Events have no NAME column, so they skip the generic builder. */
+function buildEventRows(): Row[] {
+  return MOCK_EVENTS.map((e, i) => ({
+    // Synthetic id in the shape k8s uses for event names.
+    uid: `event:${e.ns}/${e.object}.${i}`,
+    name: `${e.object.split("/")[1]}.17c3f${i}`,
+    namespace: e.ns,
+    cells: [
+      { text: e.type, tone: e.type === "Warning" ? "err" : "ok" },
+      { text: e.reason, tone: "primary" },
+      { text: e.object, tone: "secondary" },
+      { text: e.ns, tone: "muted" },
+      { text: e.age, tone: "muted" },
+      { text: `×${e.count}`, tone: "secondary" },
+      { text: e.message, tone: "secondary" },
+    ],
+  }));
+}
+
 /** Build rows for a non-pod kind from MOCK_RESOURCES with the prototype's coloring. */
 export function buildKindRows(kind: ResourceKind): Row[] {
   if (kind === "pods") return buildPodRows();
+  if (kind === "events") return buildEventRows();
   const raw = MOCK_RESOURCES[kind] ?? [];
   const hasNamespaceCol = KIND_META[kind].columns[1] === "NAMESPACE";
 

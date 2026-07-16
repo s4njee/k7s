@@ -6,7 +6,9 @@
 
 mod commands;
 mod error;
-mod kube;
+// Public so the live verification harnesses in examples/ can exercise the real
+// mappers rather than a copy of them; nothing outside this crate consumes it.
+pub mod kube;
 
 pub use error::{AppError, AppResult};
 

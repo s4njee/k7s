@@ -35,7 +35,15 @@ export function EventsTab() {
     return <div className={styles.empty}>loading events…</div>;
   }
   if (events.length === 0) {
-    return <div className={styles.empty}>no events</div>;
+    // Empty is the normal case for a healthy, long-running object: the API server
+    // drops events after ~1h, so silence here means "nothing lately", not "never".
+    // Say so, and point at the cluster feed which is where problems surface (B14).
+    return (
+      <div className={styles.empty}>
+        no recent events — events expire after ~1h
+        <div className={styles.emptyHint}>see Cluster → Events for the live feed</div>
+      </div>
+    );
   }
 
   return (

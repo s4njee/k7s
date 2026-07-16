@@ -1,5 +1,5 @@
 /**
- * Static metadata for the twelve resource kinds: nav group, display label, glyph
+ * Static metadata for each resource kind: nav group, display label, glyph
  * icon, and the exact column set (order + labels) for each kind's table.
  *
  * This is the *column contract*: the Rust DTO layer (and the MockProvider) must
@@ -113,6 +113,15 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     label: "Namespaces",
     icon: "◫",
     columns: ["NAME", "STATUS", "PODS", "AGE"],
+  },
+  // A read-only feed rather than a managed resource, but it lives in the Cluster
+  // group because it is cluster-wide. It *is* namespaced, so it keeps a NAMESPACE
+  // column and honours the namespace filter.
+  events: {
+    group: "cluster",
+    label: "Events",
+    icon: "☲",
+    columns: ["TYPE", "REASON", "OBJECT", "NAMESPACE", "AGE", "COUNT", "MESSAGE"],
   },
 };
 
