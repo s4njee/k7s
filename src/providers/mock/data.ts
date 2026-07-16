@@ -311,10 +311,46 @@ function stressPods(pods: MockPod[]): MockPod[] {
   return out;
 }
 
+/**
+ * Demo Helm releases (B26). Column order matches the backend's `map_release`:
+ * NAME, NAMESPACE, CHART, APP VERSION, REVISION, STATUS, UPDATED.
+ *
+ * Includes a `failed` and a `pending-upgrade` release: the statuses worth seeing
+ * are the ones that aren't `deployed`.
+ */
+const MOCK_HELM: [string, string, string, string, number, string, string][] = [
+  ["traefik", "kube-system", "traefik-27.0.2", "v3.0.0", 3, "deployed", "31d"],
+  ["prometheus", "monitoring", "kube-prometheus-stack-58.2.1", "v0.73.2", 7, "deployed", "18d"],
+  ["grafana", "monitoring", "grafana-7.3.9", "10.4.1", 2, "deployed", "31d"],
+  ["valkyrie", "prod", "valkyrie-1.4.0", "2.14.0", 12, "pending-upgrade", "4m"],
+  ["heimdall", "prod", "heimdall-0.9.1", "1.2.0", 5, "failed", "2h14m"],
+];
+
+/** Build rows for the demo Helm releases. */
+function buildHelmRows(): Row[] {
+  const tone = (s: string): Tone =>
+    s === "deployed" ? "ok" : s === "failed" ? "err" : s === "superseded" ? "muted" : "warn";
+  return MOCK_HELM.map(([name, ns, chart, appVersion, revision, status, updated]) => ({
+    uid: `helm:${ns}/${name}`,
+    name,
+    namespace: ns,
+    cells: [
+      { text: name, tone: "primary" },
+      { text: ns, tone: "muted" },
+      { text: chart, tone: "secondary" },
+      { text: appVersion, tone: "secondary" },
+      { text: String(revision), tone: "secondary", sort: revision },
+      { text: status, tone: tone(status), dot: true },
+      { text: updated, tone: "muted" },
+    ],
+  }));
+}
+
 /** Build rows for a non-pod kind from MOCK_RESOURCES with the prototype's coloring. */
 export function buildKindRows(kind: ResourceKind): Row[] {
   if (kind === "pods") return buildPodRows();
   if (kind === "events") return buildEventRows();
+  if (kind === "helm") return buildHelmRows();
   const raw = MOCK_RESOURCES[kind] ?? [];
   const hasNamespaceCol = KIND_META[kind].columns[1] === "NAMESPACE";
 

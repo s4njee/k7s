@@ -13,7 +13,7 @@ import type { CustomKind, KindId, ResourceKind } from "../providers/types";
 export type { CustomKind, KindId, ResourceKind } from "../providers/types";
 
 /** Nav groups, in sidebar order. "custom" holds discovered CRD kinds (B15). */
-export type NavGroup = "workloads" | "network" | "config" | "cluster" | "custom";
+export type NavGroup = "workloads" | "network" | "config" | "cluster" | "helm" | "custom";
 
 /** Human-readable group headers (mono uppercase in the sidebar). */
 export const GROUP_LABELS: Record<NavGroup, string> = {
@@ -21,6 +21,7 @@ export const GROUP_LABELS: Record<NavGroup, string> = {
   network: "Network",
   config: "Config",
   cluster: "Cluster",
+  helm: "Helm",
   custom: "Custom",
 };
 
@@ -124,6 +125,16 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     icon: "☲",
     columns: ["TYPE", "REASON", "OBJECT", "NAMESPACE", "AGE", "COUNT", "MESSAGE"],
   },
+  // ---- Helm (B26) ----
+  // Its own group, as in Lens: a release isn't a Kubernetes kind, it's a thing
+  // Helm keeps *in* Kubernetes, and filing it under Config next to the Secrets it
+  // happens to be stored in would say the wrong thing about what it is.
+  helm: {
+    group: "helm",
+    label: "Releases",
+    icon: "⎈",
+    columns: ["NAME", "NAMESPACE", "CHART", "APP VERSION", "REVISION", "STATUS", "UPDATED"],
+  },
 };
 
 /** All built-in kinds in sidebar order (Pods → Events). */
@@ -133,7 +144,14 @@ export const KIND_ORDER = Object.keys(KIND_META) as ResourceKind[];
 const CLUSTER_SCOPED: ReadonlySet<string> = new Set<string>(["nodes", "namespaces"]);
 
 /** Groups in sidebar order. */
-export const GROUP_ORDER: NavGroup[] = ["workloads", "network", "config", "cluster", "custom"];
+export const GROUP_ORDER: NavGroup[] = [
+  "workloads",
+  "network",
+  "config",
+  "cluster",
+  "helm",
+  "custom",
+];
 
 /**
  * Kinds with a properties gatherer (B13, B18). Must match the `match` in

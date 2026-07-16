@@ -7,8 +7,8 @@ use crate::error::{AppError, AppResult};
 use crate::kube::client::{self, ClusterInfo, ContextInfo};
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
 use crate::kube::{
-    discovery, drain, exec, logs, mappers, metrics, portforward, properties, watchers,
-    ClientManager,
+    discovery, drain, exec, helm, logs, mappers, metrics, portforward, properties, watchers,
+    ClientManager, ResourceKind,
 };
 use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::core::v1::Event;
@@ -297,6 +297,31 @@ async fn dynamic_api(
     })
 }
 
+/// The rendered manifest of a Helm release, newest revision (B26).
+///
+/// Finds the release by label rather than reconstructing the Secret's name:
+/// `sh.helm.release.v1.<name>.v<revision>` requires knowing the revision, and the
+/// labels are what Helm itself queries on.
+async fn helm_manifest(client: kube::Client, namespace: &str, name: &str) -> AppResult<String> {
+    let api: Api<k8s_openapi::api::core::v1::Secret> = Api::namespaced(client, namespace);
+    let lp = ListParams::default()
+        .fields(&format!("type={}", helm::RELEASE_SECRET_TYPE))
+        .labels(&format!("name={name},owner=helm"));
+    let list = api.list(&lp).await?;
+
+    let latest = list
+        .items
+        .iter()
+        .filter_map(helm::decode_release)
+        .max_by_key(|r| r.revision)
+        .ok_or_else(|| AppError::NotFound(format!("helm release {name} not found in {namespace}")))?;
+
+    if latest.manifest.trim().is_empty() {
+        return Err(AppError::Other(format!("release {name} has no rendered manifest")));
+    }
+    Ok(latest.manifest)
+}
+
 /// Fetch an object's YAML for the detail panel (any kind). Strips
 /// `metadata.managedFields`; Secret values are redacted (see below).
 #[tauri::command]
@@ -307,6 +332,12 @@ pub async fn get_yaml(
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<String> {
     let client = require_client(&mgr).await?;
+    // A Helm release isn't an API object, so there's nothing to GET: its YAML is
+    // the manifest the chart rendered, which is what you actually want to read
+    // (B26). Secret values in it are already redacted by the decoder.
+    if kind == ResourceKind::Helm.id() {
+        return helm_manifest(client, &namespace, &name).await;
+    }
     let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
     let mut obj = api.get(&name).await?;
     // Drop server-managed noise before rendering.
@@ -342,6 +373,14 @@ pub async fn apply_yaml(
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<()> {
     let client = require_client(&mgr).await?;
+    // A Helm release's YAML is a *rendered* manifest, not an API object: applying
+    // it would bypass Helm and desync the release from what Helm believes it
+    // deployed. B26 is read-only by design.
+    if kind == ResourceKind::Helm.id() {
+        return Err(AppError::Other(
+            "Helm releases are read-only here — use `helm upgrade` to change one".into(),
+        ));
+    }
     // Secrets are shown redacted, so applying edits would clobber their real values
     // — disallow it (the UI also hides the Edit button for Secrets).
     if kind == "secrets" {

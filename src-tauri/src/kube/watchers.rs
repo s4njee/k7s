@@ -11,7 +11,7 @@
 //! uses it to order and cap a stream that can otherwise run to thousands of rows.
 
 use super::discovery::CustomKind;
-use super::{dto::Row, events, mappers, ClientManager, ResourceKind, ResourceUpdate};
+use super::{dto::Row, events, helm, mappers, ClientManager, ResourceKind, ResourceUpdate};
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
@@ -63,7 +63,12 @@ pub async fn spawn_all(mgr: &ClientManager, client: Client) -> usize {
     spawn::<Namespace>(mgr, &client, ResourceKind::Namespaces, mappers::map_namespace, identity).await;
     // Cluster-wide events feed: ordered Warnings-first/newest and capped (B14).
     spawn::<Event>(mgr, &client, ResourceKind::Events, mappers::map_event, events_order).await;
-    13
+    // Helm releases, decoded from their Secrets (B26).
+    let app = mgr.app();
+    let helm_client = client.clone();
+    let handle = tokio::spawn(async move { run_helm_watcher(helm_client, app).await });
+    mgr.push_task(handle).await;
+    14
 }
 
 /// Spawn one watcher task and register it with the manager.
@@ -124,7 +129,36 @@ async fn run_watcher<K>(
         .default_backoff()
         .boxed();
 
-    pump(reader, stream, app, kind.id().to_string(), map_fn, post_fn).await;
+    pump(reader, stream, app, kind.id().to_string(), |o| Some(map_fn(o)), post_fn).await;
+}
+
+/// Ordering/reduction for the Helm feed: newest revision per release (B26).
+fn helm_latest(rows: Vec<Row>) -> Vec<Row> {
+    helm::latest_only(rows)
+}
+
+/// Watch Helm releases (B26).
+///
+/// A second Secrets watch, field-selected to Helm's release type — the API server
+/// does the filtering, so this doesn't re-ship every Secret in the cluster just to
+/// throw most of them away. It's separate from the Secrets kind on purpose: that
+/// one redacts and lists Secrets as Secrets, while this one decodes them into
+/// something else entirely.
+async fn run_helm_watcher(client: Client, app: AppHandle) {
+    let api: Api<Secret> = Api::all(client);
+    let (reader, writer) = reflector::store::<Secret>();
+    let cfg = watcher::Config::default().fields(&format!("type={}", helm::RELEASE_SECRET_TYPE));
+    let stream = reflector(writer, watcher(api, cfg)).default_backoff().boxed();
+
+    pump(
+        reader,
+        stream,
+        app,
+        ResourceKind::Helm.id().to_string(),
+        helm::map_release,
+        helm_latest,
+    )
+    .await;
 }
 
 /// Spawn a watcher for a CRD-backed kind (B15), registered so it can be aborted
@@ -163,7 +197,8 @@ async fn run_custom_watcher(
         .boxed();
 
     // Generic columns only: a CRD's interesting fields live in an arbitrary schema.
-    pump(reader, stream, app, id, move |o| mappers::map_dynamic(o, namespaced), identity).await;
+    pump(reader, stream, app, id, move |o| Some(mappers::map_dynamic(o, namespaced)), identity)
+        .await;
 }
 
 /// The shared watch loop: coalesce watch events, then emit a full post-processed
@@ -174,7 +209,10 @@ async fn pump<K>(
     mut stream: BoxStream<'static, Result<watcher::Event<K>, watcher::Error>>,
     app: AppHandle,
     kind: String,
-    map_fn: impl Fn(&K) -> Row,
+    // Option, not Row: the Helm watcher (B26) sees Secrets it can't decode, and a
+    // watcher that must invent a row for every object it's handed would have to
+    // put junk in the table.
+    map_fn: impl Fn(&K) -> Option<Row>,
     post_fn: fn(Vec<Row>) -> Vec<Row>,
 ) where
     K: Lookup + Clone + 'static,
@@ -201,7 +239,8 @@ async fn pump<K>(
             _ = ticker.tick() => {
                 if dirty {
                     dirty = false;
-                    let rows: Vec<Row> = reader.state().iter().map(|o| map_fn(o.as_ref())).collect();
+                    let rows: Vec<Row> =
+                        reader.state().iter().filter_map(|o| map_fn(o.as_ref())).collect();
                     let rows = post_fn(rows);
                     // Emit failures are non-fatal (webview may be gone).
                     let _ = app.emit(

@@ -62,9 +62,12 @@ export function DetailPanel() {
   const isPod = !!meta;
   // Logs/Shell need a container, so they're pod-only. Properties shows only for
   // kinds with a gatherer — otherwise it'd be a tab that only ever errors (B18).
+  // A Helm release has no Kubernetes events of its own (B26): its YAML is the
+  // rendered manifest, and that's the whole detail there is.
   const tabs = ALL_TABS.filter((t) => {
     if (POD_ONLY_TABS.has(t.id)) return isPod;
     if (t.id === "properties") return KINDS_WITH_PROPERTIES.has(nav);
+    if (t.id === "events") return nav !== "helm";
     return true;
   });
   const statusColor = meta ? toneColor(meta.statusTone) : "var(--text-muted)";

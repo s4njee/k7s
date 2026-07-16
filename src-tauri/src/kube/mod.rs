@@ -9,6 +9,7 @@ pub mod discovery;
 pub mod drain;
 pub mod dto;
 pub mod exec;
+pub mod helm;
 pub mod logs;
 pub mod manager;
 pub mod mappers;
@@ -41,6 +42,8 @@ pub enum ResourceKind {
     Namespaces,
     /// Cluster-wide event feed (B14) — a read-only view, not a managed resource.
     Events,
+    /// Helm releases (B26) — decoded from Helm's release Secrets; read-only.
+    Helm,
 }
 
 impl ResourceKind {
@@ -60,6 +63,7 @@ impl ResourceKind {
             ResourceKind::Nodes => "nodes",
             ResourceKind::Namespaces => "namespaces",
             ResourceKind::Events => "events",
+            ResourceKind::Helm => "helm",
         }
     }
 }

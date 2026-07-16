@@ -285,6 +285,29 @@ Read-only v1 (no rollback). Detail shows the release's rendered manifest summary
 **Accept:** freya's traefik and any user charts list with correct
 chart/version/status; secrets remain redacted elsewhere.
 
+**Accept:** *(shipped)*
+- [x] freya's releases list with correct chart/version/status — verified with
+      `cargo run --example helm_check`: traefik (traefik-40.1.3+up40.1.0, v3.7.1,
+      deployed), traefik-crd, and both ARC releases.
+- [x] Read-only: no Delete action, and `apply_yaml` refuses — a release's YAML is
+      a rendered manifest, so applying it would bypass Helm and desync the
+      release from what Helm believes it deployed.
+- [x] Secrets remain redacted elsewhere, *and* here: a chart that renders a
+      Secret has its values redacted in the manifest view, since otherwise the
+      Secrets view's redaction is just a door with a window next to it.
+
+*Two traps in the storage format. **Every revision is its own Secret** — a release
+upgraded five times has v1…v5 — so the view reduces to newest-per-release, as
+`helm list` does; freya only has v1s, so that's covered by unit tests instead.
+And the value is **double base64'd**: Helm writes base64(gzip(json)), which
+Kubernetes then base64s again for transport. A test fixture that encodes only
+once tests a decoder no cluster will ever feed — which is exactly the bug the
+first draft of the tests had.*
+
+*Known rough edge: freya's traefik-crd renders a 1.4MB manifest. It loads, but
+the YAML tab is not virtualized (B21 only covers tables), so very large
+manifests may feel heavy.*
+
 ---
 
 ## Suggested order

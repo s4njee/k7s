@@ -35,7 +35,10 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
   useClickOutside(ref, () => close(), open);
 
   // Which actions apply to this kind.
-  const canDelete = kind !== "nodes" && kind !== "namespaces";
+  // Helm releases are read-only (B26): deleting the row would mean deleting a
+  // release's storage Secret behind Helm's back, which is not uninstalling it —
+  // it's corrupting it. `helm uninstall` is the only right way to do that.
+  const canDelete = kind !== "nodes" && kind !== "namespaces" && kind !== "helm";
   const canScale = kind === "deployments" || kind === "statefulsets";
   const canCordon = kind === "nodes";
   // Services forward via a resolved backing pod (B16).

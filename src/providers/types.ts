@@ -27,7 +27,8 @@ export type ResourceKind =
   | "secrets"
   | "nodes"
   | "namespaces"
-  | "events";
+  | "events"
+  | "helm";
 
 /**
  * A CRD-backed kind discovered on connect (B15).
