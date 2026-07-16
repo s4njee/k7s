@@ -186,6 +186,49 @@
   font-size: 11px;
   color: var(--text-faint);
 }
+
+/* ---------- Custom section: collapsible API-group rows (B15) ---------- */
+
+/* A foldable API group ("argoproj.io"). Sits between a section header and a nav
+   item in weight: it's clickable like an item, but names a group, not a kind. */
+.navGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 1px 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  /* Match .navItem's accent gutter so group rows and kind rows align. */
+  border-left: 2px solid transparent;
+}
+.navGroup:hover {
+  background: var(--bg-hover);
+}
+.navGroupChevron {
+  width: 14px;
+  flex: none;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.navGroupLabel {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  /* Group names are long ("gateway.networking.k8s.io"); clip rather than wrap. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A kind nested under its API group — indented to sit under the group's label,
+   and iconless (the group row carries the visual anchor). */
+.navItemNested {
+  padding-left: 28px;
+}
 .navItem {
   display: flex;
   align-items: center;
