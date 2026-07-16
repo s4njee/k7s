@@ -90,9 +90,16 @@
 }
 .chipKey {
   color: var(--text-muted);
+  white-space: nowrap;
 }
+/* Annotation values can be multi-KB (e.g. last-applied-configuration); truncate
+   so one blob can't blow out the panel. Full value is in the title tooltip. */
 .chipVal {
   color: var(--text-secondary);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Empty section note. */

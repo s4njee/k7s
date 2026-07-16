@@ -209,7 +209,7 @@ export function PropertiesTab() {
           <div className={styles.sectionHeader}>Labels</div>
           <div className={styles.chips}>
             {props.labels.map((l) => (
-              <span key={l.key} className={styles.chip}>
+              <span key={l.key} className={styles.chip} title={`${l.key}=${l.value}`}>
                 <span className={styles.chipKey}>{l.key}</span>
                 <span className={styles.chipVal}>{l.value}</span>
               </span>
@@ -222,7 +222,7 @@ export function PropertiesTab() {
           <div className={styles.sectionHeader}>Annotations</div>
           <div className={styles.chips}>
             {props.annotations.map((a) => (
-              <span key={a.key} className={styles.chip}>
+              <span key={a.key} className={styles.chip} title={`${a.key}=${a.value}`}>
                 <span className={styles.chipKey}>{a.key}</span>
                 <span className={styles.chipVal}>{a.value}</span>
               </span>
