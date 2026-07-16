@@ -536,6 +536,32 @@ pub fn sort_events(mut rows: Vec<Row>, cap: usize) -> Vec<Row> {
     rows
 }
 
+// ---------------------------------------------------------------------------
+// Custom / CRD-backed kinds (B15)
+// ---------------------------------------------------------------------------
+
+/// Generic columns for a CRD-backed object: NAME, NAMESPACE (namespaced kinds
+/// only), AGE.
+///
+/// A CRD's schema is arbitrary, so there is no meaningful status or ready column
+/// to derive without per-CRD knowledge; the YAML tab is where the detail lives.
+/// The column set must match `kinds.ts`'s generic custom columns.
+pub fn map_dynamic(o: &kube::core::DynamicObject, namespaced: bool) -> Row {
+    let mut cells = vec![Cell::new(o.name_any(), Tone::Primary)];
+    if namespaced {
+        cells.push(Cell::new(o.namespace().unwrap_or_default(), Tone::Muted));
+    }
+    cells.push(Cell::age(o.creation_timestamp().map(|t| t.0.to_rfc3339())));
+
+    Row {
+        uid: uid_of(o),
+        name: o.name_any(),
+        namespace: o.namespace(),
+        cells,
+        pod: None,
+    }
+}
+
 /// Build a namespaced Row from prebuilt cells (shared by the simple kinds).
 fn simple_row<K: ResourceExt>(obj: &K, cells: Vec<Cell>) -> Row {
     Row {

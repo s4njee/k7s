@@ -11,7 +11,7 @@ import { useEffect } from "react";
 import { getProvider, IS_DEMO } from "../providers";
 import { useStore } from "../store";
 import { connectTo } from "../lib/connect";
-import { KIND_META } from "../lib/kinds";
+import { isCustomKind, KIND_META } from "../lib/kinds";
 
 export function useBootstrap(): void {
   useEffect(() => {
@@ -24,6 +24,7 @@ export function useBootstrap(): void {
       setWatchCount,
       setConnection,
       setContexts,
+      setCustomKinds,
     } = useStore.getState();
 
     // Reconcile cluster-status into the connection lifecycle (Story 6.2): a live
@@ -53,6 +54,8 @@ export function useBootstrap(): void {
       provider.onNodeMetrics(setNodeMetrics),
       provider.onClusterStatus(onClusterStatus),
       provider.onWatchStatus(setWatchCount),
+      // CRD-backed kinds, re-emitted on every connect (B15).
+      provider.onCustomKinds(setCustomKinds),
     ];
 
     // Discover contexts, restore saved preferences, then connect (B11).
@@ -66,7 +69,12 @@ export function useBootstrap(): void {
         const prefs = await provider.loadPrefs();
         if (prefs) {
           const restore: Partial<ReturnType<typeof useStore.getState>> = {};
-          if (prefs.nav && prefs.nav in KIND_META) restore.nav = prefs.nav;
+          // Custom kinds aren't in KIND_META and aren't discovered yet at this
+          // point, so accept any custom-looking id; if this cluster turns out not
+          // to have that CRD, the table just renders empty (B15).
+          if (prefs.nav && (prefs.nav in KIND_META || isCustomKind(prefs.nav))) {
+            restore.nav = prefs.nav;
+          }
           if (typeof prefs.namespace === "string") restore.namespace = prefs.namespace;
           if (typeof prefs.showTimestamps === "boolean") restore.showTimestamps = prefs.showTimestamps;
           if (Object.keys(restore).length) useStore.setState(restore);

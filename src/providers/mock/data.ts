@@ -8,7 +8,7 @@
  * the prototype's exact per-cell coloring (tone) and status-dot rules.
  */
 
-import type { Cell, Row, PodMeta, Tone } from "../types";
+import type { Cell, CustomKind, Row, PodMeta, Tone } from "../types";
 import { KIND_META, type ResourceKind } from "../../lib/kinds";
 import { parseCpuMillis, parseMemBytes } from "../../lib/format";
 
@@ -212,6 +212,82 @@ function buildEventRows(): Row[] {
       { text: e.message, tone: "secondary" },
     ],
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Custom (CRD-backed) kinds — B15
+// ---------------------------------------------------------------------------
+
+/**
+ * Demo CRDs, chosen to mirror what a real cluster looks like: a namespaced kind,
+ * a second one from the same group, and a cluster-scoped one (no NAMESPACE column).
+ */
+export const MOCK_CUSTOM_KINDS: CustomKind[] = [
+  {
+    id: "argoproj.io/applications",
+    group: "argoproj.io",
+    version: "v1alpha1",
+    kind: "Application",
+    plural: "applications",
+    namespaced: true,
+  },
+  {
+    id: "argoproj.io/appprojects",
+    group: "argoproj.io",
+    version: "v1alpha1",
+    kind: "AppProject",
+    plural: "appprojects",
+    namespaced: true,
+  },
+  {
+    id: "traefik.io/ingressroutes",
+    group: "traefik.io",
+    version: "v1alpha1",
+    kind: "IngressRoute",
+    plural: "ingressroutes",
+    namespaced: true,
+  },
+  {
+    id: "cert-manager.io/clusterissuers",
+    group: "cert-manager.io",
+    version: "v1",
+    kind: "ClusterIssuer",
+    plural: "clusterissuers",
+    namespaced: false,
+  },
+];
+
+/** Demo objects per custom kind id: [name, namespace ("" = cluster-scoped), age]. */
+const MOCK_CUSTOM_ROWS: Record<string, [string, string, string][]> = {
+  "argoproj.io/applications": [
+    ["valkyrie", "argocd", "31d"],
+    ["bifrost", "argocd", "31d"],
+    ["observability", "argocd", "18d"],
+  ],
+  "argoproj.io/appprojects": [["default", "argocd", "31d"]],
+  "traefik.io/ingressroutes": [
+    ["api-public", "prod", "12d"],
+    ["grafana", "monitoring", "31d"],
+  ],
+  "cert-manager.io/clusterissuers": [
+    ["letsencrypt-prod", "", "31d"],
+    ["letsencrypt-staging", "", "31d"],
+  ],
+};
+
+/**
+ * Build rows for a custom kind. Columns are the generic NAME, NAMESPACE?, AGE —
+ * the same set the backend's `map_dynamic` emits.
+ */
+export function buildCustomRows(id: string): Row[] {
+  const ck = MOCK_CUSTOM_KINDS.find((k) => k.id === id);
+  const raw = MOCK_CUSTOM_ROWS[id] ?? [];
+  return raw.map(([name, ns, age]) => {
+    const cells: Cell[] = [{ text: name, tone: "primary" }];
+    if (ck?.namespaced) cells.push({ text: ns, tone: "muted" });
+    cells.push({ text: age, tone: "muted" });
+    return { uid: `${id}:${ns}/${name}`, name, namespace: ns === "" ? undefined : ns, cells };
+  });
 }
 
 /** Build rows for a non-pod kind from MOCK_RESOURCES with the prototype's coloring. */

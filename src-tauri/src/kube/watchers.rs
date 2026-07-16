@@ -10,17 +10,21 @@
 //! is emitted. Most kinds use [`identity`] (the frontend sorts); the Events feed
 //! uses it to order and cap a stream that can otherwise run to thousands of rows.
 
+use super::discovery::CustomKind;
 use super::{dto::Row, events, mappers, ClientManager, ResourceKind, ResourceUpdate};
+use futures::stream::BoxStream;
 use futures::StreamExt;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{ConfigMap, Event, Namespace, Node, Pod, Secret, Service};
 use k8s_openapi::api::networking::v1::Ingress;
+use kube::core::{ApiResource, DynamicObject};
 use kube::runtime::reflector::Lookup;
 use kube::runtime::{reflector, watcher, WatchStreamExt};
 use kube::{Api, Client, Resource};
 use serde::de::DeserializeOwned;
 use std::fmt::Debug;
+use std::hash::Hash;
 use tauri::{AppHandle, Emitter};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 
@@ -116,10 +120,66 @@ async fn run_watcher<K>(
     // reflector() writes every event into the store and passes it through; the
     // store therefore reflects adds *and* deletes. default_backoff() retries on
     // transient/permission errors instead of terminating the stream.
-    let mut stream = reflector(writer, watcher(api, watcher::Config::default()))
+    let stream = reflector(writer, watcher(api, watcher::Config::default()))
         .default_backoff()
         .boxed();
 
+    pump(reader, stream, app, kind.id().to_string(), map_fn, post_fn).await;
+}
+
+/// Spawn a watcher for a CRD-backed kind (B15), registered so it can be aborted
+/// on its own when the user navigates away. Unlike the built-ins these start
+/// lazily: freya alone has 44 CRDs, and watching them all on connect would open
+/// dozens of pointless streams.
+pub async fn spawn_custom(mgr: &ClientManager, client: Client, kind: &CustomKind) {
+    let app = mgr.app();
+    let id = kind.id.clone();
+    let ar = kind.api_resource();
+    let namespaced = kind.namespaced;
+    let handle = tokio::spawn(async move {
+        run_custom_watcher(client, app, id, ar, namespaced).await;
+    });
+    mgr.add_custom_watcher(kind.id.clone(), handle).await;
+}
+
+/// Drive a `DynamicObject` reflector for one CRD-backed kind.
+async fn run_custom_watcher(
+    client: Client,
+    app: AppHandle,
+    id: String,
+    ar: ApiResource,
+    namespaced: bool,
+) {
+    let api: Api<DynamicObject> = Api::all_with(client, &ar);
+
+    // DynamicObject's DynamicType is the ApiResource itself (it's what tells the
+    // store how to identify objects), so the store is built from `ar` rather than
+    // via reflector::store()'s Default-based path used for typed kinds.
+    let writer = reflector::store::Writer::<DynamicObject>::new(ar.clone());
+    let reader = writer.as_reader();
+
+    let stream = reflector(writer, watcher(api, watcher::Config::default()))
+        .default_backoff()
+        .boxed();
+
+    // Generic columns only: a CRD's interesting fields live in an arbitrary schema.
+    pump(reader, stream, app, id, move |o| mappers::map_dynamic(o, namespaced), identity).await;
+}
+
+/// The shared watch loop: coalesce watch events, then emit a full post-processed
+/// snapshot at most once per [`DEBOUNCE`]. Generic over the object type so typed
+/// and dynamic watchers share one implementation.
+async fn pump<K>(
+    reader: reflector::Store<K>,
+    mut stream: BoxStream<'static, Result<watcher::Event<K>, watcher::Error>>,
+    app: AppHandle,
+    kind: String,
+    map_fn: impl Fn(&K) -> Row,
+    post_fn: fn(Vec<Row>) -> Vec<Row>,
+) where
+    K: Lookup + Clone + 'static,
+    K::DynamicType: Eq + Hash + Clone,
+{
     // A ticker gates emits to at most one per DEBOUNCE window.
     let mut ticker = interval(DEBOUNCE);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -133,7 +193,7 @@ async fn run_watcher<K>(
                 Some(Ok(_)) => { dirty = true; }
                 Some(Err(e)) => {
                     // Logged, not fatal — backoff will retry this one kind.
-                    tracing::warn!("watch {} error: {e}", kind.id());
+                    tracing::warn!("watch {kind} error: {e}");
                 }
                 None => break, // stream ended (client dropped on reset)
             },
@@ -144,7 +204,10 @@ async fn run_watcher<K>(
                     let rows: Vec<Row> = reader.state().iter().map(|o| map_fn(o.as_ref())).collect();
                     let rows = post_fn(rows);
                     // Emit failures are non-fatal (webview may be gone).
-                    let _ = app.emit(events::RESOURCE_UPDATE, ResourceUpdate { kind, rows });
+                    let _ = app.emit(
+                        events::RESOURCE_UPDATE,
+                        ResourceUpdate { kind: kind.clone(), rows },
+                    );
                 }
             }
         }

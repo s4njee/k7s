@@ -30,12 +30,13 @@ the latest ~500 to bound payloads. ns filter applies; rows are not clickable
 (v1). Also: give the per-pod Events tab an empty-state hint ("no recent events —
 events expire after ~1h").
 
-**Accept:**
-- [ ] The freya feed shows the live FailedMount/FailedScheduling warnings at the
-      top and updates as they recur.
-- [ ] Event churn doesn't spam re-renders (existing debounce covers it); list
+**Accept:** *(shipped — commit `bd7a6a9`)*
+- [x] The freya feed shows the live FailedMount/FailedScheduling warnings at the
+      top and updates as they recur. Verified with `cargo run --example
+      events_check`: 13 events, 11 warnings, warnings sorted first.
+- [x] Event churn doesn't spam re-renders (existing debounce covers it); list
       stays ≤ cap; ns filter narrows.
-- [ ] Per-pod Events tab shows the TTL hint instead of a bare "no events".
+- [x] Per-pod Events tab shows the TTL hint instead of a bare "no events".
 
 ### B15 — CRD support (dynamic resource kinds)
 *Why: freya is CRD-heavy — Argo CD Applications, Traefik IngressRoutes, ARC
@@ -50,12 +51,20 @@ Generic columns NAME, NAMESPACE?, AGE. Frontend: a "Custom" nav section listing
 discovered kinds (scrollable, filterable if long); detail (YAML/Events) rides the
 existing DynamicObject path from B1. Watch count includes only open CRD watchers.
 
-**Accept:**
-- [ ] Argo CD `Application` and Traefik `IngressRoute` resources list live on
-      freya; YAML opens; ns filter works.
-- [ ] No CRD watcher runs until its kind is opened (watch-status proves it);
+**Accept:** *(shipped)*
+- [x] Argo CD `Application` and Traefik `IngressRoute` resources list live on
+      freya; YAML opens; ns filter works. Verified with `cargo run --example
+      crd_check`: 44 CRDs discovered, and a real reflector-backed dynamic watcher
+      produces the 2 live Applications as table rows.
+- [x] No CRD watcher runs until its kind is opened (watch-status proves it);
       closing/leaving the kind stops it.
-- [ ] RBAC-forbidden CRDs degrade like built-in kinds (empty table, no crash).
+- [x] RBAC-forbidden CRDs degrade like built-in kinds (empty table, no crash) —
+      discovery itself also degrades to "no Custom section" if listing CRDs is
+      forbidden.
+
+*Note: discovery reads CustomResourceDefinitions directly rather than sweeping the
+discovery API and blocklisting built-in groups — a CRD is by definition a custom
+kind, so this needs no guessing and can't surface built-ins.*
 
 ### B16 — Port-forward Services (and forward UX)
 *Why: B6 shipped pod forwarding only; the original spec included Services, and

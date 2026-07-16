@@ -7,13 +7,13 @@
  * prototype's `resourceDefs` and the Pods branch of its render (design/K8s Monitor.dc.html).
  */
 
-import type { ResourceKind } from "../providers/types";
+import type { CustomKind, KindId, ResourceKind } from "../providers/types";
 
 // Re-export so consumers can pull the kind type and its metadata from one module.
-export type { ResourceKind } from "../providers/types";
+export type { CustomKind, KindId, ResourceKind } from "../providers/types";
 
-/** Nav groups, in sidebar order. */
-export type NavGroup = "workloads" | "network" | "config" | "cluster";
+/** Nav groups, in sidebar order. "custom" holds discovered CRD kinds (B15). */
+export type NavGroup = "workloads" | "network" | "config" | "cluster" | "custom";
 
 /** Human-readable group headers (mono uppercase in the sidebar). */
 export const GROUP_LABELS: Record<NavGroup, string> = {
@@ -21,6 +21,7 @@ export const GROUP_LABELS: Record<NavGroup, string> = {
   network: "Network",
   config: "Config",
   cluster: "Cluster",
+  custom: "Custom",
 };
 
 export interface KindMeta {
@@ -125,14 +126,63 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
   },
 };
 
-/** All kinds in sidebar order (Pods → Namespaces). */
+/** All built-in kinds in sidebar order (Pods → Events). */
 export const KIND_ORDER = Object.keys(KIND_META) as ResourceKind[];
 
-/** Kinds that are cluster-scoped and therefore ignore the namespace filter. */
-export const CLUSTER_SCOPED: ReadonlySet<ResourceKind> = new Set<ResourceKind>([
-  "nodes",
-  "namespaces",
-]);
+/** Built-in kinds that are cluster-scoped and therefore ignore the namespace filter. */
+const CLUSTER_SCOPED: ReadonlySet<string> = new Set<string>(["nodes", "namespaces"]);
 
 /** Groups in sidebar order. */
-export const GROUP_ORDER: NavGroup[] = ["workloads", "network", "config", "cluster"];
+export const GROUP_ORDER: NavGroup[] = ["workloads", "network", "config", "cluster", "custom"];
+
+// ---------------------------------------------------------------------------
+// Custom (CRD-backed) kinds — B15
+// ---------------------------------------------------------------------------
+
+/**
+ * True when `id` refers to a discovered CRD kind rather than a built-in one.
+ * Custom ids are "group/plural"; built-in ids are bare plurals, so the slash is
+ * an unambiguous test (a Kubernetes group name always contains a dot, never a
+ * slash, and a plural contains neither).
+ */
+export function isCustomKind(id: KindId): boolean {
+  return id.includes("/");
+}
+
+/** Icon for every custom kind (they have no per-kind glyph of their own). */
+const CUSTOM_ICON = "◈";
+
+/**
+ * Generic columns for a CRD-backed kind. A CRD's schema is arbitrary, so there's
+ * nothing meaningful to show beyond identity and age without per-CRD knowledge —
+ * the YAML tab carries the detail. Must match the backend's `map_dynamic`.
+ */
+function customColumns(namespaced: boolean): string[] {
+  return namespaced ? ["NAME", "NAMESPACE", "AGE"] : ["NAME", "AGE"];
+}
+
+/**
+ * Metadata for any kind: the static entry for built-ins, or a derived one for a
+ * discovered custom kind. Returns undefined for an id that is neither (e.g. a
+ * persisted nav pointing at a CRD that no longer exists on this cluster).
+ */
+export function kindMeta(id: KindId, customKinds: CustomKind[]): KindMeta | undefined {
+  if (!isCustomKind(id)) return KIND_META[id as ResourceKind];
+  const ck = customKinds.find((k) => k.id === id);
+  if (!ck) return undefined;
+  return {
+    group: "custom",
+    // The Kind name reads better than the plural ("Application", not "applications").
+    label: ck.kind,
+    icon: CUSTOM_ICON,
+    columns: customColumns(ck.namespaced),
+  };
+}
+
+/** Whether a kind ignores the namespace filter (cluster-scoped). */
+export function isClusterScoped(id: KindId, customKinds: CustomKind[]): boolean {
+  if (!isCustomKind(id)) return CLUSTER_SCOPED.has(id);
+  const ck = customKinds.find((k) => k.id === id);
+  // Unknown custom kinds have no rows to filter; treat as namespaced.
+  return ck ? !ck.namespaced : false;
+}

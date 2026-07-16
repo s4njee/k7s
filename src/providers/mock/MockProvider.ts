@@ -19,13 +19,15 @@ import type {
   PodMetricsMap,
   PodProperties,
   Prefs,
+  CustomKind,
+  KindId,
   ResourceRef,
   ShellHandle,
   Row,
   Unsub,
 } from "../types";
-import { KIND_ORDER, type ResourceKind } from "../../lib/kinds";
-import { MOCK_CLUSTERS, MOCK_PODS, buildKindRows } from "./data";
+import { KIND_ORDER } from "../../lib/kinds";
+import { MOCK_CLUSTERS, MOCK_CUSTOM_KINDS, MOCK_PODS, buildCustomRows, buildKindRows } from "./data";
 import { makeLogLine, seedLogLines } from "./logs";
 import { yamlForPodName, yamlForGeneric } from "./yaml";
 import { eventsForPodName } from "./events";
@@ -54,9 +56,10 @@ export class MockProvider implements DataProvider {
   // Live subscribers, retained so connect() can re-emit after a data reset (e.g.
   // the cluster switcher clears data on a context switch). The real backend
   // re-emits from its watchers/pollers; the mock re-emits from here.
-  private resourceCbs = new Set<(kind: ResourceKind, rows: Row[]) => void>();
+  private resourceCbs = new Set<(kind: KindId, rows: Row[]) => void>();
   private statusCbs = new Set<(s: ClusterStatus) => void>();
   private watchCbs = new Set<(n: number) => void>();
+  private customKindCbs = new Set<(k: CustomKind[]) => void>();
 
   // ---- one-shot commands ----
 
@@ -219,7 +222,7 @@ export class MockProvider implements DataProvider {
   // subscriptions emit a single initial value. Each returns a no-op unsubscribe
   // (nothing keeps running that needs teardown).
 
-  onResourceUpdate(cb: (kind: ResourceKind, rows: Row[]) => void): Unsub {
+  onResourceUpdate(cb: (kind: KindId, rows: Row[]) => void): Unsub {
     this.resourceCbs.add(cb);
     // Emit asynchronously so subscribers finish wiring up before the first snapshot.
     queueMicrotask(() => {
@@ -228,6 +231,28 @@ export class MockProvider implements DataProvider {
     return () => {
       this.resourceCbs.delete(cb);
     };
+  }
+
+  // ---- custom (CRD-backed) kinds (B15) ----
+  //
+  // Demo mode mirrors the real lazy-watch contract: no rows exist for a custom
+  // kind until it's watched, and they arrive via the same resource-update path.
+
+  onCustomKinds(cb: (kinds: CustomKind[]) => void): Unsub {
+    this.customKindCbs.add(cb);
+    queueMicrotask(() => cb(MOCK_CUSTOM_KINDS));
+    return () => {
+      this.customKindCbs.delete(cb);
+    };
+  }
+
+  async watchCustomKind(id: string): Promise<void> {
+    const rows = buildCustomRows(id);
+    for (const cb of this.resourceCbs) cb(id, rows);
+  }
+
+  async unwatchCustomKind(_id: string): Promise<void> {
+    // Nothing to tear down: the mock has no live streams.
   }
 
   onPodMetrics(_cb: (metrics: PodMetricsMap) => void): Unsub {

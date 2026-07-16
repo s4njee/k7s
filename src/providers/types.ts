@@ -30,6 +30,35 @@ export type ResourceKind =
   | "events";
 
 /**
+ * A CRD-backed kind discovered on connect (B15).
+ *
+ * These aren't known at build time, so they can't be part of {@link ResourceKind}.
+ */
+export interface CustomKind {
+  /** Stable id, always "group/plural" (e.g. "argoproj.io/applications"). */
+  id: string;
+  group: string;
+  /** The version being watched (the CRD's storage version). */
+  version: string;
+  /** Kind name, e.g. "Application" — the nav label. */
+  kind: string;
+  plural: string;
+  /** False for cluster-scoped CRDs, which ignore the namespace filter. */
+  namespaced: boolean;
+}
+
+/**
+ * Any kind the table can show: a built-in {@link ResourceKind} or a custom kind's
+ * id. The `(string & {})` keeps editor autocomplete for the built-in literals
+ * while still admitting the dynamic ids.
+ *
+ * A custom id always contains a slash; a built-in id never does. That's the test
+ * used wherever the two need distinguishing (`isCustomKind`).
+ */
+// eslint-disable-next-line @typescript-eslint/ban-types
+export type KindId = ResourceKind | (string & {});
+
+/**
  * The one coloring channel exposed by providers. The backend decides semantics
  * (e.g. CrashLoopBackOff → "err"); the table maps tone → a token color. This keeps
  * status semantics in a single place rather than scattered through the UI.
@@ -218,14 +247,16 @@ export interface PodProperties {
 /** Persisted UI preferences (B11) — where the user left off. */
 export interface Prefs {
   context?: string | null;
-  nav?: ResourceKind | null;
+  /** Last kind viewed; may be a custom kind's id (B15). */
+  nav?: KindId | null;
   namespace?: string | null;
   showTimestamps?: boolean | null;
 }
 
 /** Identifies a specific object for YAML/events/log commands. */
 export interface ResourceRef {
-  kind: ResourceKind;
+  /** Built-in kind id, or a custom kind's "group/plural" id (B15). */
+  kind: KindId;
   namespace?: string;
   name: string;
 }
@@ -298,8 +329,19 @@ export interface DataProvider {
   /** Persist UI preferences (no-op in demo mode). */
   savePrefs(prefs: Prefs): Promise<void>;
 
+  // ---- custom (CRD-backed) kinds (B15) ----
+  /**
+   * Start watching a custom kind. Called when the user opens it — watchers are
+   * lazy because a cluster can define hundreds of CRDs. Safe to call twice.
+   */
+  watchCustomKind(id: string): Promise<void>;
+  /** Stop watching a custom kind (idempotent). Called when navigating away. */
+  unwatchCustomKind(id: string): Promise<void>;
+
   // ---- push subscriptions (return an unsubscribe fn) ----
-  onResourceUpdate(cb: (kind: ResourceKind, rows: Row[]) => void): Unsub;
+  onResourceUpdate(cb: (kind: KindId, rows: Row[]) => void): Unsub;
+  /** CRD-backed kinds discovered on connect; re-emitted on every connect. */
+  onCustomKinds(cb: (kinds: CustomKind[]) => void): Unsub;
   onPodMetrics(cb: (metrics: PodMetricsMap) => void): Unsub;
   onNodeMetrics(cb: (metrics: NodeMetricsMap) => void): Unsub;
   onClusterStatus(cb: (status: ClusterStatus) => void): Unsub;

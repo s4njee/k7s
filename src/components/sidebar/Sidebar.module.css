@@ -148,6 +148,43 @@
   letter-spacing: 0.12em;
   color: var(--text-faint);
   text-transform: uppercase;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* Count of discovered CRD kinds, beside the "Custom" header (B15). */
+.sectionCount {
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+
+/* Filter box for the Custom group, shown only when the list is long. */
+.navFilter {
+  width: calc(100% - 16px);
+  margin: 2px 8px 4px;
+  padding: 4px 8px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  outline: none;
+}
+.navFilter:focus {
+  border-color: var(--border-hover);
+}
+.navFilter::placeholder {
+  color: var(--text-faint);
+}
+
+/* Empty state when the Custom filter matches nothing. */
+.navEmpty {
+  padding: 4px 16px 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
 }
 .navItem {
   display: flex;

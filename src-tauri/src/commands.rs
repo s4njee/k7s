@@ -6,7 +6,9 @@
 use crate::error::{AppError, AppResult};
 use crate::kube::client::{self, ClusterInfo, ContextInfo};
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
-use crate::kube::{exec, logs, mappers, metrics, portforward, properties, watchers, ClientManager};
+use crate::kube::{
+    discovery, exec, logs, mappers, metrics, portforward, properties, watchers, ClientManager,
+};
 use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::core::v1::Event;
 use kube::api::{
@@ -17,7 +19,7 @@ use kube::ResourceExt;
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Emitter, State};
 
 /// Monotonic counter for generating unique log-stream ids.
 static STREAM_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -141,6 +143,13 @@ pub async fn connect(
     manager.push_task(metrics_task).await;
     manager.push_task(status_task).await;
 
+    // Discover CRD-backed kinds and tell the frontend about them (B15). Their
+    // watchers start lazily when the user opens one, so this only populates the
+    // nav — a cluster with dozens of CRDs costs nothing until a kind is opened.
+    let custom = discovery::discover(&kube_client).await;
+    manager.set_custom_kinds(custom.clone()).await;
+    let _ = manager.app().emit(crate::kube::events::CUSTOM_KINDS, custom);
+
     // Record the live connection (also emits the initial watch-status count).
     manager.set_connected(kube_client, watcher_count).await;
 
@@ -155,7 +164,17 @@ pub async fn connect(
 /// Map a frontend kind id to its `ApiResource` and whether it is namespaced. The
 /// kind id doubles as the resource plural, so we build the ApiResource directly
 /// (avoiding fragile plural-guessing).
-fn resource_for(kind: &str) -> AppResult<(ApiResource, bool)> {
+///
+/// A custom (CRD-backed) kind id contains a slash ("group/plural", B15) and is
+/// resolved from the kinds discovered on connect, so YAML/delete/events work on
+/// CRDs through the same path as built-ins.
+async fn resource_for(kind: &str, mgr: &ClientManager) -> AppResult<(ApiResource, bool)> {
+    if kind.contains('/') {
+        return match mgr.custom_kind(kind).await {
+            Some(ck) => Ok((ck.api_resource(), ck.namespaced)),
+            None => Err(AppError::Other(format!("unknown custom kind: {kind}"))),
+        };
+    }
     // (group, version, Kind, namespaced)
     let (group, version, k, namespaced) = match kind {
         "pods" => ("", "v1", "Pod", true),
@@ -177,12 +196,13 @@ fn resource_for(kind: &str) -> AppResult<(ApiResource, bool)> {
 }
 
 /// Build a dynamic API for `kind`, namespaced or cluster-scoped as appropriate.
-fn dynamic_api(
+async fn dynamic_api(
     client: kube::Client,
     kind: &str,
     namespace: &str,
+    mgr: &ClientManager,
 ) -> AppResult<Api<DynamicObject>> {
-    let (ar, namespaced) = resource_for(kind)?;
+    let (ar, namespaced) = resource_for(kind, mgr).await?;
     Ok(if namespaced {
         Api::namespaced_with(client, namespace, &ar)
     } else {
@@ -200,7 +220,7 @@ pub async fn get_yaml(
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<String> {
     let client = require_client(&mgr).await?;
-    let api = dynamic_api(client, &kind, &namespace)?;
+    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
     let mut obj = api.get(&name).await?;
     // Drop server-managed noise before rendering.
     obj.metadata.managed_fields = None;
@@ -241,7 +261,7 @@ pub async fn apply_yaml(
         return Err(AppError::Other("editing Secrets is disabled".into()));
     }
     let obj: DynamicObject = serde_yaml::from_str(&yaml)?;
-    let api = dynamic_api(client, &kind, &namespace)?;
+    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
     // replace() requires the resourceVersion present in the fetched/edited object;
     // a stale value yields a 409 whose message we pass straight through.
     api.replace(&name, &PostParams::default(), &obj).await?;
@@ -258,7 +278,7 @@ pub async fn delete_resource(
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<()> {
     let client = require_client(&mgr).await?;
-    let api = dynamic_api(client, &kind, &namespace)?;
+    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
     api.delete(&name, &DeleteParams::default()).await?;
     Ok(())
 }
@@ -273,7 +293,7 @@ pub async fn scale_resource(
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<()> {
     let client = require_client(&mgr).await?;
-    let api = dynamic_api(client, &kind, &namespace)?;
+    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
     let patch = Patch::Merge(serde_json::json!({ "spec": { "replicas": replicas } }));
     api.patch(&name, &PatchParams::default(), &patch).await?;
     Ok(())
@@ -287,9 +307,38 @@ pub async fn set_cordon(
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<()> {
     let client = require_client(&mgr).await?;
-    let api = dynamic_api(client, "nodes", "")?;
+    let api = dynamic_api(client, "nodes", "", &mgr).await?;
     let patch = Patch::Merge(serde_json::json!({ "spec": { "unschedulable": unschedulable } }));
     api.patch(&name, &PatchParams::default(), &patch).await?;
+    Ok(())
+}
+
+/// Start watching a custom (CRD-backed) kind (B15), if it isn't already watched.
+///
+/// Called when the user opens a custom kind. Watching is lazy and reference-free:
+/// a cluster can define hundreds of CRDs, and watching them all on connect would
+/// open a stream per CRD for data nobody is looking at.
+#[tauri::command]
+pub async fn watch_custom_kind(kind: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+    let manager: Arc<ClientManager> = (*mgr).clone();
+    // Already open — nothing to do (navigating back to a kind is common).
+    if manager.has_custom_watcher(&kind).await {
+        return Ok(());
+    }
+    let client = require_client(&mgr).await?;
+    let ck = manager
+        .custom_kind(&kind)
+        .await
+        .ok_or_else(|| AppError::Other(format!("unknown custom kind: {kind}")))?;
+    watchers::spawn_custom(&manager, client, &ck).await;
+    Ok(())
+}
+
+/// Stop watching a custom kind (B15). Idempotent: unknown ids are a no-op, so the
+/// frontend can call this unconditionally when navigating away.
+#[tauri::command]
+pub async fn unwatch_custom_kind(kind: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+    mgr.remove_custom_watcher(&kind).await;
     Ok(())
 }
 

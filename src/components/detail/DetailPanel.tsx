@@ -11,7 +11,7 @@ import { useStore, type DetailTab } from "../../store";
 import { useNow } from "../../hooks/useNow";
 import { formatAge } from "../../lib/format";
 import { toneColor } from "../../lib/tone";
-import { KIND_META } from "../../lib/kinds";
+import { kindMeta } from "../../lib/kinds";
 import { LogsTab } from "./LogsTab";
 import { PropertiesTab } from "./PropertiesTab";
 import { ShellTab } from "./ShellTab";
@@ -36,6 +36,7 @@ export function DetailPanel() {
   const activeTab = useStore((s) => s.activeTab);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const closeDetail = useStore((s) => s.closeDetail);
+  const customKinds = useStore((s) => s.customKinds);
   const now = useNow();
 
   // Error from an action (delete/scale/cordon), shown as a header banner.
@@ -49,6 +50,8 @@ export function DetailPanel() {
   // Logs/Shell are pod-only; other kinds get YAML + Events.
   const tabs = isPod ? ALL_TABS : ALL_TABS.filter((t) => !POD_ONLY_TABS.has(t.id));
   const statusColor = meta ? toneColor(meta.statusTone) : "var(--text-muted)";
+  // Custom kinds resolve their label from discovery, so this is a runtime lookup.
+  const kindLabel = kindMeta(nav, customKinds)?.label ?? nav;
 
   return (
     <div className={styles.panel}>
@@ -86,7 +89,7 @@ export function DetailPanel() {
         ) : (
           <div className={styles.meta}>
             <span>
-              kind: <span className={styles.metaVal}>{KIND_META[nav].label}</span>
+              kind: <span className={styles.metaVal}>{kindLabel}</span>
             </span>
             {row.namespace && (
               <span>

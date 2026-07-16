@@ -3,6 +3,7 @@
 //! connection. Switching context or disconnecting aborts *all* of them here, so no
 //! task ever outlives the connection that created it (Story 6.1).
 
+use super::discovery::CustomKind;
 use super::events;
 use kube::Client;
 use serde::Serialize;
@@ -51,6 +52,13 @@ struct Inner {
     forwards: HashMap<String, ForwardEntry>,
     /// Number of resource watchers running (set on connect, 0 when disconnected).
     watcher_count: usize,
+    /// CRD-backed kinds discovered on connect, keyed by kind id (B15). Populated
+    /// on connect so commands can resolve a custom id back to its ApiResource.
+    custom_kinds: HashMap<String, CustomKind>,
+    /// Lazily-started watchers for custom kinds, keyed by kind id. Held separately
+    /// from `tasks` because these are aborted individually when the user navigates
+    /// away, not only on reset.
+    custom_watchers: HashMap<String, JoinHandle<()>>,
 }
 
 /// A context imported from a non-default kubeconfig file: its source path and the
@@ -119,6 +127,12 @@ impl ClientManager {
         for (_, f) in inner.forwards.drain() {
             f.task.abort();
         }
+        // Lazily-started CRD watchers (B15) are connection-scoped too.
+        for (_, t) in inner.custom_watchers.drain() {
+            t.abort();
+        }
+        // The discovered kinds belong to the old cluster; the next connect re-discovers.
+        inner.custom_kinds.clear();
         inner.client = None;
         inner.watcher_count = 0;
         drop(inner);
@@ -231,11 +245,57 @@ impl ClientManager {
         self.inner.read().await.forwards.values().map(|f| f.dto.clone()).collect()
     }
 
+    // ---- custom (CRD-backed) kinds (B15) ----
+
+    /// Record the kinds discovered for this connection.
+    pub async fn set_custom_kinds(&self, kinds: Vec<CustomKind>) {
+        let mut inner = self.inner.write().await;
+        inner.custom_kinds = kinds.into_iter().map(|k| (k.id.clone(), k)).collect();
+    }
+
+    /// Look up a discovered custom kind by id (e.g. "argoproj.io/applications").
+    pub async fn custom_kind(&self, id: &str) -> Option<CustomKind> {
+        self.inner.read().await.custom_kinds.get(id).cloned()
+    }
+
+    /// Register a lazily-started watcher for a custom kind. Replaces (and aborts)
+    /// any existing watcher for the same kind, so double-registration is safe.
+    pub async fn add_custom_watcher(&self, id: String, handle: JoinHandle<()>) {
+        {
+            let mut inner = self.inner.write().await;
+            if let Some(old) = inner.custom_watchers.insert(id, handle) {
+                old.abort();
+            }
+        }
+        self.emit_watch().await;
+    }
+
+    /// True when a watcher for this custom kind is already running.
+    pub async fn has_custom_watcher(&self, id: &str) -> bool {
+        self.inner.read().await.custom_watchers.contains_key(id)
+    }
+
+    /// Abort a custom kind's watcher (idempotent), e.g. when the user navigates away.
+    pub async fn remove_custom_watcher(&self, id: &str) {
+        let existed = {
+            let mut inner = self.inner.write().await;
+            inner.custom_watchers.remove(id).map(|h| h.abort()).is_some()
+        };
+        if existed {
+            self.emit_watch().await;
+        }
+    }
+
     /// Emit the current live-stream count (watchers + logs + shells + forwards).
+    /// Custom kinds count only while their watcher is open (B15).
     async fn emit_watch(&self) {
         let count = {
             let inner = self.inner.read().await;
-            inner.watcher_count + inner.logs.len() + inner.shells.len() + inner.forwards.len()
+            inner.watcher_count
+                + inner.custom_watchers.len()
+                + inner.logs.len()
+                + inner.shells.len()
+                + inner.forwards.len()
         };
         // Emit failures are non-fatal (the webview may be gone during shutdown).
         let _ = self.app.emit(events::WATCH_STATUS, count);

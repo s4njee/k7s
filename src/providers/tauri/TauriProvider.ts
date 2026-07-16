@@ -23,7 +23,8 @@ import type {
   PodMetricsMap,
   PodProperties,
   Prefs,
-  ResourceKind,
+  CustomKind,
+  KindId,
   ResourceRef,
   ShellHandle,
   Row,
@@ -32,7 +33,8 @@ import type {
 
 /** Wire payload for the `resource-update` event. */
 interface ResourceUpdatePayload {
-  kind: ResourceKind;
+  /** Built-in kind id, or a custom kind's "group/plural" id (B15). */
+  kind: KindId;
   rows: Row[];
 }
 
@@ -146,7 +148,21 @@ export class TauriProvider implements DataProvider {
 
   // ---- push subscriptions ----
 
-  onResourceUpdate(cb: (kind: ResourceKind, rows: Row[]) => void): Unsub {
+  // ---- custom (CRD-backed) kinds (B15) ----
+
+  watchCustomKind(id: string): Promise<void> {
+    return invoke("watch_custom_kind", { kind: id });
+  }
+
+  unwatchCustomKind(id: string): Promise<void> {
+    return invoke("unwatch_custom_kind", { kind: id });
+  }
+
+  onCustomKinds(cb: (kinds: CustomKind[]) => void): Unsub {
+    return subscribe<CustomKind[]>("custom-kinds", cb);
+  }
+
+  onResourceUpdate(cb: (kind: KindId, rows: Row[]) => void): Unsub {
     return subscribe<ResourceUpdatePayload>("resource-update", (p) => cb(p.kind, p.rows));
   }
 

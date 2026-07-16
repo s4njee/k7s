@@ -10,10 +10,10 @@ import styles from "./DetailPanel.module.css";
 import { getProvider } from "../../providers";
 import { useStore } from "../../store";
 import { useClickOutside } from "../../hooks/useClickOutside";
-import type { ResourceKind, Row } from "../../providers/types";
+import type { KindId, Row } from "../../providers/types";
 
 interface ActionsMenuProps {
-  kind: ResourceKind;
+  kind: KindId;
   row: Row;
   /** Report an API error (or null to clear) for the header banner. */
   onError: (msg: string | null) => void;
@@ -60,7 +60,7 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
     }
   }
 
-  const ref3: { kind: ResourceKind; namespace?: string; name: string } = {
+  const ref3: { kind: KindId; namespace?: string; name: string } = {
     kind,
     namespace: row.namespace,
     name: row.name,

@@ -5,6 +5,7 @@
 //! events named in [`events`].
 
 pub mod client;
+pub mod discovery;
 pub mod dto;
 pub mod exec;
 pub mod logs;
@@ -67,6 +68,8 @@ impl ResourceKind {
 pub mod events {
     /// Full row snapshot for a kind: `{ kind, rows }`. Debounced per kind.
     pub const RESOURCE_UPDATE: &str = "resource-update";
+    /// CRD-backed kinds discovered on connect (B15): `[{ id, group, kind, … }]`.
+    pub const CUSTOM_KINDS: &str = "custom-kinds";
     /// Pod usage keyed by "ns/name": `{ [key]: { cpuMillis, memBytes } }`.
     pub const POD_METRICS: &str = "pod-metrics";
     /// Node usage percentages keyed by node name: `{ [name]: { cpuPercent, memPercent } }`.
@@ -82,8 +85,13 @@ pub mod events {
 }
 
 /// Payload for [`events::RESOURCE_UPDATE`].
+///
+/// `kind` is the frontend kind id as a string rather than a [`ResourceKind`]:
+/// custom (CRD-backed) kinds aren't in that enum, and their ids are "group/plural"
+/// (B15). Built-in kinds pass `ResourceKind::id()`, so the wire format is
+/// unchanged either way.
 #[derive(Serialize, Clone)]
 pub struct ResourceUpdate {
-    pub kind: ResourceKind,
+    pub kind: String,
     pub rows: Vec<Row>,
 }

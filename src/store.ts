@@ -9,13 +9,15 @@ import { create } from "zustand";
 import type {
   ClusterStatus,
   ContextInfo,
+  CustomKind,
   ForwardInfo,
+  KindId,
   LogLine,
   NodeMetricsMap,
   PodMetricsMap,
   Row,
 } from "./providers/types";
-import { KIND_ORDER, type ResourceKind } from "./lib/kinds";
+import { KIND_ORDER } from "./lib/kinds";
 
 /** Ring-buffer cap for the log view (design default). */
 export const LOG_BUFFER_CAP = 200;
@@ -37,13 +39,25 @@ export interface ConnectionState {
   error?: string;
 }
 
-/** Empty per-kind row map (all 12 kinds present, each an empty array). */
-function emptyRows(): Record<ResourceKind, Row[]> {
-  return Object.fromEntries(KIND_ORDER.map((k) => [k, [] as Row[]])) as Record<
-    ResourceKind,
-    Row[]
-  >;
+/**
+ * Rows keyed by kind id. Not a `Record<ResourceKind, …>`: custom (CRD-backed)
+ * kind ids aren't known at build time, and their entries only appear once the
+ * kind is watched — so readers must tolerate a missing key (see {@link rowsFor}).
+ */
+export type RowMap = Record<string, Row[]>;
+
+/** Empty row map: every built-in kind present with an empty array. */
+function emptyRows(): RowMap {
+  return Object.fromEntries(KIND_ORDER.map((k) => [k, [] as Row[]]));
 }
+
+/** Rows for a kind, or an empty array for a custom kind not yet watched (B15). */
+export function rowsFor(rows: RowMap, kind: KindId): Row[] {
+  return rows[kind] ?? EMPTY_ROWS;
+}
+
+/** Shared empty array so `rowsFor` returns a stable reference (avoids re-renders). */
+const EMPTY_ROWS: Row[] = [];
 
 export interface AppState {
   // ---------- connection & cluster ----------
@@ -54,8 +68,8 @@ export interface AppState {
   contexts: ContextInfo[];
 
   // ---------- navigation & filtering ----------
-  /** Active resource kind (drives the table + breadcrumb). */
-  nav: ResourceKind;
+  /** Active resource kind (drives the table + breadcrumb); a custom id for CRDs. */
+  nav: KindId;
   /** Namespace filter; "all" shows everything. */
   namespace: string;
   /** Free-text name filter for the current table (cleared on nav change). */
@@ -68,7 +82,10 @@ export interface AppState {
   openMenu: OpenMenu;
 
   // ---------- live data ----------
-  rows: Record<ResourceKind, Row[]>;
+  /** Rows per kind. Built-ins always present; custom kinds appear once watched. */
+  rows: RowMap;
+  /** CRD-backed kinds discovered on connect (B15); empty when disconnected. */
+  customKinds: CustomKind[];
   podMetrics: PodMetricsMap;
   nodeMetrics: NodeMetricsMap;
   /** Active port-forwards (B6). */
@@ -92,7 +109,7 @@ export interface AppState {
 
   // ---------- actions ----------
   // navigation
-  setNav: (kind: ResourceKind) => void;
+  setNav: (kind: KindId) => void;
   setNamespace: (ns: string) => void;
   setTableFilter: (q: string) => void;
   /** Sort by a column: same column toggles direction, a new column starts ascending. */
@@ -105,7 +122,8 @@ export interface AppState {
   setContexts: (contexts: ContextInfo[]) => void;
   setClusterStatus: (s: ClusterStatus) => void;
   setWatchCount: (n: number) => void;
-  setRows: (kind: ResourceKind, rows: Row[]) => void;
+  setRows: (kind: KindId, rows: Row[]) => void;
+  setCustomKinds: (kinds: CustomKind[]) => void;
   setPodMetrics: (m: PodMetricsMap) => void;
   setNodeMetrics: (m: NodeMetricsMap) => void;
   setPortForwards: (list: ForwardInfo[]) => void;
@@ -146,6 +164,7 @@ export const useStore = create<AppState>((set) => ({
   openMenu: null,
 
   rows: emptyRows(),
+  customKinds: [],
   podMetrics: {},
   nodeMetrics: {},
   portForwards: [],
@@ -193,6 +212,7 @@ export const useStore = create<AppState>((set) => ({
   setClusterStatus: (status) => set({ clusterStatus: status }),
   setWatchCount: (n) => set({ watchCount: n }),
   setRows: (kind, rows) => set((s) => ({ rows: { ...s.rows, [kind]: rows } })),
+  setCustomKinds: (kinds) => set({ customKinds: kinds }),
   setPodMetrics: (m) => set({ podMetrics: m }),
   setNodeMetrics: (m) => set({ nodeMetrics: m }),
   setPortForwards: (list) => set({ portForwards: list }),
@@ -201,6 +221,11 @@ export const useStore = create<AppState>((set) => ({
   resetData: () =>
     set({
       rows: emptyRows(),
+      // The discovered CRDs belong to the old cluster; connect re-discovers them.
+      // `nav` is deliberately left alone: on a reconnect to the same cluster the
+      // kind comes straight back, and a nav pointing at a kind this cluster lacks
+      // renders an empty table rather than yanking the user elsewhere.
+      customKinds: [],
       podMetrics: {},
       nodeMetrics: {},
       portForwards: [],

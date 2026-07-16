@@ -8,6 +8,7 @@
 
 import styles from "./App.module.css";
 import { useBootstrap } from "./hooks/useBootstrap";
+import { useCustomKindWatch } from "./hooks/useCustomKindWatch";
 import { useGlobalKeys } from "./hooks/useGlobalKeys";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { TopBar } from "./components/topbar/TopBar";
@@ -21,6 +22,8 @@ export default function App() {
   useBootstrap();
   // App-level keyboard shortcuts (Esc cascade, detail tab cycling).
   useGlobalKeys();
+  // Watch the open CRD kind, and only that one (B15).
+  useCustomKindWatch();
 
   return (
     <div className={styles.app}>

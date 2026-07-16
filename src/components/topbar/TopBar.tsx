@@ -8,7 +8,7 @@ import { useMemo, useRef } from "react";
 import styles from "./TopBar.module.css";
 import { useStore } from "../../store";
 import { useClickOutside } from "../../hooks/useClickOutside";
-import { KIND_META } from "../../lib/kinds";
+import { kindMeta } from "../../lib/kinds";
 
 export function TopBar() {
   const nav = useStore((s) => s.nav);
@@ -19,12 +19,14 @@ export function TopBar() {
   const toggleMenu = useStore((s) => s.toggleMenu);
   const closeMenus = useStore((s) => s.closeMenus);
   const setNamespace = useStore((s) => s.setNamespace);
+  const customKinds = useStore((s) => s.customKinds);
 
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, closeMenus, open);
 
   const cluster = connection.clusterName ?? connection.context ?? "k7s";
-  const meta = KIND_META[nav];
+  // Runtime lookup: custom (CRD-backed) kinds aren't in the static table (B15).
+  const meta = kindMeta(nav, customKinds);
 
   // "all" plus the live namespace names (sorted for stable display).
   const namespaces = useMemo(() => {
@@ -35,9 +37,9 @@ export function TopBar() {
   return (
     <div className={styles.topbar}>
       <div className={styles.breadcrumb}>
-        {cluster} <span className={styles.sep}>/</span> {meta.group}{" "}
+        {cluster} <span className={styles.sep}>/</span> {meta?.group ?? "custom"}{" "}
         <span className={styles.sep}>/</span>{" "}
-        <span className={styles.kind}>{meta.label}</span>
+        <span className={styles.kind}>{meta?.label ?? nav}</span>
       </div>
 
       <div className={styles.spacer} />

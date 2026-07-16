@@ -7,12 +7,12 @@
 
 import { useMemo, useRef } from "react";
 import styles from "./ResourceTable.module.css";
-import { useStore } from "../../store";
+import { rowsFor, useStore } from "../../store";
 import { useNow } from "../../hooks/useNow";
 import { useTableKeys } from "../../hooks/useTableKeys";
 import { toneColor } from "../../lib/tone";
 import { formatAge, formatCpu, formatMem } from "../../lib/format";
-import { CLUSTER_SCOPED, KIND_META, type ResourceKind } from "../../lib/kinds";
+import { isClusterScoped, kindMeta, type KindId } from "../../lib/kinds";
 import { sortRows } from "../../lib/sort";
 import type { Cell, NodeMetricsMap, PodMetricsMap, Row } from "../../providers/types";
 
@@ -24,18 +24,22 @@ export function ResourceTable() {
   const sortCol = useStore((s) => s.sortCol);
   const sortDir = useStore((s) => s.sortDir);
   const toggleSort = useStore((s) => s.toggleSort);
-  const allRows = useStore((s) => s.rows[nav]);
+  const allRows = useStore((s) => rowsFor(s.rows, nav));
   const podMetrics = useStore((s) => s.podMetrics);
   const nodeMetrics = useStore((s) => s.nodeMetrics);
   // The full pods list, used to derive per-namespace pod counts (B12).
   const podRows = useStore((s) => s.rows.pods);
   const selectedUid = useStore((s) => s.selectedRow?.uid ?? null);
   const selectRow = useStore((s) => s.selectRow);
+  const customKinds = useStore((s) => s.customKinds);
 
   // Age columns re-render on a 30s tick.
   const now = useNow();
 
-  const columns = KIND_META[nav].columns;
+  // Undefined only for a nav pointing at a kind this cluster doesn't have — e.g.
+  // a persisted CRD kind after switching to a cluster without that CRD (B15).
+  const meta = kindMeta(nav, customKinds);
+  const columns = meta?.columns ?? [];
 
   // The Events feed is a read-only view (B14): rows have no detail panel, so they
   // neither select on click nor on Enter.
@@ -50,7 +54,7 @@ export function ResourceTable() {
     const filtered = allRows.filter((r) => {
       // Namespace filter — cluster-scoped kinds ignore it. Events are namespaced
       // (despite living in the Cluster nav group), so the filter narrows them.
-      if (!CLUSTER_SCOPED.has(nav) && namespace !== "all" && r.namespace !== namespace) {
+      if (!isClusterScoped(nav, customKinds) && namespace !== "all" && r.namespace !== namespace) {
         return false;
       }
       if (!q) return true;
@@ -63,7 +67,19 @@ export function ResourceTable() {
     });
     const overlaid = overlayMetrics(nav, filtered, podMetrics, nodeMetrics, podRows);
     return sortCol === null ? overlaid : sortRows(overlaid, sortCol, sortDir, now);
-  }, [nav, allRows, namespace, tableFilter, podMetrics, nodeMetrics, podRows, sortCol, sortDir, now]);
+  }, [
+    nav,
+    allRows,
+    namespace,
+    tableFilter,
+    podMetrics,
+    nodeMetrics,
+    podRows,
+    sortCol,
+    sortDir,
+    now,
+    customKinds,
+  ]);
 
   // Keyboard navigation: highlighted row index + `/`-to-focus the filter.
   const filterRef = useRef<HTMLInputElement>(null);
@@ -141,7 +157,7 @@ function renderCell(cell: Cell, now: number): string {
  *  - the Namespaces PODS count, derived from the live pods list (B12).
  */
 function overlayMetrics(
-  kind: ResourceKind,
+  kind: KindId,
   rows: Row[],
   podMetrics: PodMetricsMap,
   nodeMetrics: NodeMetricsMap,
