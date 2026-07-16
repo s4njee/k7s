@@ -36,6 +36,12 @@ pub struct ForwardDto {
     /// The port on the pod. For a Service forward this is the resolved targetPort,
     /// which may differ from the service port the user typed.
     pub remote_port: u16,
+    /// The port as the user asked for it — the Service's own port (B16). Only set
+    /// for Service forwards, and only when it differs from `remote_port`; the
+    /// strip shows this, since the resolved targetPort is a port the Service
+    /// doesn't publish and nobody asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_port: Option<u16>,
     pub local_port: u16,
     /// Last per-connection failure, if any (B16). The listener stays up, so this
     /// is how a forward whose pod died surfaces instead of silently timing out.

@@ -282,6 +282,12 @@ export interface ForwardInfo {
   service?: string;
   /** Port on the pod (a Service forward's resolved targetPort). */
   remotePort: number;
+  /**
+   * For Service forwards, the port the user actually asked for — the Service's
+   * own port — when it differs from the resolved targetPort (B16). The strip
+   * shows this: `remotePort` is a container port the Service doesn't publish.
+   */
+  servicePort?: number;
   localPort: number;
   /** Last per-connection failure; the forward stays up (B16). */
   error?: string;

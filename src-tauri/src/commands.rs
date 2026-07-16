@@ -595,7 +595,7 @@ pub async fn start_service_port_forward(
     let (pod, target_port) =
         portforward::resolve_service(client.clone(), &namespace, &service, remote_port).await?;
 
-    spawn_forward(manager, client, namespace, pod, Some(service), target_port).await
+    spawn_forward(manager, client, namespace, pod, Some((service, remote_port)), target_port).await
 }
 
 /// Bind a local listener, spawn the forward's accept loop, and register it.
@@ -606,7 +606,8 @@ async fn spawn_forward(
     client: kube::Client,
     namespace: String,
     pod: String,
-    service: Option<String>,
+    // For a Service forward: its name and the port the user asked for.
+    service: Option<(String, u16)>,
     remote_port: u16,
 ) -> AppResult<ForwardDto> {
     let (ready_tx, ready_rx) = oneshot::channel::<Result<u16, String>>();
@@ -626,10 +627,23 @@ async fn spawn_forward(
         .map_err(|_| AppError::Other("port-forward task ended before binding".into()))?
         .map_err(AppError::Kube)?;
 
-    let label = service.clone().unwrap_or_else(|| pod.clone());
+    let (service_name, service_port) = match service {
+        // Only carry the service port when it differs; an identical one is noise.
+        Some((name, port)) => (Some(name), (port != remote_port).then_some(port)),
+        None => (None, None),
+    };
+    let label = service_name.clone().unwrap_or_else(|| pod.clone());
     let id = format!("pf-{}-{}", label, STREAM_SEQ.fetch_add(1, Ordering::Relaxed));
-    let dto =
-        ForwardDto { id: id.clone(), namespace, pod, service, remote_port, local_port, error: None };
+    let dto = ForwardDto {
+        id: id.clone(),
+        namespace,
+        pod,
+        service: service_name,
+        remote_port,
+        service_port,
+        local_port,
+        error: None,
+    };
     manager.add_forward(dto.clone(), task).await;
 
     // Relay per-connection failures onto the forward for the UI. Ends on its own

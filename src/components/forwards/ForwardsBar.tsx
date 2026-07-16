@@ -43,7 +43,7 @@ export function ForwardsBar() {
           </span>
           <span className={styles.arrow}>→</span>
           <span className={styles.target}>
-            {f.service ?? f.pod}:{f.remotePort}
+            {f.service ?? f.pod}:{f.servicePort ?? f.remotePort}
           </span>
           {f.error && <span className={styles.errorMark}>!</span>}
           <span className={styles.stop} title="stop forward" onClick={() => void stop(f.id)}>
@@ -55,10 +55,14 @@ export function ForwardsBar() {
   );
 }
 
-/** Full detail on hover: the resolved pod for services, and any failure. */
+/** Full detail on hover: the resolved pod and port for services, and any failure. */
 function tooltip(f: ForwardInfo): string {
-  const target = f.service ? `service ${f.service} via pod ${f.pod}` : `pod ${f.pod}`;
-  const base = `${f.namespace}/${target}:${f.remotePort}`;
+  // The strip shows the port asked for; the tooltip is where the resolved
+  // targetPort belongs, since that's the detail you'd want when debugging.
+  const base = f.service
+    ? `${f.namespace}/service ${f.service}:${f.servicePort ?? f.remotePort}` +
+      ` → pod ${f.pod}:${f.remotePort}`
+    : `${f.namespace}/pod ${f.pod}:${f.remotePort}`;
   return f.error ? `${base}\n${f.error}` : base;
 }
 

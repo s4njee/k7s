@@ -309,7 +309,10 @@ export class MockProvider implements DataProvider {
       // strip shows the same "service (via pod)" shape as the real thing (B16).
       pod: isService ? `${ref.name}-6c8d9-mn4p` : ref.name,
       service: isService ? ref.name : undefined,
-      remotePort,
+      // A Service's targetPort commonly differs from its published port; the mock
+      // mirrors that so the strip's "show what was asked for" rule is visible.
+      remotePort: isService ? 8080 : remotePort,
+      servicePort: isService && remotePort !== 8080 ? remotePort : undefined,
       localPort: 20000 + Math.floor(Math.random() * 10000),
     };
     this.forwards.push(fwd);

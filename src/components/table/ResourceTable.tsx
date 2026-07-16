@@ -127,6 +127,17 @@ export function ResourceTable() {
       </div>
       <div className={styles.wrap} ref={scrollRef}>
         <table className={`${styles.table} ${virtual ? styles.tableFixed : ""}`}>
+        {/* Fixed layout takes its widths from <col>, and divides the width
+            equally when there are none — which would squeeze NAME to the same
+            share as RESTARTS. Only needed in the windowed path; auto layout
+            sizes to content on its own. */}
+        {virtual && (
+          <colgroup>
+            {columns.map((col) => (
+              <col key={col} style={{ width: columnWidth(col) }} />
+            ))}
+          </colgroup>
+        )}
         <thead>
           <tr>
             {columns.map((col, i) => (
@@ -206,6 +217,46 @@ function headerHeight(scrollEl: HTMLElement): number {
 }
 
 /**
+ * Width for a column in the windowed path, keyed by header name (B21).
+ *
+ * Windowing forces `table-layout: fixed`, which sizes columns from `<col>` and
+ * splits the width *equally* when there are none — so without this, a pod name
+ * would get the same share as its restart count. Auto layout does this by
+ * measuring content, which is exactly what windowing takes away.
+ *
+ * Names and free text get the room; short, bounded values get only what they
+ * need. Anything unlisted (including CRD columns) falls back to a middling share.
+ */
+function columnWidth(header: string): string {
+  switch (header) {
+    case "NAME":
+    case "MESSAGE":
+      return "22%";
+    case "OBJECT":
+    case "HOSTS":
+    case "IMAGE":
+      return "16%";
+    case "NAMESPACE":
+    case "REASON":
+    case "PORTS":
+    case "CLUSTER-IP":
+    case "SCHEDULE":
+      return "12%";
+    case "AGE":
+    case "READY":
+    case "COUNT":
+    case "TYPE":
+    case "STATUS":
+    case "RESTARTS":
+    case "CPU":
+    case "MEM":
+      return "8%";
+    default:
+      return "10%";
+  }
+}
+
+/**
  * Track scroll position and viewport height, and derive the row window from them.
  * Returns `virtual: false` for lists short enough to render whole.
  */
@@ -221,13 +272,23 @@ function useVirtualRows(
   const virtualRef = useRef(virtual);
   virtualRef.current = virtual;
 
+  // Seed from the DOM whenever windowing engages. While it was off the handler
+  // below ignored scrolling, so the state can be stale by now — switching to a
+  // short kind lets the browser clamp scrollTop to 0 unobserved, and windowing
+  // around that abandoned offset would render the window behind a huge spacer,
+  // i.e. a blank table.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (virtual && el) setScrollTop(el.scrollTop);
+  }, [virtual, scrollRef]);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
 
     const onScroll = () => {
       // Short lists render whole; re-rendering them on every scroll event would
-      // be pure waste.
+      // be pure waste. The effect above repairs the state when this stops.
       if (virtualRef.current) setScrollTop(el.scrollTop);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
