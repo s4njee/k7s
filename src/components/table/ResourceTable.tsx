@@ -5,10 +5,11 @@
  * the detail panel; other kinds are not interactive.
  */
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import styles from "./ResourceTable.module.css";
 import { useStore } from "../../store";
 import { useNow } from "../../hooks/useNow";
+import { useTableKeys } from "../../hooks/useTableKeys";
 import { toneColor } from "../../lib/tone";
 import { formatAge, formatCpu, formatMem } from "../../lib/format";
 import { CLUSTER_SCOPED, KIND_META, type ResourceKind } from "../../lib/kinds";
@@ -52,12 +53,17 @@ export function ResourceTable() {
     return sortCol === null ? overlaid : sortRows(overlaid, sortCol, sortDir, now);
   }, [nav, allRows, namespace, tableFilter, podMetrics, nodeMetrics, podRows, sortCol, sortDir, now]);
 
+  // Keyboard navigation: highlighted row index + `/`-to-focus the filter.
+  const filterRef = useRef<HTMLInputElement>(null);
+  const highlight = useTableKeys(rows, selectRow, () => filterRef.current?.focus(), nav);
+
   return (
     <div className={styles.container}>
       <div className={styles.toolbar}>
         <div className={styles.search}>
           <span className={styles.searchIcon}>⌕</span>
           <input
+            ref={filterRef}
             className={styles.searchInput}
             value={tableFilter}
             onChange={(e) => setTableFilter(e.target.value)}
@@ -81,7 +87,7 @@ export function ResourceTable() {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
+          {rows.map((row, i) => {
             const selected = row.uid === selectedUid;
             return (
               <tr
@@ -90,6 +96,7 @@ export function ResourceTable() {
                   styles.row,
                   styles.rowClickable,
                   selected ? styles.rowSelected : "",
+                  i === highlight ? styles.rowHighlight : "",
                 ].join(" ")}
                 onClick={() => selectRow(row)}
               >

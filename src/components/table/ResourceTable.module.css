@@ -95,6 +95,14 @@
 .rowSelected {
   background: var(--bg-selected-row);
 }
+/* Keyboard-highlighted row: a subtle inset accent bar + hover-like background. */
+.rowHighlight {
+  background: var(--bg-control);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.rowHighlight.rowSelected {
+  background: var(--bg-selected-row);
+}
 
 .td {
   padding: 6px 14px;

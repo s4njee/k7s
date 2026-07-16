@@ -8,6 +8,7 @@
 
 import styles from "./App.module.css";
 import { useBootstrap } from "./hooks/useBootstrap";
+import { useGlobalKeys } from "./hooks/useGlobalKeys";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { TopBar } from "./components/topbar/TopBar";
 import { StatusBar } from "./components/statusbar/StatusBar";
@@ -17,6 +18,8 @@ import { DetailPanel } from "./components/detail/DetailPanel";
 export default function App() {
   // Wire provider → store and connect on mount.
   useBootstrap();
+  // App-level keyboard shortcuts (Esc cascade, detail tab cycling).
+  useGlobalKeys();
 
   return (
     <div className={styles.app}>

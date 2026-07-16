@@ -42,6 +42,19 @@ prototype's data, and a **TauriProvider** that invokes the Rust backend. Compone
 never reference either directly, so the entire UI can be developed and pixel-checked
 against the design without a cluster.
 
+## Keyboard shortcuts
+
+| Key | Action |
+|---|---|
+| `j` / `↓`, `k` / `↑` | Move the row highlight down / up |
+| `Enter` | Open the highlighted row's detail |
+| `g g` / `G` | Jump to the first / last row |
+| `/` | Focus the table filter |
+| `Esc` | Close an open menu → else clear the filter → else close the detail panel |
+| `[` / `]` | Cycle the detail panel's tabs |
+
+Shortcuts are ignored while typing in a field (filter, log search, YAML editor).
+
 ## Fixture cluster
 
 To exercise the real backend end-to-end, bring up a local `kind` cluster seeded with
