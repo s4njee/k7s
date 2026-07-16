@@ -1,11 +1,20 @@
 /**
- * Shell tab (B4): an interactive terminal (xterm) attached to the selected pod's
- * container via the backend exec session. Keystrokes go to the container; output
- * is written to the terminal; terminal resizes are forwarded. The session is torn
- * down on unmount / pod / container change.
+ * Shell tab (B4, B19): an interactive terminal (xterm) attached to the selected
+ * pod's container via the backend exec session. Keystrokes go to the container;
+ * output is written to the terminal; terminal resizes are forwarded.
+ *
+ * The terminal and the session have deliberately different lifetimes (B19):
+ *   - the terminal belongs to a pod+container, and
+ *   - a session is one connection to it, which can end (you type `exit`, the pod
+ *     restarts) and be reconnected.
+ * Keeping them apart is what preserves scrollback across a reconnect — the
+ * terminal isn't rebuilt, only the session underneath it is.
+ *
+ * The container choice is the tab's own (B19): it used to piggyback on the Logs
+ * tab's cycler index, so cycling log containers silently moved your shell.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -34,15 +43,28 @@ const TERM_THEME = {
 
 export function ShellTab() {
   const pod = useStore((s) => s.selectedRow);
-  const containerIndex = useStore((s) => s.containerIndex);
   const hostRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const handleRef = useRef<ShellHandle | null>(null);
 
   const containers = pod?.pod?.containers ?? [];
-  // Shell into a real container (ignore the logs "all" option) — default the first.
-  const container = containers.length ? containers[containerIndex % containers.length] : "";
 
+  // The tab's own container choice, defaulting to the first.
+  const [container, setContainer] = useState("");
   useEffect(() => {
-    if (!hostRef.current || !pod) return;
+    setContainer(containers[0] ?? "");
+    // Only on pod change: `containers` is a fresh array each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pod?.uid]);
+
+  // Why the session ended, or null while it's live. Drives the reconnect bar.
+  const [ended, setEnded] = useState<string | null>(null);
+  // Bumping this re-runs the session effect against the same terminal.
+  const [attempt, setAttempt] = useState(0);
+
+  // ---- the terminal: one per pod+container ----
+  useEffect(() => {
+    if (!hostRef.current || !container) return;
 
     const term = new Terminal({
       fontFamily: "'JetBrains Mono', ui-monospace, monospace",
@@ -54,34 +76,14 @@ export function ShellTab() {
     term.loadAddon(fit);
     term.open(hostRef.current);
     fit.fit();
+    termRef.current = term;
 
-    let handle: ShellHandle | null = null;
-    let cancelled = false;
-
-    void getProvider()
-      .startShell(
-        { kind: "pods", namespace: pod.namespace, name: pod.name },
-        container,
-        (data) => term.write(data),
-        (reason) => term.write(`\r\n\x1b[90m[${reason}]\x1b[0m\r\n`),
-      )
-      .then((h) => {
-        if (cancelled) {
-          h.stop();
-          return;
-        }
-        handle = h;
-        // Pipe keystrokes to the container and sync the initial size.
-        term.onData((d) => h.input(d));
-        h.resize(term.cols, term.rows);
-      })
-      .catch((e) => term.write(`\r\n\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m\r\n`));
-
-    // Refit + report size when the panel resizes.
+    // Refit + report size when the panel resizes. Reads the session through a ref
+    // so a reconnect doesn't need to rebuild the observer.
     const ro = new ResizeObserver(() => {
       try {
         fit.fit();
-        handle?.resize(term.cols, term.rows);
+        handleRef.current?.resize(term.cols, term.rows);
       } catch {
         /* element detached mid-resize */
       }
@@ -89,13 +91,94 @@ export function ShellTab() {
     ro.observe(hostRef.current);
 
     return () => {
-      cancelled = true;
       ro.disconnect();
-      handle?.stop();
       term.dispose();
+      termRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pod?.uid, container]);
 
-  return <div className={styles.shell} ref={hostRef} />;
+  // ---- the session: re-runs on reconnect, writing into the existing terminal ----
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term || !pod || !container) return;
+
+    setEnded(null);
+    let handle: ShellHandle | null = null;
+    let cancelled = false;
+    // xterm's onData returns a disposable; without disposing it, every reconnect
+    // would stack another listener and each keystroke would be sent twice.
+    let dataSub: { dispose(): void } | null = null;
+
+    void getProvider()
+      .startShell(
+        { kind: "pods", namespace: pod.namespace, name: pod.name },
+        container,
+        (data) => term.write(data),
+        (reason) => {
+          if (!cancelled) setEnded(reason || "session ended");
+        },
+      )
+      .then((h) => {
+        if (cancelled) {
+          h.stop();
+          return;
+        }
+        handle = h;
+        handleRef.current = h;
+        // Pipe keystrokes to the container and sync the initial size.
+        dataSub = term.onData((d) => h.input(d));
+        h.resize(term.cols, term.rows);
+      })
+      .catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        term.write(`\r\n\x1b[31m${msg}\x1b[0m\r\n`);
+        if (!cancelled) setEnded(msg);
+      });
+
+    return () => {
+      cancelled = true;
+      dataSub?.dispose();
+      handle?.stop();
+      handleRef.current = null;
+    };
+  }, [pod?.uid, container, attempt]);
+
+  /** Start a fresh session in the same terminal, marking the break in scrollback. */
+  const reconnect = () => {
+    termRef.current?.write("\r\n\x1b[90m── reconnecting ──\x1b[0m\r\n");
+    setAttempt((n) => n + 1);
+  };
+
+  return (
+    <div className={styles.wrap}>
+      {/* Only worth a picker when there's a choice to make. */}
+      {containers.length > 1 && (
+        <div className={styles.header}>
+          <span className={styles.headerLabel}>container</span>
+          <select
+            className={styles.picker}
+            value={container}
+            onChange={(e) => setContainer(e.target.value)}
+          >
+            {containers.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <div className={styles.shell} ref={hostRef} />
+
+      {ended !== null && (
+        <div className={styles.endedBar}>
+          <span className={styles.endedReason}>{ended}</span>
+          <span className={styles.reconnect} onClick={reconnect} title="start a new session">
+            ↻ reconnect
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }

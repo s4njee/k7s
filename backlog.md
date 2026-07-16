@@ -145,10 +145,12 @@ the first container) instead of sharing the logs cycler index; add a "reconnect"
 affordance when the session ends (the `[reason]` line becomes a row with a
 `↻ reconnect` button); keep scrollback on reconnect.
 
-**Accept:**
-- [ ] Multi-container pod: logs cycler and shell container choice no longer
-      affect each other.
-- [ ] After `exit` in the shell, one click reconnects; scrollback preserved.
+**Accept:** *(shipped — needs a GUI pass to confirm)*
+- [x] Multi-container pod: logs cycler and shell container choice no longer
+      affect each other — the Shell tab holds its own choice.
+- [x] After `exit` in the shell, one click reconnects; scrollback preserved (the
+      terminal and the session now have separate lifetimes, so reconnecting
+      rebuilds only the session).
 
 ### B20 — Drain node
 *Finishes B3's stretch goal.*
