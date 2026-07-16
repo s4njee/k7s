@@ -276,6 +276,26 @@ styling step works on runners with a GUI session; otherwise ship the .app zip).
 Tag-triggered releases attach artifacts.
 **Accept:** pushing a tag produces a downloadable build with all suites green.
 
+**Accept:** *(shipped — unverified on GitHub; this repo has no remote)*
+- [x] Every command the workflow runs was executed locally, exactly as written:
+      `pnpm install --frozen-lockfile`, typecheck, vitest, clippy `-D warnings`,
+      `cargo test`, and the real `pnpm tauri build`, which produced a 6.3MB zipped
+      `.app` that round-trips into a valid arm64 bundle.
+- [x] DMG is best-effort (`continue-on-error`) per the note above; it builds here,
+      where there's a GUI session.
+- [ ] **Not verified:** the workflow running on GitHub. There is no remote to push
+      to, so the YAML is validated and its commands are proven, but Actions itself
+      has never executed it.
+
+*The DMG step **deletes** `bundle/macos/k7s.app` after folding it into the image
+("Cleaning …/k7s.app"), so the zip step has to come first. It does — and now says
+so, because the failure only appears if someone reorders two steps that look
+independent.*
+
+*Uses pnpm, not npm: `node_modules` is pnpm's and `pnpm-lock.yaml` is the newer
+file, so it's what these builds actually come from. `packageManager` in
+package.json now pins the version for CI and corepack alike.*
+
 ### B26 — Helm releases view
 *freya is k3s + Helm; Lens parity feature.*
 

@@ -1,0 +1,132 @@
+# Release CI (B25): run every suite, then build the macOS app.
+#
+# Runs on:
+#   - a `v*` tag  → builds and attaches the artifacts to a GitHub Release
+#   - a push/PR   → runs the checks only, so a break is caught before tagging
+#   - manually    → workflow_dispatch, to get a build without cutting a tag
+#
+# macOS is not a preference: a .app/.dmg can only be produced on a macOS runner.
+#
+# The build is **unsigned and unnotarised** — there are no signing secrets in this
+# repo. Gatekeeper will refuse to open the download until it's cleared (right-click
+# → Open, or `xattr -d com.apple.quarantine`). Signing needs an Apple Developer
+# ID; wire APPLE_CERTIFICATE et al into the tauri-action step when there is one.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same ref makes the first build irrelevant; don't pay for it.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # macos-14 is arm64. The intel runner would need its own job and a separate
+    # artifact; k7s only ships a build for the arch it was built on.
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm before Node: setup-node's pnpm cache needs pnpm to already exist.
+      # Version comes from package.json's packageManager field, so CI and a
+      # developer's machine can't drift.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Without this every run rebuilds the whole dependency tree — tauri alone is
+      # several hundred crates, which is most of the wall clock.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        # --frozen-lockfile: fail rather than silently resolve something new, so a
+        # release is built from exactly the tree the lockfile describes.
+        run: pnpm install --frozen-lockfile
+
+      # ---- the full suite, before anything is built or published ----
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Frontend tests
+        run: pnpm test
+
+      - name: Clippy
+        # Same gate as local development: warnings are errors.
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: src-tauri
+
+      - name: Rust tests
+        run: cargo test
+        working-directory: src-tauri
+
+      # ---- build ----
+
+      - name: Build the app bundle
+        # `--bundles app` on its own, because the DMG step below is the fragile
+        # part and the .app is the thing that must always come out.
+        run: pnpm tauri build --bundles app
+
+      - name: Zip the .app
+        # ditto, not `zip`: it preserves the bundle's symlinks and resource forks,
+        # which a plain zip mangles into an app that won't launch.
+        #
+        # This MUST stay ahead of the DMG step. `tauri build --bundles dmg` deletes
+        # bundle/macos/k7s.app once it has folded it into the image ("Cleaning
+        # …/k7s.app"), so zipping afterwards would fail on a missing file — and
+        # only when someone happens to reorder these two steps.
+        run: ditto -c -k --keepParent "src-tauri/target/release/bundle/macos/k7s.app" "k7s-macos-arm64.zip"
+
+      - name: Build the DMG (best-effort)
+        id: dmg
+        # Tauri styles the DMG window with AppleScript, which wants a GUI session
+        # and can fail on a headless runner. That must not fail the release: the
+        # zipped .app above is a complete artifact on its own.
+        continue-on-error: true
+        run: pnpm tauri build --bundles dmg
+
+      - name: Note a skipped DMG
+        if: steps.dmg.outcome == 'failure'
+        run: echo "::warning::DMG bundling failed on this runner (usually the headless AppleScript step); shipping the zipped .app only."
+
+      # ---- publish ----
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: k7s-macos-arm64
+          path: |
+            k7s-macos-arm64.zip
+            src-tauri/target/release/bundle/dmg/*.dmg
+          # The DMG is allowed to be missing (see above); the zip never is, and
+          # upload-artifact fails the step if *nothing* matches.
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          body: |
+            Unsigned build — macOS will quarantine it on download.
+            To run it: right-click the app → Open, or `xattr -dr com.apple.quarantine /Applications/k7s.app`.
+          files: |
+            k7s-macos-arm64.zip
+            src-tauri/target/release/bundle/dmg/*.dmg
