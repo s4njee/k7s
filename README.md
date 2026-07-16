@@ -35,7 +35,30 @@ VITE_DEMO=1 npm run dev        # → http://localhost:1420
 VITE_DEMO=1 VITE_STRESS=5000 npm run dev
 
 # Real app — Rust backend + webview against your current kubeconfig context.
-npm run tauri:dev
+dev/run.sh                     # preferred; see below
+npm run tauri:dev              # raw equivalent
+```
+
+### `dev/run.sh` — why not just `npm run tauri:dev`?
+
+Because `tauri dev` can silently show you a **stale build**. It serves the webview
+from `devUrl` (localhost:1420), but `tauri.conf.json` also declares
+`frontendDist: "../dist"`. If vite isn't actually up on 1420 — a previous run left
+an orphan holding the port, or vite died — the window can come up rendering
+whatever `npm run build` last produced. It looks like the app, with features
+mysteriously missing. We lost real time to this twice: it reads as "my code is
+broken" when in fact your code was never loaded.
+
+`dev/run.sh` makes that state unreachable. It stops any previous k7s dev
+processes (matched to *this* repo — it will never touch another project's vite),
+refuses to start if something else owns port 1420 rather than killing a stranger,
+deletes `dist/` so there's nothing stale to fall back to, and watches vite for as
+long as the app runs — if vite dies, it says so and stops the app instead of
+leaving you debugging a ghost.
+
+```bash
+dev/run.sh                                   # current kubeconfig context
+KUBECONFIG=/path/to/kubeconfig dev/run.sh    # a specific one
 ```
 
 ### Demo mode vs. real mode

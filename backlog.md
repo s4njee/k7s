@@ -220,9 +220,21 @@ vite dies. Delete `dist/` in dev (or add a visible "BUNDLED BUILD" badge when
 `import.meta.env.DEV` is false but the app was launched via `tauri dev`… simplest:
 just remove stale dist as part of the script). Document in README.
 
-**Accept:**
-- [ ] Running `dev/run.sh` twice never yields two app instances or a stale-dist
-      window.
+**Accept:** *(shipped)*
+- [x] Running `dev/run.sh` twice never yields two app instances or a stale-dist
+      window — verified by running it against a live first instance: it reclaimed
+      all four processes and came back to exactly 1 app / 1 vite / 1 listener /
+      no `dist/`.
+- [x] Fails loudly if vite dies: verified by killing vite under a running app —
+      it names the stale-bundle risk and stops the app.
+- [x] Never touches other projects: verified against a second Tauri app
+      (`rstorrent`) and another project's vite, both untouched.
+
+*Two bugs this found in its own first draft, both the very failure it targets:
+signalling `npm` left vite **and** the app orphaned (they're grandchildren), and
+the app binary can't be matched by path at all — cargo launches it as the
+relative `target/debug/k7s`, so every absolute pattern silently matched nothing.
+That second one is exactly the mistake that caused the original incident.*
 
 ### B25 — Release CI
 **Do:** GitHub Actions workflow on a macOS runner: install deps, run the full
