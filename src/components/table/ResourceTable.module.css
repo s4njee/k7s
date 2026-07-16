@@ -97,10 +97,13 @@
   background: transparent;
 }
 
-/* Pins windowed rows to exactly the height the spacer math assumes (ROW_HEIGHT).
-   A row even a pixel off would drift the window out of step with the scrollbar. */
-.rowFixed {
-  height: 28px;
+/* Windowed rows are pinned to exactly the height the spacer math assumes — a row
+   even a pixel off would drift the window out of step with the scrollbar. The
+   height itself is set inline from ROW_HEIGHT rather than written here, so the
+   two can't disagree; this only stops the padding from stretching the row. */
+.rowFixed td {
+  padding-top: 0;
+  padding-bottom: 0;
 }
 /* Row hover uses #17171a (the control background, per Design §3). */
 .rowClickable {

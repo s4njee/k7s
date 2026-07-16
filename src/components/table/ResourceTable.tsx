@@ -157,6 +157,9 @@ export function ResourceTable() {
                   selected ? styles.rowSelected : "",
                   index === highlight ? styles.rowHighlight : "",
                 ].join(" ")}
+                // Height comes from the same constant the spacer math uses, so the
+                // two cannot drift apart. Natural height when not windowed.
+                style={virtual ? { height: ROW_HEIGHT } : undefined}
                 onClick={() => onSelect(row)}
               >
                 {row.cells.map((cell, j) => (
@@ -177,9 +180,9 @@ export function ResourceTable() {
 }
 
 /**
- * Row height used by the windowing math, enforced by `.rowFixed` (B21). The
- * design's rows are 28px; virtualized rows are pinned to exactly that so the
- * spacer arithmetic can't drift out of step with the real layout.
+ * Row height used by the windowing math (B21), and the single source of it: it's
+ * applied to windowed rows inline, so the spacer arithmetic and the real layout
+ * cannot disagree. The design's rows are 28px.
  */
 const ROW_HEIGHT = 28;
 
