@@ -389,16 +389,18 @@ pub struct EventItem {
     age: String,
 }
 
-/// Gather a pod's properties: placement, containers, volumes (PVC → PV) and the
-/// Services that select it (B13).
+/// Gather an object's properties as a generic section document (B13, B18).
+/// Errors for kinds with no gatherer — the frontend only offers the tab for the
+/// kinds that have one.
 #[tauri::command]
-pub async fn get_pod_properties(
+pub async fn get_properties(
+    kind: String,
     namespace: String,
     name: String,
     mgr: State<'_, Arc<ClientManager>>,
-) -> AppResult<properties::PodProperties> {
+) -> AppResult<properties::Properties> {
     let client = require_client(&mgr).await?;
-    properties::gather(client, &namespace, &name).await
+    properties::gather(client, &kind, &namespace, &name).await
 }
 
 /// List events for an object, newest first, field-selected by involvedObject.

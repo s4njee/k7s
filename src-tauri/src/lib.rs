@@ -58,7 +58,7 @@ pub fn run() {
             commands::scale_resource,
             commands::set_cordon,
             commands::get_events,
-            commands::get_pod_properties,
+            commands::get_properties,
             commands::watch_custom_kind,
             commands::unwatch_custom_kind,
             commands::start_log_stream,

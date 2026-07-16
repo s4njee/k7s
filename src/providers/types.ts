@@ -196,60 +196,38 @@ export interface KeyValue {
   value: string;
 }
 
-/** Per-container summary in the Properties tab (B13). */
-export interface ContainerInfo {
-  name: string;
-  image: string;
-  ready: boolean;
-  restarts: number;
-  /** "Running" | "Waiting: Reason" | "Terminated: Reason" | "Unknown". */
-  state: string;
-  /** "request / limit", or "—". */
-  cpu: string;
-  memory: string;
-  ports: string;
+/** One row of a properties field grid: a label and a toned value. */
+export interface Field {
+  label: string;
+  value: Cell;
 }
 
-/** A volume attached to the pod; PVC-backed ones carry resolved claim/PV details. */
-export interface VolumeInfo {
-  name: string;
-  /** "PVC" | "ConfigMap" | "Secret" | "EmptyDir" | … */
-  kind: string;
-  mountPaths: string;
-  readOnly: boolean;
-  claim: string;
-  pv: string;
-  capacity: string;
-  storageClass: string;
-  accessModes: string;
-  phase: string;
+/**
+ * What a properties section renders as (B18). Discriminated by `type`, matching
+ * the backend's tagged enum.
+ */
+export type SectionBody =
+  | { type: "fields"; fields: Field[] }
+  | { type: "table"; columns: string[]; rows: Cell[][] }
+  | { type: "chips"; chips: KeyValue[] };
+
+/** One section of the Properties tab. */
+export interface Section {
+  title: string;
+  /** Rendered in place of an empty table ("no taints"). */
+  emptyNote?: string;
+  body: SectionBody;
 }
 
-/** A Service whose selector matches the pod. */
-export interface ServiceInfo {
-  name: string;
-  type: string;
-  clusterIp: string;
-  ports: string;
-}
-
-/** Everything the Properties tab renders for a pod (B13). */
-export interface PodProperties {
-  node: string;
-  podIp: string;
-  hostIp: string;
-  qosClass: string;
-  serviceAccount: string;
-  priorityClass: string;
-  restartPolicy: string;
-  /** RFC3339; formatted as an age by the UI. */
-  startTime: string;
-  owner: string;
-  labels: KeyValue[];
-  annotations: KeyValue[];
-  containers: ContainerInfo[];
-  volumes: VolumeInfo[];
-  services: ServiceInfo[];
+/**
+ * Everything the Properties tab renders, for any kind (B13, B18).
+ *
+ * The backend decides both the content *and* the shape: sections are a generic
+ * grid/table/chips document, so a new kind is a backend gatherer and no frontend
+ * change. See src-tauri/src/kube/properties.rs.
+ */
+export interface Properties {
+  sections: Section[];
 }
 
 /** Persisted UI preferences (B11) — where the user left off. */
@@ -335,8 +313,12 @@ export interface DataProvider {
   /** Rejects with the API error message (shown inline) on failure. */
   applyYaml(ref: ResourceRef, text: string): Promise<void>;
   getEvents(ref: ResourceRef): Promise<EventItem[]>;
-  /** Pod properties: placement, containers, volumes (PVC→PV), selecting Services. */
-  getPodProperties(ref: ResourceRef): Promise<PodProperties>;
+  /**
+   * Properties for an object: what it's wired to, as a generic section document.
+   * Rejects for kinds without a gatherer — see `KINDS_WITH_PROPERTIES`, which is
+   * what stops the tab being offered for them (B13, B18).
+   */
+  getProperties(ref: ResourceRef): Promise<Properties>;
 
   // ---- mutations (B3); all reject with the API error message on failure ----
   /** Delete a resource of any kind. */

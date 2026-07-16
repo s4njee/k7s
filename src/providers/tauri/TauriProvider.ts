@@ -22,8 +22,8 @@ import type {
   LogOptions,
   NodeMetricsMap,
   PodMetricsMap,
-  PodProperties,
   Prefs,
+  Properties,
   CustomKind,
   KindId,
   ResourceRef,
@@ -118,8 +118,9 @@ export class TauriProvider implements DataProvider {
     });
   }
 
-  getPodProperties(ref: ResourceRef): Promise<PodProperties> {
-    return invoke<PodProperties>("get_pod_properties", {
+  getProperties(ref: ResourceRef): Promise<Properties> {
+    return invoke<Properties>("get_properties", {
+      kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
     });

@@ -5,7 +5,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { isClusterScoped, isCustomKind, kindMeta } from "./kinds";
+import { isClusterScoped, isCustomKind, kindMeta, KINDS_WITH_PROPERTIES } from "./kinds";
+import { mockProperties } from "../providers/mock/properties";
 import type { CustomKind } from "../providers/types";
 
 const APPS: CustomKind = {
@@ -65,6 +66,22 @@ describe("kindMeta", () => {
   it("returns undefined for a custom kind this cluster doesn't have", () => {
     // e.g. a nav restored from prefs after switching to a cluster without that CRD.
     expect(kindMeta("traefik.io/ingressroutes", CUSTOM)).toBeUndefined();
+  });
+});
+
+describe("KINDS_WITH_PROPERTIES", () => {
+  // The set decides whether the tab is offered; a kind listed without a gatherer
+  // would render a tab that only ever errors ("no dead tab", B18).
+  it("every listed kind actually has a gatherer", () => {
+    for (const kind of KINDS_WITH_PROPERTIES) {
+      expect(mockProperties({ kind, namespace: "prod", name: "x" }), kind).not.toBeNull();
+    }
+  });
+
+  it("kinds without a gatherer are not listed", () => {
+    expect(KINDS_WITH_PROPERTIES.has("configmaps")).toBe(false);
+    expect(KINDS_WITH_PROPERTIES.has("events")).toBe(false);
+    expect(mockProperties({ kind: "configmaps", namespace: "prod", name: "x" })).toBeNull();
   });
 });
 

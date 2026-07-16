@@ -126,11 +126,18 @@ taints, capacity vs allocatable, kubelet/OS/kernel versions, addresses),
 **PVC-view on StatefulSets** (volume claim templates + bound PVCs). Frontend: the
 Properties tab shows for these kinds (POD_ONLY set becomes per-kind capability).
 
-**Accept:**
-- [ ] Deployment properties on freya show ReplicaSets + conditions; Service
+**Accept:** *(shipped)*
+- [x] Deployment properties on freya show ReplicaSets + conditions; Service
       properties list ready endpoint pods; Node properties show taints and
-      capacity/allocatable.
-- [ ] Kinds without a gatherer simply don't show the tab (no dead tab).
+      capacity/allocatable. Verified with `cargo run --example properties_check`,
+      which gathers all five kinds off live objects and asserts those sections.
+- [x] Kinds without a gatherer simply don't show the tab (no dead tab) —
+      `KINDS_WITH_PROPERTIES` gates it, and a vitest asserts every listed kind
+      really has a gatherer.
+
+*Note: rather than a DTO + renderer per kind, gatherers return a generic section
+document (field grid / table / chips) that the frontend renders for any kind — so
+B18's remaining kinds, and future ones, are backend-only additions.*
 
 ### B19 — Shell UX polish
 **Do:** Give the Shell tab its own container picker (small dropdown, defaults to

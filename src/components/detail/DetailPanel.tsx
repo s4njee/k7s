@@ -11,7 +11,7 @@ import { useStore, type DetailTab } from "../../store";
 import { useNow } from "../../hooks/useNow";
 import { formatAge } from "../../lib/format";
 import { toneColor } from "../../lib/tone";
-import { kindMeta } from "../../lib/kinds";
+import { kindMeta, KINDS_WITH_PROPERTIES } from "../../lib/kinds";
 import { LogsTab } from "./LogsTab";
 import { PropertiesTab } from "./PropertiesTab";
 import { ShellTab } from "./ShellTab";
@@ -27,8 +27,11 @@ const ALL_TABS: { id: DetailTab; label: string }[] = [
   { id: "events", label: "Events" },
 ];
 
-/** Tabs available only for pods (the others apply to every kind). */
-const POD_ONLY_TABS = new Set<DetailTab>(["logs", "properties", "shell"]);
+/**
+ * Tabs that need a running container, so they only apply to pods. Properties is
+ * no longer among them: it shows for any kind with a gatherer (B18).
+ */
+const POD_ONLY_TABS = new Set<DetailTab>(["logs", "shell"]);
 
 export function DetailPanel() {
   const row = useStore((s) => s.selectedRow);
@@ -47,8 +50,13 @@ export function DetailPanel() {
 
   const meta = row.pod; // present only for pods
   const isPod = !!meta;
-  // Logs/Shell are pod-only; other kinds get YAML + Events.
-  const tabs = isPod ? ALL_TABS : ALL_TABS.filter((t) => !POD_ONLY_TABS.has(t.id));
+  // Logs/Shell need a container, so they're pod-only. Properties shows only for
+  // kinds with a gatherer — otherwise it'd be a tab that only ever errors (B18).
+  const tabs = ALL_TABS.filter((t) => {
+    if (POD_ONLY_TABS.has(t.id)) return isPod;
+    if (t.id === "properties") return KINDS_WITH_PROPERTIES.has(nav);
+    return true;
+  });
   const statusColor = meta ? toneColor(meta.statusTone) : "var(--text-muted)";
   // Custom kinds resolve their label from discovery, so this is a runtime lookup.
   const kindLabel = kindMeta(nav, customKinds)?.label ?? nav;

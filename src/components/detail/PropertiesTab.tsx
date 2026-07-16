@@ -1,8 +1,13 @@
 /**
- * Properties tab (B13): what the selected pod is actually wired to — placement,
- * containers, attached volumes (with PVC → PV resolved: capacity, storage class,
- * access modes, phase, mount paths), and the Services whose selector matches it,
- * plus labels/annotations. Fetched in one backend call on open / pod change.
+ * Properties tab (B13, B18): what the selected object is actually wired to.
+ *
+ * The backend decides both the content and the shape — it returns an ordered list
+ * of sections, each a field grid, a table, or chips (see
+ * src-tauri/src/kube/properties.rs). This renders that document generically, so a
+ * pod's containers/volumes/services and a node's taints/capacity go through the
+ * same code and adding a kind needs no change here.
+ *
+ * Fetched in one backend call on open / selection change.
  */
 
 import { useEffect, useState } from "react";
@@ -12,21 +17,22 @@ import { getProvider } from "../../providers";
 import { useNow } from "../../hooks/useNow";
 import { formatAge } from "../../lib/format";
 import { toneColor } from "../../lib/tone";
-import type { PodProperties } from "../../providers/types";
+import type { Cell, Properties, Section } from "../../providers/types";
 
 export function PropertiesTab() {
-  const pod = useStore((s) => s.selectedRow);
-  const [props, setProps] = useState<PodProperties | null>(null);
+  const row = useStore((s) => s.selectedRow);
+  const kind = useStore((s) => s.nav);
+  const [props, setProps] = useState<Properties | null>(null);
   const [error, setError] = useState<string | null>(null);
   const now = useNow();
 
   useEffect(() => {
-    if (!pod) return;
+    if (!row) return;
     let cancelled = false;
     setProps(null);
     setError(null);
     void getProvider()
-      .getPodProperties({ kind: "pods", namespace: pod.namespace, name: pod.name })
+      .getProperties({ kind, namespace: row.namespace, name: row.name })
       .then((p) => {
         if (!cancelled) setProps(p);
       })
@@ -36,123 +42,47 @@ export function PropertiesTab() {
     return () => {
       cancelled = true;
     };
-  }, [pod?.uid, pod?.namespace, pod?.name]);
+  }, [row?.uid, row?.namespace, row?.name, kind]);
 
   if (error) return <div className={styles.state}>{error}</div>;
   if (!props) return <div className={styles.state}>loading properties…</div>;
 
-  // Started: format the RFC3339 start time as an age (blank when unset).
-  const started = props.startTime ? formatAge(props.startTime, now) : "—";
-  const pvcVolumes = props.volumes.filter((v) => v.kind === "PVC");
-  const otherVolumes = props.volumes.filter((v) => v.kind !== "PVC");
-
   return (
     <div className={styles.wrap}>
-      {/* ---- Overview ---- */}
-      <div className={styles.section}>
-        <div className={styles.sectionHeader}>Overview</div>
+      {props.sections.map((s) => (
+        <SectionView key={s.title} section={s} now={now} />
+      ))}
+    </div>
+  );
+}
+
+/** One section: header (with a row count for tables) plus its body. */
+function SectionView({ section, now }: { section: Section; now: number }) {
+  const { body } = section;
+  return (
+    <div className={styles.section}>
+      <div className={styles.sectionHeader}>
+        {section.title}
+        {/* Counts belong on lists, not on the Overview grid or chip groups. */}
+        {body.type === "table" && ` (${body.rows.length})`}
+      </div>
+
+      {body.type === "fields" && (
         <div className={styles.grid}>
-          <Row k="node" v={props.node} />
-          <Row k="pod IP" v={props.podIp} />
-          <Row k="host IP" v={props.hostIp} />
-          <Row k="QoS" v={props.qosClass} />
-          <Row k="owner" v={props.owner} />
-          <Row k="service account" v={props.serviceAccount} />
-          <Row k="restart policy" v={props.restartPolicy} />
-          <Row k="priority class" v={props.priorityClass} />
-          <Row k="started" v={started} />
+          {body.fields.map((f) => (
+            <FieldRow key={f.label} label={f.label} value={f.value} now={now} />
+          ))}
         </div>
-      </div>
+      )}
 
-      {/* ---- Containers ---- */}
-      <div className={styles.section}>
-        <div className={styles.sectionHeader}>Containers ({props.containers.length})</div>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              {["NAME", "IMAGE", "STATE", "READY", "RESTARTS", "CPU R/L", "MEM R/L", "PORTS"].map(
-                (h) => (
-                  <th key={h} className={styles.th}>
-                    {h}
-                  </th>
-                ),
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {props.containers.map((c) => (
-              <tr key={c.name}>
-                <td className={`${styles.td} ${styles.tdName}`}>{c.name}</td>
-                <td className={`${styles.td} ${styles.tdWrap}`}>{c.image}</td>
-                <td className={styles.td} style={{ color: stateColor(c.state) }}>
-                  {c.state}
-                </td>
-                <td className={styles.td} style={{ color: toneColor(c.ready ? "ok" : "warn") }}>
-                  {c.ready ? "yes" : "no"}
-                </td>
-                <td className={styles.td} style={{ color: toneColor(c.restarts > 5 ? "err" : "secondary") }}>
-                  {c.restarts}
-                </td>
-                <td className={styles.td}>{c.cpu}</td>
-                <td className={styles.td}>{c.memory}</td>
-                <td className={styles.td}>{c.ports}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* ---- Storage (PVC-backed volumes) ---- */}
-      <div className={styles.section}>
-        <div className={styles.sectionHeader}>Storage ({pvcVolumes.length})</div>
-        {pvcVolumes.length === 0 ? (
-          <div className={styles.empty}>no persistent volumes attached</div>
+      {body.type === "table" &&
+        (body.rows.length === 0 ? (
+          <div className={styles.empty}>{section.emptyNote}</div>
         ) : (
           <table className={styles.table}>
             <thead>
               <tr>
-                {["VOLUME", "CLAIM", "PV", "CAPACITY", "CLASS", "ACCESS", "PHASE", "MOUNTED AT"].map(
-                  (h) => (
-                    <th key={h} className={styles.th}>
-                      {h}
-                    </th>
-                  ),
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {pvcVolumes.map((v) => (
-                <tr key={v.name}>
-                  <td className={`${styles.td} ${styles.tdName}`}>{v.name}</td>
-                  <td className={styles.td}>{v.claim}</td>
-                  <td className={`${styles.td} ${styles.tdWrap}`}>{v.pv}</td>
-                  <td className={styles.td}>{v.capacity}</td>
-                  <td className={styles.td}>{v.storageClass}</td>
-                  <td className={styles.td}>{v.accessModes}</td>
-                  <td className={styles.td} style={{ color: toneColor(v.phase === "Bound" ? "ok" : "warn") }}>
-                    {v.phase}
-                  </td>
-                  <td className={`${styles.td} ${styles.tdWrap}`}>
-                    {v.mountPaths}
-                    {v.readOnly ? " (ro)" : ""}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* ---- Services selecting this pod ---- */}
-      <div className={styles.section}>
-        <div className={styles.sectionHeader}>Services ({props.services.length})</div>
-        {props.services.length === 0 ? (
-          <div className={styles.empty}>no services select this pod</div>
-        ) : (
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                {["NAME", "TYPE", "CLUSTER-IP", "PORTS"].map((h) => (
+                {body.columns.map((h) => (
                   <th key={h} className={styles.th}>
                     {h}
                   </th>
@@ -160,94 +90,52 @@ export function PropertiesTab() {
               </tr>
             </thead>
             <tbody>
-              {props.services.map((s) => (
-                <tr key={s.name}>
-                  <td className={`${styles.td} ${styles.tdName}`}>{s.name}</td>
-                  <td className={styles.td}>{s.type}</td>
-                  <td className={styles.td}>{s.clusterIp}</td>
-                  <td className={styles.td}>{s.ports}</td>
+              {body.rows.map((cells, i) => (
+                <tr key={i}>
+                  {cells.map((cell, j) => (
+                    <td
+                      // The first column is the row's name; later ones may hold
+                      // long text (images, messages) that should wrap.
+                      className={`${styles.td} ${j === 0 ? styles.tdName : styles.tdWrap}`}
+                      key={j}
+                      style={{ color: toneColor(cell.tone) }}
+                    >
+                      {cellText(cell, now)}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+        ))}
 
-      {/* ---- Other volumes (config/secret/projected/…) ---- */}
-      {otherVolumes.length > 0 && (
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>Other volumes ({otherVolumes.length})</div>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                {["VOLUME", "KIND", "MOUNTED AT"].map((h) => (
-                  <th key={h} className={styles.th}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {otherVolumes.map((v) => (
-                <tr key={v.name}>
-                  <td className={`${styles.td} ${styles.tdName}`}>{v.name}</td>
-                  <td className={styles.td}>{v.kind}</td>
-                  <td className={`${styles.td} ${styles.tdWrap}`}>
-                    {v.mountPaths}
-                    {v.readOnly ? " (ro)" : ""}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* ---- Labels / annotations ---- */}
-      {props.labels.length > 0 && (
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>Labels</div>
-          <div className={styles.chips}>
-            {props.labels.map((l) => (
-              <span key={l.key} className={styles.chip} title={`${l.key}=${l.value}`}>
-                <span className={styles.chipKey}>{l.key}</span>
-                <span className={styles.chipVal}>{l.value}</span>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-      {props.annotations.length > 0 && (
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>Annotations</div>
-          <div className={styles.chips}>
-            {props.annotations.map((a) => (
-              <span key={a.key} className={styles.chip} title={`${a.key}=${a.value}`}>
-                <span className={styles.chipKey}>{a.key}</span>
-                <span className={styles.chipVal}>{a.value}</span>
-              </span>
-            ))}
-          </div>
+      {body.type === "chips" && (
+        <div className={styles.chips}>
+          {body.chips.map((kv) => (
+            <span key={kv.key} className={styles.chip} title={`${kv.key}=${kv.value}`}>
+              <span className={styles.chipKey}>{kv.key}</span>
+              <span className={styles.chipVal}>{kv.value}</span>
+            </span>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-/** One key/value row in the overview grid. */
-function Row({ k, v }: { k: string; v: string }) {
+/** One key/value row in a field grid. */
+function FieldRow({ label, value, now }: { label: string; value: Cell; now: number }) {
   return (
     <>
-      <span className={styles.gridKey}>{k}</span>
-      <span className={styles.gridVal}>{v}</span>
+      <span className={styles.gridKey}>{label}</span>
+      <span className={styles.gridVal} style={{ color: toneColor(value.tone) }}>
+        {cellText(value, now)}
+      </span>
     </>
   );
 }
 
-/** Color a container state like the table statuses. */
-function stateColor(state: string): string {
-  if (state.startsWith("Running")) return toneColor("ok");
-  if (state.startsWith("Waiting")) return toneColor("warn");
-  if (state.startsWith("Terminated")) return toneColor("err");
-  return toneColor("secondary");
+/** Cell text, formatting age cells like the resource tables do. */
+function cellText(cell: Cell, now: number): string {
+  return cell.format === "age" ? formatAge(cell.text, now) : cell.text;
 }

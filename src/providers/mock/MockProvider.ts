@@ -18,8 +18,8 @@ import type {
   LogOptions,
   NodeMetricsMap,
   PodMetricsMap,
-  PodProperties,
   Prefs,
+  Properties,
   CustomKind,
   KindId,
   ResourceRef,
@@ -32,6 +32,7 @@ import { MOCK_CLUSTERS, MOCK_CUSTOM_KINDS, MOCK_PODS, buildCustomRows, buildKind
 import { makeLogLine, seedLogLines } from "./logs";
 import { yamlForPodName, yamlForGeneric } from "./yaml";
 import { eventsForPodName } from "./events";
+import { mockProperties } from "./properties";
 
 /** Interval (ms) between mock log lines, matching the prototype's default. */
 const LOG_TICK_MS = 900;
@@ -124,91 +125,12 @@ export class MockProvider implements DataProvider {
     return eventsForPodName(ref.name);
   }
 
-  async getPodProperties(ref: ResourceRef): Promise<PodProperties> {
-    const pod = MOCK_PODS.find((p) => p.name === ref.name);
-    const running = pod?.status === "Running";
-    const containers = (pod?.containers ?? ["app"]).map((c, i) => ({
-      name: c,
-      image: `registry.freya.io/${c}:v2.4.1`,
-      ready: running,
-      restarts: i === 0 ? (pod?.restarts ?? 0) : 0,
-      state: running ? "Running" : `Waiting: ${pod?.status ?? "Unknown"}`,
-      cpu: "100m / 1",
-      memory: "256Mi / 1Gi",
-      ports: "8080/TCP",
-    }));
-
-    // Stateful mock pods get a PVC-backed volume so the storage section is shown.
-    const stateful = /db|postgres|prometheus/.test(ref.name);
-    const volumes = [
-      ...(stateful
-        ? [
-            {
-              name: "data",
-              kind: "PVC",
-              mountPaths: "/var/lib/data",
-              readOnly: false,
-              claim: `data-${ref.name}`,
-              pv: "pvc-8f2c1a3e-4b7d-11ef-9c21",
-              capacity: "20Gi",
-              storageClass: "local-path",
-              accessModes: "ReadWriteOnce",
-              phase: "Bound",
-            },
-          ]
-        : []),
-      {
-        name: "config",
-        kind: "ConfigMap",
-        mountPaths: "/etc/config",
-        readOnly: true,
-        claim: "",
-        pv: "",
-        capacity: "",
-        storageClass: "",
-        accessModes: "",
-        phase: "",
-      },
-      {
-        name: "kube-api-access",
-        kind: "Projected",
-        mountPaths: "/var/run/secrets/kubernetes.io/serviceaccount",
-        readOnly: true,
-        claim: "",
-        pv: "",
-        capacity: "",
-        storageClass: "",
-        accessModes: "",
-        phase: "",
-      },
-    ];
-
-    const app = ref.name.split("-").slice(0, 2).join("-");
-    return {
-      node: pod?.node ?? "—",
-      podIp: "10.244.2.37",
-      hostIp: "192.168.1.153",
-      qosClass: "Burstable",
-      serviceAccount: `${ref.namespace}-runtime`,
-      priorityClass: "—",
-      restartPolicy: "Always",
-      startTime: "",
-      owner: `ReplicaSet/${app}-7d9f8b64d`,
-      labels: [
-        { key: "app", value: app },
-        { key: "version", value: "v2.4.1" },
-        { key: "team", value: "platform" },
-      ],
-      annotations: [
-        { key: "prometheus.io/scrape", value: "true" },
-        { key: "prometheus.io/port", value: "9090" },
-      ],
-      containers,
-      volumes,
-      services: [
-        { name: app, type: "ClusterIP", clusterIp: "10.96.14.22", ports: "8080/TCP" },
-      ],
-    };
+  async getProperties(ref: ResourceRef): Promise<Properties> {
+    const props = mockProperties(ref);
+    // Match the backend, which errors for kinds with no gatherer — the tab isn't
+    // offered for those, so this only fires if the two lists drift apart.
+    if (!props) throw new Error(`no properties for kind ${ref.kind}`);
+    return props;
   }
 
   // Mutations are no-ops in demo mode (the data is static) — they resolve so the

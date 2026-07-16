@@ -135,6 +135,20 @@ const CLUSTER_SCOPED: ReadonlySet<string> = new Set<string>(["nodes", "namespace
 /** Groups in sidebar order. */
 export const GROUP_ORDER: NavGroup[] = ["workloads", "network", "config", "cluster", "custom"];
 
+/**
+ * Kinds with a properties gatherer (B13, B18). Must match the `match` in
+ * src-tauri/src/kube/properties.rs `gather` — a kind listed here without a
+ * gatherer would show a tab that only ever errors, and one with a gatherer but
+ * missing here just doesn't offer the tab.
+ */
+export const KINDS_WITH_PROPERTIES: ReadonlySet<string> = new Set<string>([
+  "pods",
+  "deployments",
+  "services",
+  "statefulsets",
+  "nodes",
+]);
+
 // ---------------------------------------------------------------------------
 // Custom (CRD-backed) kinds — B15
 // ---------------------------------------------------------------------------
