@@ -10,6 +10,8 @@ import type {
   ClusterStatus,
   ContextInfo,
   DataProvider,
+  DrainFailure,
+  DrainProgress,
   EventItem,
   ForwardInfo,
   ImportResult,
@@ -63,6 +65,7 @@ export class MockProvider implements DataProvider {
   private watchCbs = new Set<(n: number) => void>();
   private customKindCbs = new Set<(k: CustomKind[]) => void>();
   private forwardCbs = new Set<(f: ForwardInfo[]) => void>();
+  private drainCbs = new Set<(p: DrainProgress) => void>();
 
   // ---- one-shot commands ----
 
@@ -139,6 +142,33 @@ export class MockProvider implements DataProvider {
   async scaleResource(_ref: ResourceRef, _replicas: number): Promise<void> {}
   async setCordon(_node: string, _unschedulable: boolean): Promise<void> {}
 
+  /**
+   * Simulate a drain (B20): tick evictions out over a couple of seconds so the
+   * progress banner is demonstrable, and have one pod blocked by a PDB — that's
+   * the case worth seeing, since it's the one that stops a drain finishing.
+   */
+  async drainNode(node: string): Promise<void> {
+    const total = 6;
+    let evicted = 0;
+    const failures: DrainFailure[] = [];
+    const tick = () => {
+      if (evicted < total - 1) {
+        evicted += 1;
+      } else if (failures.length === 0) {
+        failures.push({
+          pod: "prod/yggdrasil-db-0",
+          message:
+            "blocked by a PodDisruptionBudget: Cannot evict pod as it would violate the pod's disruption budget.",
+          blockedByPdb: true,
+        });
+      }
+      const done = evicted >= total - 1 && failures.length > 0;
+      for (const cb of this.drainCbs) cb({ node, evicted, total, failures: [...failures], done });
+      if (!done) setTimeout(tick, 400);
+    };
+    setTimeout(tick, 300);
+  }
+
   // Demo mode doesn't persist anything.
   async loadPrefs(): Promise<Prefs | null> {
     return null;
@@ -208,6 +238,13 @@ export class MockProvider implements DataProvider {
     queueMicrotask(() => cb(MOCK_WATCH_COUNT));
     return () => {
       this.watchCbs.delete(cb);
+    };
+  }
+
+  onDrainProgress(cb: (p: DrainProgress) => void): Unsub {
+    this.drainCbs.add(cb);
+    return () => {
+      this.drainCbs.delete(cb);
     };
   }
 

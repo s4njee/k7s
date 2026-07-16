@@ -1,8 +1,12 @@
 /**
  * Detail panel (Design §4). Opens for the selected row. Pods get a header with
- * status/node/age and a Logs/YAML/Events tab strip; other kinds get a simpler
- * header and YAML/Events only (no logs). The selected row's kind is the current
- * nav kind, since selection is cleared whenever nav changes.
+ * status/node/age and the full tab strip; other kinds get a simpler header, and
+ * their tabs depend on the kind — Logs/Shell need a container, and Properties
+ * needs a gatherer (B18). The selected row's kind is the current nav kind, since
+ * selection is cleared whenever nav changes.
+ *
+ * The header also carries transient state for the selected object: action errors,
+ * and node drain progress (B20).
  */
 
 import { useState } from "react";
@@ -18,6 +22,7 @@ import { ShellTab } from "./ShellTab";
 import { YamlTab } from "./YamlTab";
 import { EventsTab } from "./EventsTab";
 import { ActionsMenu } from "./ActionsMenu";
+import type { DrainProgress } from "../../providers/types";
 
 const ALL_TABS: { id: DetailTab; label: string }[] = [
   { id: "logs", label: "Logs" },
@@ -40,6 +45,7 @@ export function DetailPanel() {
   const setActiveTab = useStore((s) => s.setActiveTab);
   const closeDetail = useStore((s) => s.closeDetail);
   const customKinds = useStore((s) => s.customKinds);
+  const drains = useStore((s) => s.drains);
   const now = useNow();
 
   // Error from an action (delete/scale/cordon), shown as a header banner.
@@ -47,6 +53,9 @@ export function DetailPanel() {
 
   // Panel is closed when nothing is selected.
   if (!row) return null;
+
+  // Drain progress for this node, if one has run this session (B20).
+  const drain = nav === "nodes" ? drains[row.name] : undefined;
 
   const meta = row.pod; // present only for pods
   const isPod = !!meta;
@@ -80,6 +89,10 @@ export function DetailPanel() {
             {actionError}
           </div>
         )}
+
+        {/* Drain progress for this node (B20) — a drain runs for minutes, so it
+            reports here rather than blocking the action menu. */}
+        {drain && <DrainBanner progress={drain} />}
 
         {isPod ? (
           <div className={styles.meta}>
@@ -121,10 +134,48 @@ export function DetailPanel() {
       </div>
 
       {activeTab === "logs" && isPod && <LogsTab />}
-      {activeTab === "properties" && isPod && <PropertiesTab />}
+      {/* Mirrors the tab list above: Properties is no longer pod-only (B18). */}
+      {activeTab === "properties" && KINDS_WITH_PROPERTIES.has(nav) && <PropertiesTab />}
       {activeTab === "shell" && isPod && <ShellTab />}
       {activeTab === "yaml" && <YamlTab />}
       {activeTab === "events" && <EventsTab />}
+    </div>
+  );
+}
+
+/**
+ * Node drain progress (B20): evicted/total, plus the pods that wouldn't go.
+ *
+ * A PDB block is the expected sticking point rather than a failure — it means the
+ * eviction would take a workload below its declared availability — so it reads
+ * amber and says what to do, while a real error reads red.
+ */
+function DrainBanner({ progress }: { progress: DrainProgress }) {
+  const { evicted, total, failures, done } = progress;
+  const blocked = failures.filter((f) => f.blockedByPdb);
+  const errored = failures.filter((f) => !f.blockedByPdb);
+  const tone = errored.length ? "err" : blocked.length ? "warn" : done ? "ok" : "secondary";
+
+  return (
+    <div className={styles.drainBanner} style={{ borderColor: toneColor(tone) }}>
+      <div className={styles.drainLine}>
+        <span style={{ color: toneColor(tone) }}>
+          {done ? "drain finished" : "draining"}: {evicted}/{total} evicted
+        </span>
+        {!done && <span className={styles.drainSpinner}>…</span>}
+      </div>
+      {blocked.length > 0 && (
+        <div className={styles.drainDetail}>
+          {blocked.length} pod{blocked.length > 1 ? "s" : ""} held by a PodDisruptionBudget —
+          they need more replicas elsewhere, or the budget relaxed:{" "}
+          {blocked.map((f) => f.pod).join(", ")}
+        </div>
+      )}
+      {errored.map((f) => (
+        <div key={f.pod} className={styles.drainDetail} style={{ color: toneColor("err") }}>
+          {f.pod}: {f.message}
+        </div>
+      ))}
     </div>
   );
 }

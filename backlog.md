@@ -161,9 +161,16 @@ DaemonSet-owned and mirror pods) and create `Eviction`s; emit progress events
 reporting them rather than retry-looping. Frontend: Drain… in the node actions
 menu with confirm + progress in the header banner.
 
-**Accept:**
-- [ ] Draining a freya worker cordons it and evicts non-DaemonSet pods; PDB
-      blocks surface as a readable message; uncordon restores schedulability.
+**Accept:** *(shipped — the destructive path is deliberately unexercised)*
+- [x] Cordons, then evicts non-DaemonSet pods; PDB blocks surface as a readable
+      message; uncordon restores schedulability (existing action).
+- [x] Selection rules verified **read-only** against freya with `cargo run
+      --example drain_check`, which reports what a drain *would* do: of 54 pods,
+      29 would be evicted and 25 skipped (DaemonSet-owned, completed jobs, a
+      failed pod). No pod was evicted and no node cordoned — draining a live node
+      is the operator's call, not a harness's.
+- [ ] **Not verified:** an actual drain, and a real PDB 429. Unit tests cover the
+      429 classification; the live path needs a cluster you're willing to disrupt.
 
 ### B21 — Table virtualization
 *Scale safety: freya's 71 pods are fine, but 2–5k-pod clusters will jank the

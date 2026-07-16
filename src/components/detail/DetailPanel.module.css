@@ -235,3 +235,30 @@
   color: var(--text-primary);
   border-bottom-color: var(--accent);
 }
+
+/* ---------- Drain progress banner (B20) ---------- */
+
+/* Left-bordered in the tone of the drain's worst outcome (see DrainBanner). */
+.drainBanner {
+  margin: 6px 0 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border-default);
+  border-left-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.drainLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.drainSpinner {
+  color: var(--text-faint);
+}
+.drainDetail {
+  margin-top: 3px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}

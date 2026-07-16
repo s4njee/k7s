@@ -7,7 +7,8 @@ use crate::error::{AppError, AppResult};
 use crate::kube::client::{self, ClusterInfo, ContextInfo};
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
 use crate::kube::{
-    discovery, exec, logs, mappers, metrics, portforward, properties, watchers, ClientManager,
+    discovery, drain, exec, logs, mappers, metrics, portforward, properties, watchers,
+    ClientManager,
 };
 use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::core::v1::Event;
@@ -375,6 +376,28 @@ pub async fn watch_custom_kind(kind: String, mgr: State<'_, Arc<ClientManager>>)
 #[tauri::command]
 pub async fn unwatch_custom_kind(kind: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
     mgr.remove_custom_watcher(&kind).await;
+    Ok(())
+}
+
+/// Drain a node (B20): cordon it, then evict its pods in the background.
+///
+/// Cordoning happens inline so an RBAC/not-found failure surfaces as a rejected
+/// command rather than a silent no-op. The eviction pass then runs as a
+/// connection-scoped task reporting via [`kube::events::DRAIN_PROGRESS`] — it can
+/// take minutes, so blocking the command on it would freeze the UI.
+#[tauri::command]
+pub async fn drain_node(name: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+    let client = require_client(&mgr).await?;
+    let manager: Arc<ClientManager> = (*mgr).clone();
+
+    // Cordon first: without it the scheduler could refill the node as we drain it.
+    drain::cordon(client.clone(), &name).await?;
+
+    let app = manager.app();
+    let task = tokio::spawn(async move {
+        drain::run_drain(client, app, name).await;
+    });
+    manager.push_task(task).await;
     Ok(())
 }
 

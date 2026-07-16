@@ -21,7 +21,7 @@ interface ActionsMenuProps {
   onDeleted: () => void;
 }
 
-type Mode = "menu" | "confirmDelete" | "scale" | "forward";
+type Mode = "menu" | "confirmDelete" | "scale" | "forward" | "confirmDrain";
 
 export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps) {
   const [open, setOpen] = useState(false);
@@ -111,6 +111,13 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
                   >
                     Uncordon
                   </div>
+                  {/* Evicts every pod on the node — confirmed, and marked danger. */}
+                  <div
+                    className={`${styles.actionsRow} ${styles.actionsDanger}`}
+                    onClick={() => setMode("confirmDrain")}
+                  >
+                    Drain…
+                  </div>
                 </>
               )}
               {canDelete && (
@@ -142,6 +149,27 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
                   }
                 >
                   Delete
+                </div>
+              </div>
+            </div>
+          )}
+
+          {mode === "confirmDrain" && (
+            <div className={styles.actionsConfirm}>
+              <div className={styles.actionsConfirmText}>
+                Drain {row.name}? This cordons it and evicts every pod on it
+                (DaemonSet and static pods stay).
+              </div>
+              <div className={styles.actionsConfirmRow}>
+                <div className={styles.cancelBtn} onClick={() => setMode("menu")}>
+                  Cancel
+                </div>
+                <div
+                  className={styles.deleteBtn}
+                  aria-disabled={busy}
+                  onClick={() => run(() => getProvider().drainNode(row.name), close)}
+                >
+                  Drain
                 </div>
               </div>
             </div>

@@ -10,6 +10,7 @@ import type {
   ClusterStatus,
   ContextInfo,
   CustomKind,
+  DrainProgress,
   ForwardInfo,
   KindId,
   LogLine,
@@ -95,6 +96,12 @@ export interface AppState {
   nodeMetrics: NodeMetricsMap;
   /** Active port-forwards (B6). */
   portForwards: ForwardInfo[];
+  /**
+   * Node drains in progress or recently finished, keyed by node name (B20).
+   * Kept in the store rather than in the node's panel so progress survives
+   * navigating away — a drain takes minutes.
+   */
+  drains: Record<string, DrainProgress>;
 
   // ---------- detail panel ----------
   /** Selected row (null → panel closed). Pods also get a Logs tab. */
@@ -135,6 +142,7 @@ export interface AppState {
   setPodMetrics: (m: PodMetricsMap) => void;
   setNodeMetrics: (m: NodeMetricsMap) => void;
   setPortForwards: (list: ForwardInfo[]) => void;
+  setDrain: (progress: DrainProgress) => void;
   resetData: () => void;
 
   // detail panel
@@ -177,6 +185,7 @@ export const useStore = create<AppState>((set) => ({
   podMetrics: {},
   nodeMetrics: {},
   portForwards: [],
+  drains: {},
 
   selectedRow: null,
   activeTab: "logs",
@@ -230,6 +239,7 @@ export const useStore = create<AppState>((set) => ({
   setPodMetrics: (m) => set({ podMetrics: m }),
   setNodeMetrics: (m) => set({ nodeMetrics: m }),
   setPortForwards: (list) => set({ portForwards: list }),
+  setDrain: (p) => set((s) => ({ drains: { ...s.drains, [p.node]: p } })),
   // Wipe all live data on disconnect/context-switch (Story 6.1). The backend also
   // aborts every forward/shell on reset, so we clear the local list here too.
   resetData: () =>
@@ -243,6 +253,8 @@ export const useStore = create<AppState>((set) => ({
       podMetrics: {},
       nodeMetrics: {},
       portForwards: [],
+      // Drains belong to the old connection; the backend aborts them on reset.
+      drains: {},
       selectedRow: null,
       logBuffer: [],
       clusterStatus: null,

@@ -6,6 +6,7 @@
 
 pub mod client;
 pub mod discovery;
+pub mod drain;
 pub mod dto;
 pub mod exec;
 pub mod logs;
@@ -81,6 +82,10 @@ pub mod events {
     /// The active port-forwards, pushed whenever one is added, removed, or fails
     /// (B16) — so the strip reflects failures without the UI polling for them.
     pub const FORWARDS_UPDATE: &str = "forwards-update";
+    /// Progress of a node drain (B20): `{ node, evicted, total, failures, done }`.
+    /// One event carrying the node, rather than a per-node channel, so progress
+    /// lands in the store and survives navigating away mid-drain.
+    pub const DRAIN_PROGRESS: &str = "drain-progress";
     /// Log lines for a stream: emitted as `log-line:{streamId}`.
     pub const LOG_LINE_PREFIX: &str = "log-line:";
     /// Stream end/error: emitted as `log-closed:{streamId}`.

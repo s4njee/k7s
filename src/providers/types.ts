@@ -287,6 +287,25 @@ export interface ForwardInfo {
   error?: string;
 }
 
+/** A pod a drain could not evict (B20). */
+export interface DrainFailure {
+  pod: string;
+  message: string;
+  /** True when a PodDisruptionBudget held it back (429), not a real error. */
+  blockedByPdb: boolean;
+}
+
+/** Progress of a node drain (B20). */
+export interface DrainProgress {
+  node: string;
+  evicted: number;
+  /** Pods eligible for eviction (excludes DaemonSet/mirror/finished pods). */
+  total: number;
+  failures: DrainFailure[];
+  /** False while working; true once every pod has been attempted. */
+  done: boolean;
+}
+
 /** Unsubscribe function returned by the `on*` event subscriptions. */
 export type Unsub = () => void;
 
@@ -327,6 +346,11 @@ export interface DataProvider {
   scaleResource(ref: ResourceRef, replicas: number): Promise<void>;
   /** Cordon or uncordon a node. */
   setCordon(node: string, unschedulable: boolean): Promise<void>;
+  /**
+   * Drain a node (B20): cordon it, then evict its pods in the background.
+   * Resolves once cordoned — watch {@link onDrainProgress} for the rest.
+   */
+  drainNode(node: string): Promise<void>;
 
   // ---- persisted preferences (B11) ----
   /** Load persisted UI preferences, or null if none / not supported (demo). */
@@ -351,6 +375,8 @@ export interface DataProvider {
   onNodeMetrics(cb: (metrics: NodeMetricsMap) => void): Unsub;
   onClusterStatus(cb: (status: ClusterStatus) => void): Unsub;
   onWatchStatus(cb: (activeStreams: number) => void): Unsub;
+  /** Progress of running node drains (B20). */
+  onDrainProgress(cb: (progress: DrainProgress) => void): Unsub;
 
   // ---- log streaming ----
   startLogs(

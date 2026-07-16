@@ -26,6 +26,7 @@ export function useBootstrap(): void {
       setContexts,
       setCustomKinds,
       setPortForwards,
+      setDrain,
     } = useStore.getState();
 
     // Reconcile cluster-status into the connection lifecycle (Story 6.2): a live
@@ -60,6 +61,8 @@ export function useBootstrap(): void {
       // Forwards are pushed on add/remove/failure, so a forward that starts
       // failing turns red without the strip polling for it (B16).
       provider.onForwards(setPortForwards),
+      // Node drain progress (B20) — lands in the store so it survives navigation.
+      provider.onDrainProgress(setDrain),
     ];
 
     // Discover contexts, restore saved preferences, then connect (B11).

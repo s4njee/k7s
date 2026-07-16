@@ -57,6 +57,7 @@ pub fn run() {
             commands::delete_resource,
             commands::scale_resource,
             commands::set_cordon,
+            commands::drain_node,
             commands::get_events,
             commands::get_properties,
             commands::watch_custom_kind,

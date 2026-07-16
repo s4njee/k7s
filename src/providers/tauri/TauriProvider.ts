@@ -14,6 +14,7 @@ import type {
   ClusterStatus,
   ContextInfo,
   DataProvider,
+  DrainProgress,
   EventItem,
   ForwardInfo,
   ImportResult,
@@ -147,6 +148,10 @@ export class TauriProvider implements DataProvider {
     return invoke<void>("set_cordon", { name: node, unschedulable });
   }
 
+  drainNode(node: string): Promise<void> {
+    return invoke<void>("drain_node", { name: node });
+  }
+
   loadPrefs(): Promise<Prefs | null> {
     return invoke<Prefs | null>("load_prefs");
   }
@@ -189,6 +194,10 @@ export class TauriProvider implements DataProvider {
 
   onWatchStatus(cb: (activeStreams: number) => void): Unsub {
     return subscribe<number>("watch-status", cb);
+  }
+
+  onDrainProgress(cb: (progress: DrainProgress) => void): Unsub {
+    return subscribe<DrainProgress>("drain-progress", cb);
   }
 
   // ---- log streaming ----
