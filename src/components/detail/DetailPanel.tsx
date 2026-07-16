@@ -16,6 +16,7 @@ import { useNow } from "../../hooks/useNow";
 import { formatAge } from "../../lib/format";
 import { toneColor } from "../../lib/tone";
 import { kindMeta, KINDS_WITH_PROPERTIES } from "../../lib/kinds";
+import { drainErrors, drainSummary, drainTone, pdbBlocked } from "../../lib/drain";
 import { LogsTab } from "./LogsTab";
 import { PropertiesTab } from "./PropertiesTab";
 import { ShellTab } from "./ShellTab";
@@ -145,24 +146,19 @@ export function DetailPanel() {
 
 /**
  * Node drain progress (B20): evicted/total, plus the pods that wouldn't go.
- *
- * A PDB block is the expected sticking point rather than a failure — it means the
- * eviction would take a workload below its declared availability — so it reads
- * amber and says what to do, while a real error reads red.
+ * The judgement about how it reads (a PDB block is not a failure) lives in
+ * lib/drain.ts, where it's tested.
  */
 function DrainBanner({ progress }: { progress: DrainProgress }) {
-  const { evicted, total, failures, done } = progress;
-  const blocked = failures.filter((f) => f.blockedByPdb);
-  const errored = failures.filter((f) => !f.blockedByPdb);
-  const tone = errored.length ? "err" : blocked.length ? "warn" : done ? "ok" : "secondary";
+  const tone = drainTone(progress);
+  const blocked = pdbBlocked(progress);
+  const errored = drainErrors(progress);
 
   return (
     <div className={styles.drainBanner} style={{ borderColor: toneColor(tone) }}>
       <div className={styles.drainLine}>
-        <span style={{ color: toneColor(tone) }}>
-          {done ? "drain finished" : "draining"}: {evicted}/{total} evicted
-        </span>
-        {!done && <span className={styles.drainSpinner}>…</span>}
+        <span style={{ color: toneColor(tone) }}>{drainSummary(progress)}</span>
+        {!progress.done && <span className={styles.drainSpinner}>…</span>}
       </div>
       {blocked.length > 0 && (
         <div className={styles.drainDetail}>
