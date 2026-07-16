@@ -26,7 +26,7 @@ export function useGlobalKeys(): void {
       if ((e.key === "[" || e.key === "]") && s.selectedRow && !isTypingTarget(document.activeElement)) {
         // Cycle among the tabs available for this row (pods also have Logs).
         const tabs: DetailTab[] = s.selectedRow.pod
-          ? ["logs", "shell", "yaml", "events"]
+          ? ["logs", "properties", "shell", "yaml", "events"]
           : ["yaml", "events"];
         const i = Math.max(0, tabs.indexOf(s.activeTab));
         const next = e.key === "]" ? (i + 1) % tabs.length : (i - 1 + tabs.length) % tabs.length;

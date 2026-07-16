@@ -13,6 +13,7 @@ import { formatAge } from "../../lib/format";
 import { toneColor } from "../../lib/tone";
 import { KIND_META } from "../../lib/kinds";
 import { LogsTab } from "./LogsTab";
+import { PropertiesTab } from "./PropertiesTab";
 import { ShellTab } from "./ShellTab";
 import { YamlTab } from "./YamlTab";
 import { EventsTab } from "./EventsTab";
@@ -20,13 +21,14 @@ import { ActionsMenu } from "./ActionsMenu";
 
 const ALL_TABS: { id: DetailTab; label: string }[] = [
   { id: "logs", label: "Logs" },
+  { id: "properties", label: "Properties" },
   { id: "shell", label: "Shell" },
   { id: "yaml", label: "YAML" },
   { id: "events", label: "Events" },
 ];
 
 /** Tabs available only for pods (the others apply to every kind). */
-const POD_ONLY_TABS = new Set<DetailTab>(["logs", "shell"]);
+const POD_ONLY_TABS = new Set<DetailTab>(["logs", "properties", "shell"]);
 
 export function DetailPanel() {
   const row = useStore((s) => s.selectedRow);
@@ -108,6 +110,7 @@ export function DetailPanel() {
       </div>
 
       {activeTab === "logs" && isPod && <LogsTab />}
+      {activeTab === "properties" && isPod && <PropertiesTab />}
       {activeTab === "shell" && isPod && <ShellTab />}
       {activeTab === "yaml" && <YamlTab />}
       {activeTab === "events" && <EventsTab />}

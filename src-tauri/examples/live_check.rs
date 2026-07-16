@@ -7,7 +7,7 @@
 //! Picks the argocd-redis pod, runs `echo` in it (exec), then opens a portforward
 //! to 6379 and sends a Redis PING (port-forward).
 
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::core::v1::{Event, Pod};
 use kube::api::{Api, AttachParams, ListParams};
 use kube::Client;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -15,6 +15,27 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let client = Client::try_default().await?;
+
+    // ---- events (B1 path): find a pod with events, query the same way get_events does ----
+    {
+        let all_events: Api<Event> = Api::all(client.clone());
+        let all = all_events
+            .list(&ListParams::default().fields("involvedObject.kind=Pod"))
+            .await?;
+        println!("cluster pod-events found: {}", all.items.len());
+        if let Some(ev) = all.items.iter().find(|e| e.involved_object.name.is_some()) {
+            let ns = ev.involved_object.namespace.clone().unwrap_or_default();
+            let name = ev.involved_object.name.clone().unwrap_or_default();
+            let ns_api: Api<Event> = Api::namespaced(client.clone(), &ns);
+            let lp = ListParams::default()
+                .fields(&format!("involvedObject.name={name},involvedObject.namespace={ns}"));
+            match ns_api.list(&lp).await {
+                Ok(list) => println!("get_events({ns}/{name}) → {} events", list.items.len()),
+                Err(e) => println!("get_events ERROR: {e}"),
+            }
+        }
+    }
+
     let pods: Api<Pod> = Api::namespaced(client, "argocd");
 
     // Find the argocd-redis pod.

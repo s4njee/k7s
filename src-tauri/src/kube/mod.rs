@@ -12,6 +12,7 @@ pub mod manager;
 pub mod mappers;
 pub mod metrics;
 pub mod portforward;
+pub mod properties;
 pub mod watchers;
 
 use serde::{Deserialize, Serialize};

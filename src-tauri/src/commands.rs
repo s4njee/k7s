@@ -6,7 +6,7 @@
 use crate::error::{AppError, AppResult};
 use crate::kube::client::{self, ClusterInfo, ContextInfo};
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
-use crate::kube::{exec, logs, mappers, metrics, portforward, watchers, ClientManager};
+use crate::kube::{exec, logs, mappers, metrics, portforward, properties, watchers, ClientManager};
 use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::core::v1::Event;
 use kube::api::{
@@ -302,6 +302,18 @@ pub struct EventItem {
     message: String,
     count: i32,
     age: String,
+}
+
+/// Gather a pod's properties: placement, containers, volumes (PVC → PV) and the
+/// Services that select it (B13).
+#[tauri::command]
+pub async fn get_pod_properties(
+    namespace: String,
+    name: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<properties::PodProperties> {
+    let client = require_client(&mgr).await?;
+    properties::gather(client, &namespace, &name).await
 }
 
 /// List events for an object, newest first, field-selected by involvedObject.

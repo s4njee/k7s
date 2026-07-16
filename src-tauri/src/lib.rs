@@ -55,6 +55,7 @@ pub fn run() {
             commands::scale_resource,
             commands::set_cordon,
             commands::get_events,
+            commands::get_pod_properties,
             commands::start_log_stream,
             commands::stop_log_stream,
             commands::start_shell,

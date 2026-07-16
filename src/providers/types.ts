@@ -148,6 +148,68 @@ export interface NodeMetrics {
 }
 export type NodeMetricsMap = Record<string, NodeMetrics>;
 
+/** A label/annotation entry. */
+export interface KeyValue {
+  key: string;
+  value: string;
+}
+
+/** Per-container summary in the Properties tab (B13). */
+export interface ContainerInfo {
+  name: string;
+  image: string;
+  ready: boolean;
+  restarts: number;
+  /** "Running" | "Waiting: Reason" | "Terminated: Reason" | "Unknown". */
+  state: string;
+  /** "request / limit", or "—". */
+  cpu: string;
+  memory: string;
+  ports: string;
+}
+
+/** A volume attached to the pod; PVC-backed ones carry resolved claim/PV details. */
+export interface VolumeInfo {
+  name: string;
+  /** "PVC" | "ConfigMap" | "Secret" | "EmptyDir" | … */
+  kind: string;
+  mountPaths: string;
+  readOnly: boolean;
+  claim: string;
+  pv: string;
+  capacity: string;
+  storageClass: string;
+  accessModes: string;
+  phase: string;
+}
+
+/** A Service whose selector matches the pod. */
+export interface ServiceInfo {
+  name: string;
+  type: string;
+  clusterIp: string;
+  ports: string;
+}
+
+/** Everything the Properties tab renders for a pod (B13). */
+export interface PodProperties {
+  node: string;
+  podIp: string;
+  hostIp: string;
+  qosClass: string;
+  serviceAccount: string;
+  priorityClass: string;
+  restartPolicy: string;
+  /** RFC3339; formatted as an age by the UI. */
+  startTime: string;
+  owner: string;
+  labels: KeyValue[];
+  annotations: KeyValue[];
+  containers: ContainerInfo[];
+  volumes: VolumeInfo[];
+  services: ServiceInfo[];
+}
+
 /** Persisted UI preferences (B11) — where the user left off. */
 export interface Prefs {
   context?: string | null;
@@ -214,6 +276,8 @@ export interface DataProvider {
   /** Rejects with the API error message (shown inline) on failure. */
   applyYaml(ref: ResourceRef, text: string): Promise<void>;
   getEvents(ref: ResourceRef): Promise<EventItem[]>;
+  /** Pod properties: placement, containers, volumes (PVC→PV), selecting Services. */
+  getPodProperties(ref: ResourceRef): Promise<PodProperties>;
 
   // ---- mutations (B3); all reject with the API error message on failure ----
   /** Delete a resource of any kind. */

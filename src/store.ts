@@ -21,7 +21,7 @@ import { KIND_ORDER, type ResourceKind } from "./lib/kinds";
 export const LOG_BUFFER_CAP = 200;
 
 /** Detail-panel tab identifiers. */
-export type DetailTab = "logs" | "shell" | "yaml" | "events";
+export type DetailTab = "logs" | "properties" | "shell" | "yaml" | "events";
 
 /** Which dropdown menu (if any) is currently open — only one at a time. */
 export type OpenMenu = "cluster" | "ns" | null;
