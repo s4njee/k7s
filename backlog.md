@@ -1,243 +1,198 @@
-# k7s — Feature backlog
+# k7s — Backlog (v2)
 
-Post-v1 features, roughly ordered by payoff-to-effort. Each item is scoped like the
-stories in [tasks.md](tasks.md): self-contained, with pointers into the codebase and
-acceptance criteria. The global Definition of Done from tasks.md applies (clippy
-`-D warnings`, `cargo test`, `tsc`, `vitest`, demo-mode or fixture-cluster
-verification, no hardcoded hex — tokens only).
+Prioritized next additions. The v1 backlog (B1–B13) is **shipped** on
+`feat/backlog-qol` — detail panel for all kinds, filter bar, actions
+(delete/scale/cordon), sorting, multi-container logs, keyboard nav, persisted
+state, namespace pod counts, shell/exec, port-forwarding, and the pod Properties
+panel — all verified against the live `freya` cluster. Numbering continues from
+there.
 
-Architecture refresher: the UI talks to a `DataProvider` seam
-([src/providers/types.ts](src/providers/types.ts)) with Mock and Tauri
-implementations; the Rust backend owns per-connection tasks in `ClientManager`
-([src-tauri/src/kube/manager.rs](src-tauri/src/kube/manager.rs)) and emits
-row-DTO snapshots ([src-tauri/src/kube/watchers.rs](src-tauri/src/kube/watchers.rs),
-[dto.rs](src-tauri/src/kube/dto.rs)). New backend features should follow the same
-patterns: commands for one-shots, events for streams, abortable tasks registered
-with the manager.
+Conventions are unchanged (see [tasks.md](tasks.md)): each item is
+self-contained with **Do**/**Accept**, the DoD is clippy `-D warnings` +
+`cargo test` + `tsc` + `vitest` + live or demo verification, colors come from
+tokens only. Backend work follows the established patterns: commands for
+one-shots, events for streams, abortable tasks registered in `ClientManager`
+([src-tauri/src/kube/manager.rs](src-tauri/src/kube/manager.rs)).
 
 ---
 
-> **Progress:** B1–B3, B5, B7, B10, B11, B12 done, plus B4 (shell/exec) and B6 (port-forwarding) — verified live against the freya cluster. Only B8 (CRDs) and B9 (events view) remain.
+## P0 — highest priority
 
-## B1 — Detail panel for all resource kinds
-*The design handoff names this the natural follow-up ("extending YAML/Events to all
-kinds"). Pods keep their Logs tab; every other kind gets YAML + Events.*
+### B14 — Cluster-wide Events view
+*Why first: per-pod events expire after ~1h, so the per-pod tab is usually empty
+(observed on freya) — the cluster feed is where problems actually surface.*
 
-**Do:**
-- Backend: generalize `get_yaml` / `apply_yaml` / `get_events`
-  ([src-tauri/src/commands.rs](src-tauri/src/commands.rs)) beyond `kind == "pods"`.
-  Either match per kind to the typed `Api<K>` (12 arms, reuses existing imports) or
-  use `kube::api::DynamicObject` with an `ApiResource` looked up per kind. Strip
-  `managedFields` as today. Events field-selector works for any involvedObject.
-- Frontend: allow row click → detail for all kinds. Non-pod rows need a generic
-  header (name, ns, age, first status-ish cell) — extend `Row` with an optional
-  generic meta or derive from cells. Tab strip shows YAML/Events only (Logs stays
-  pods-only). `selectedPod` becomes `selectedRow` in the store; keep the log-stream
-  hooks gated on `pod != null`.
-- Mock: reuse the YAML generator for pods; add a small generic YAML stub for other
-  kinds so demo mode demonstrates the flow.
+**Do:** Add an `events` pseudo-kind under the Cluster nav group (icon `☲`).
+Backend: one more watcher in `spawn_all` on core/v1 Events, mapped to columns
+TYPE, REASON, OBJECT (`kind/name`), NAMESPACE, AGE, COUNT, MESSAGE — TYPE toned
+Warning→`err`, Normal→`ok`; sort Warnings first, then newest; cap the snapshot at
+the latest ~500 to bound payloads. ns filter applies; rows are not clickable
+(v1). Also: give the per-pod Events tab an empty-state hint ("no recent events —
+events expire after ~1h").
 
 **Accept:**
-- [ ] Clicking a Deployment/Service/ConfigMap row opens the panel with YAML + Events.
-- [ ] Editing a Deployment's replica count via YAML Apply scales it (fixture cluster).
-- [ ] Pods still show all three tabs; Secrets YAML is reachable but this is a
-      deliberate decision point — either render values or redact `data:` (pick one,
-      document it in docs/verification.md).
-- [ ] Selection/clear behavior (nav switch, ns switch, ×) works for every kind.
+- [ ] The freya feed shows the live FailedMount/FailedScheduling warnings at the
+      top and updates as they recur.
+- [ ] Event churn doesn't spam re-renders (existing debounce covers it); list
+      stays ≤ cap; ns filter narrows.
+- [ ] Per-pod Events tab shows the TTL hint instead of a bare "no events".
 
-## B2 — Table filter bar
-*A `⌕` name filter above the table, like the log search.*
+### B15 — CRD support (dynamic resource kinds)
+*Why: freya is CRD-heavy — Argo CD Applications, Traefik IngressRoutes, ARC
+RunnerSets, helm.cattle.io charts. Without CRDs the app can't show half the
+cluster's real state.*
 
-**Do:** Add `tableFilter` to the store (cleared on nav change). Render a search
-field above [ResourceTable](src/components/table/ResourceTable.tsx) styled like the
-logs toolbar search (bg `--bg-terminal`, border `--border-default`, mono 11px,
-placeholder `filter…`). Filter rows client-side on name (case-insensitive substring)
-inside the existing `useMemo` alongside the ns filter. Empty result reuses
-"no resources match filter". Keyboard: `/` focuses it, `esc` clears+blurs (coordinate
-with B11).
-
-**Accept:**
-- [ ] Typing narrows rows live across all kinds; count in the nav stays pre-filter.
-- [ ] Clearing restores; nav switch resets the filter.
-- [ ] Pixel-consistent with the logs search field.
-
-## B3 — Resource actions (delete pod, scale, cordon/drain)
-*First mutations beyond YAML apply. Each is one command + a confirm.*
-
-**Do:**
-- Backend commands: `delete_pod(ns, name)` (`Api::<Pod>::delete`),
-  `scale(kind, ns, name, replicas)` (patch the scale subresource for
-  Deployments/StatefulSets), `set_cordon(node, bool)` (patch `spec.unschedulable`).
-  Drain = cordon + evict pods (`create` an `Eviction`) — mark drain optional/stretch.
-- Frontend: an actions affordance in the detail header (e.g. a `⋯` menu styled like
-  the dropdowns) and/or row context menu. Destructive actions get an inline confirm
-  (small menu row "confirm delete?" pattern — no browser `confirm()`).
-- Errors surface like YAML apply errors (inline strip, `--status-err`).
+**Do:** On connect, run API discovery (`kube::discovery::Discovery`) and emit a
+`custom-kinds` event `[{group, kind, plural, namespaced}]` for CRD-backed
+resources. Watch lazily: start a `DynamicObject` watcher only when the user opens
+that kind (register/unregister commands) so hundreds of CRDs don't spawn watchers.
+Generic columns NAME, NAMESPACE?, AGE. Frontend: a "Custom" nav section listing
+discovered kinds (scrollable, filterable if long); detail (YAML/Events) rides the
+existing DynamicObject path from B1. Watch count includes only open CRD watchers.
 
 **Accept:**
-- [ ] Delete pod: pod vanishes, replacement appears via watch (fixture cluster).
-- [ ] Scale deployment 1→3: table READY updates live; scale back down works.
-- [ ] Cordon node: Nodes table STATUS shows the change; uncordon restores.
-- [ ] Every action asks for confirmation and reports API errors inline.
+- [ ] Argo CD `Application` and Traefik `IngressRoute` resources list live on
+      freya; YAML opens; ns filter works.
+- [ ] No CRD watcher runs until its kind is opened (watch-status proves it);
+      closing/leaving the kind stops it.
+- [ ] RBAC-forbidden CRDs degrade like built-in kinds (empty table, no crash).
 
-## B4 — Shell / exec into containers
-*The flagship Lens feature. Fourth detail tab: Shell (pods only).*
+### B16 — Port-forward Services (and forward UX)
+*Why: B6 shipped pod forwarding only; the original spec included Services, and
+forwarding a Service is the common case ("give me grafana").*
 
-**Do:**
-- Backend: `kube`'s `Api::<Pod>::exec` with `AttachParams { stdin: true, tty: true,
-  stdout: true }` (needs the `ws` feature — already enabled in Cargo.toml). Spawn an
-  abortable task per session registered in `ClientManager` (counts toward
-  `watch-status`). Wire stdin/stdout over Tauri: emit `shell-out:{id}` batches;
-  command `shell_in(id, data)` + `shell_resize(id, cols, rows)` + `stop_shell(id)`.
-- Frontend: add `xterm` (bundled locally, themed with tokens: bg `--bg-terminal`,
-  fg `--text-body`, cursor `--accent`). New Shell tab with a container picker
-  (reuse the cycler) and shell fallback list (`/bin/bash` → `/bin/sh`).
-- Mock: a tiny fake echo shell so demo mode renders the tab.
+**Do:** Backend: for a Service ref, resolve selector → first Ready pod, then
+reuse the pod forward path; map named targetPorts to the container port. Add the
+Forward… action to Service rows' detail (ActionsMenu `canForward` for
+`services`). UX: after starting a forward, copy `localhost:PORT` to the clipboard
+and show it in the forwards strip immediately; forward errors (pod gone,
+connection refused per-connection) surface in the strip item as a red tone.
 
 **Accept:**
-- [ ] `ls /` in a fixture pod returns output; ctrl-C works; resize reflows.
-- [ ] Closing the tab/panel or switching pods kills the exec session (watch count
-      returns to baseline).
-- [ ] A pod without bash falls back to sh; a failed exec shows the API error inline.
+- [ ] Forwarding the freya `grafana` Service opens a working local tunnel
+      (`curl localhost:<port>` responds) without picking a pod manually.
+- [ ] Named targetPort services resolve correctly; stopping works; context
+      switch kills all forwards (existing reset path).
 
-## B5 — Column sorting
-*Click a header to sort; click again to reverse.*
+### B17 — Persist imported kubeconfigs
+*Why: deferred from B11 — imported contexts vanish on relaunch, which makes the
+import feature feel broken for daily use.*
 
-**Do:** Extend `Cell` with an optional `sort` value (number | string) populated by
-the Rust mappers ([mappers.rs](src-tauri/src/kube/mappers.rs)) and the mock: ages
-sort by creation timestamp, READY by fraction, CPU/MEM by the overlay numbers
-(sort on the merged row, post-overlay), plain text lexicographically. Store
-`sortCol/sortDir` per kind (reset on nav change is acceptable v1). Header shows a
-`▲/▼` glyph in `--accent` on the active column; unsorted default preserves server
-order.
+**Do:** Extend `Prefs` with `importedFiles: string[]`. On boot (TauriProvider
+path only), re-run `import_kubeconfig` for each saved path before the initial
+`listContexts` merge; drop paths that no longer parse (with a console warning,
+not an error). Save whenever an import succeeds.
 
 **Accept:**
-- [ ] Sorting Pods by RESTARTS puts the crashloop pod first; AGE sorts by real
-      duration not string; CPU sorts numerically with `—` last.
-- [ ] Direction toggles; indicator matches; other kinds sort too.
-- [ ] Live watch updates keep the chosen order.
+- [ ] Import a kubeconfig, relaunch → its contexts are still in the switcher and
+      connectable.
+- [ ] Deleting the file then relaunching drops it silently; default-kubeconfig
+      contexts always win name collisions (existing merge rule).
 
-## B6 — Port-forwarding
-*"Forward…" on pods/services + a manager strip listing active forwards.*
+## P1 — next
 
-**Do:**
-- Backend: `Api::<Pod>::portforward` (kube `ws` feature); bind a local
-  `tokio::net::TcpListener` (port 0 = auto) and pump bytes between local conns and
-  the forward stream. Task per forward in `ClientManager` (shows in watch count).
-  Commands: `start_port_forward(ns, pod, remote_port, local_port?) -> {id, localPort}`,
-  `stop_port_forward(id)`, `list_port_forwards()`. For Services, resolve a backing
-  pod first (selector → first Ready pod).
-- Frontend: action in the detail header; active forwards listed in a small section
-  above the status bar or in the detail meta row (`localhost:54321 → 8080` mono,
-  `×` to stop). Persist nothing — forwards die with the app.
+### B18 — Properties for more kinds
+*Extend B13's panel beyond pods; same one-command pattern
+([properties.rs](src-tauri/src/kube/properties.rs)).*
 
-**Accept:**
-- [ ] Forwarding the fixture grafana pod's port then `curl localhost:<port>` works.
-- [ ] Stopping the forward closes the listener; killing the pod ends it with a
-      surfaced reason; context switch kills all forwards.
-
-## B7 — Multi-container interleaved logs
-*An "all containers" option in the container cycler.*
-
-**Do:** Backend: allow `start_log_stream` with `container: null` → spawn one inner
-stream per container, tag each parsed line, merge into one batch channel
-(extend `LogLine` with optional `container`). Frontend: cycler gains an `all`
-option (first position); when active, render a container tag column (mono,
-`--text-faint`, fixed width, before the level column) and disable `sinceTime`
-resume nuance if needed (resume per-container using the shared anchor is fine).
-Ring buffer unchanged (200 total).
+**Do:** Per-kind property gatherers, one at a time in this order:
+**Deployments** (replica status, strategy, selector, owned ReplicaSets + their
+pod counts, conditions), **Services** (selector, endpoints/EndpointSlices with
+ready addresses → backing pod names, ports incl. nodePort), **Nodes** (conditions,
+taints, capacity vs allocatable, kubelet/OS/kernel versions, addresses),
+**PVC-view on StatefulSets** (volume claim templates + bound PVCs). Frontend: the
+Properties tab shows for these kinds (POD_ONLY set becomes per-kind capability).
 
 **Accept:**
-- [ ] `all` on the fixture valkyrie-api pod interleaves 3 containers, each line
-      tagged; filter/search still applies; pause/resume works.
-- [ ] Per-container selection still behaves exactly as today.
+- [ ] Deployment properties on freya show ReplicaSets + conditions; Service
+      properties list ready endpoint pods; Node properties show taints and
+      capacity/allocatable.
+- [ ] Kinds without a gatherer simply don't show the tab (no dead tab).
 
-## B8 — CRD support (dynamic resource kinds)
-*Discover API groups; browse custom resources.*
-
-**Do:** Backend: on connect, run API discovery (`kube::discovery::Discovery`),
-collect CRD-backed resources (or read `CustomResourceDefinition`s), and emit a
-`custom-kinds` event `[{group, kind, plural, namespaced}]`. Watch lazily: only
-start a `DynamicObject` watcher when the user opens that kind (register/unregister
-via commands) to avoid watching hundreds of CRDs. Generic columns: NAME,
-NAMESPACE?, AGE. Frontend: a new "Custom" nav section listing discovered kinds
-(scrollable), reusing the generic table; detail (YAML/Events) rides on B1's
-DynamicObject path.
+### B19 — Shell UX polish
+**Do:** Give the Shell tab its own container picker (small dropdown, defaults to
+the first container) instead of sharing the logs cycler index; add a "reconnect"
+affordance when the session ends (the `[reason]` line becomes a row with a
+`↻ reconnect` button); keep scrollback on reconnect.
 
 **Accept:**
-- [ ] Install any CRD in the fixture cluster (e.g. a toy one in dev/cluster) +
-      create an instance → it appears under Custom and lists live.
-- [ ] Kinds without instances show an empty table, not an error; RBAC-forbidden
-      CRDs degrade like built-in kinds.
-- [ ] No CRD watchers run until their kind is opened (watch count proves it).
+- [ ] Multi-container pod: logs cycler and shell container choice no longer
+      affect each other.
+- [ ] After `exit` in the shell, one click reconnects; scrollback preserved.
 
-## B9 — Cluster-wide Events view
-*A top-level "what's wrong right now" feed under the Cluster nav group.*
+### B20 — Drain node
+*Finishes B3's stretch goal.*
 
-**Do:** Add an `events` pseudo-kind: nav item (icon `⚠` or `☲`) under Cluster.
-Backend: watch core/v1 Events cluster-wide (one more watcher in `spawn_all`),
-mapping to columns TYPE, REASON, OBJECT (`kind/name`), NAMESPACE, AGE, COUNT,
-MESSAGE — TYPE toned Warning→`err`, Normal→`ok`. Sort Warnings first, then newest.
-Cap the snapshot (e.g. latest 500) to bound payloads. ns filter applies. Row click
-could jump to the involved object (stretch).
+**Do:** Backend `drain_node(name)`: cordon, then list pods on the node (skip
+DaemonSet-owned and mirror pods) and create `Eviction`s; emit progress events
+(`drain-progress:{node}` with evicted/total); respect failures (PDB 429s) by
+reporting them rather than retry-looping. Frontend: Drain… in the node actions
+menu with confirm + progress in the header banner.
 
 **Accept:**
-- [ ] Fixture cluster shows the crashloop's BackOff/Unhealthy Warnings at the top,
-      updating live; ns filter narrows.
-- [ ] Event churn doesn't spam re-renders (debounce already covers this) and the
-      list stays ≤ cap.
+- [ ] Draining a freya worker cordons it and evicts non-DaemonSet pods; PDB
+      blocks surface as a readable message; uncordon restores schedulability.
 
-## B10 — Keyboard navigation
-*k9s-style keys; no visible UI change except a focus ring.*
+### B21 — Table virtualization
+*Scale safety: freya's 71 pods are fine, but 2–5k-pod clusters will jank the
+full-render table.*
 
-**Do:** A `useKeyboardNav` hook at App level (ignores keys when an
-input/textarea/CodeMirror has focus): `j/k` or `↓/↑` move a highlighted row
-(`--bg-hover` outline; Enter opens detail for clickable rows), `/` focuses the
-table filter (B2) or log search when the Logs tab is active, `esc` closes menus →
-clears filter → closes detail (in that order), `[`/`]` or `1/2/3` switch detail
-tabs, `gg/G` jump top/bottom. Document the map in README.
+**Do:** Windowed rendering for the resource table (e.g. `@tanstack/react-virtual`,
+bundled locally): fixed row height (design rows are 28px), overscan ~20, sticky
+header preserved, keyboard highlight (B10) keeps the highlighted row scrolled
+into view. Ensure sorting/filtering still operate on the full dataset.
 
 **Accept:**
-- [ ] Full flow without a mouse: filter pods, arrow to the crashloop pod, Enter,
-      switch to Events, esc back out.
-- [ ] Typing in any input never triggers navigation; keys do nothing harmful when
-      the table is empty.
+- [ ] A synthetic 5k-row mock kind scrolls at 60fps with j/k navigation working;
+      no visual change at freya's scale.
 
-## B11 — Persisted state across launches
-*Reopen where you left off.*
+## P2 — quality of life
 
-**Do:** Add `tauri-plugin-store` (or a tiny JSON file in `app_config_dir` written
-via a `save_state` command). Persist: last context, nav kind, namespace filter,
-`showTimestamps`, imported kubeconfig paths (re-import them on boot so their
-contexts reappear — extend the imports registry to load at startup). Restore in
-`useBootstrap` before auto-connect; fall back cleanly if the saved context no
-longer exists. Demo mode: skip persistence entirely.
+### B22 — Window state persistence
+**Do:** `tauri-plugin-window-state` (size/position/monitor), gated out of demo
+builds. **Accept:** relaunch restores window geometry.
 
-**Accept:**
-- [ ] Quit/relaunch restores context, kind, ns filter, and imported contexts.
-- [ ] A stale saved context (deleted from kubeconfig) falls back to
-      current-context with no error loop.
-- [ ] Demo mode behavior unchanged.
+### B23 — Settings panel
+**Do:** A small settings surface (gear in the sidebar footer) for: log ring-buffer
+cap, metrics/status poll intervals, default namespace filter, and the shell
+command override. Persist via the existing Prefs file; live-apply where cheap.
+**Accept:** changing the ring buffer cap visibly changes log retention without
+restart; values survive relaunch.
 
-## B12 — Namespaces table: real pod counts
-*Replace the `—` PODS column stub.*
+### B24 — Dev launch hygiene
+*We hit this: orphaned `tauri dev` watchers + a dead vite made the app silently
+fall back to a stale bundled `dist/`, which looked like missing features.*
 
-**Do:** In Rust, the namespace mapper can't see pods; do the join where both
-snapshots exist. Options: (a) frontend — derive counts in `ResourceTable` from
-`rows.pods` when rendering the namespaces kind (simplest, live, zero backend work);
-(b) backend — share the pod reflector store with the namespace watcher. Prefer (a);
-note that counts are of *watched* pods (all, since watchers are cluster-wide).
-Mock data already carries counts — keep demo values matching the prototype.
+**Do:** Add `dev/run.sh`: kills prior k7s dev processes (match real process
+names), frees port 1420, ensures a fresh `npm run tauri:dev`, and fails loudly if
+vite dies. Delete `dist/` in dev (or add a visible "BUNDLED BUILD" badge when
+`import.meta.env.DEV` is false but the app was launched via `tauri dev`… simplest:
+just remove stale dist as part of the script). Document in README.
 
 **Accept:**
-- [ ] Namespaces table shows live pod counts summing to the Pods nav count.
-- [ ] Creating/deleting a pod updates its namespace's count within ~1s.
-- [ ] Demo mode still shows the prototype's numbers (7/2/2/2/0).
+- [ ] Running `dev/run.sh` twice never yields two app instances or a stale-dist
+      window.
+
+### B25 — Release CI
+**Do:** GitHub Actions workflow on a macOS runner: install deps, run the full
+test suite, `npm run tauri:build`, upload the `.app`/`.dmg` artifacts (the DMG
+styling step works on runners with a GUI session; otherwise ship the .app zip).
+Tag-triggered releases attach artifacts.
+**Accept:** pushing a tag produces a downloadable build with all suites green.
+
+### B26 — Helm releases view
+*freya is k3s + Helm; Lens parity feature.*
+
+**Do:** Parse `sh.helm.release.v1.*` Secrets (base64 → gzip → JSON) into a
+"Helm" nav kind: NAME, NAMESPACE, CHART, APP VERSION, REVISION, STATUS, UPDATED.
+Read-only v1 (no rollback). Detail shows the release's rendered manifest summary.
+**Accept:** freya's traefik and any user charts list with correct
+chart/version/status; secrets remain redacted elsewhere.
 
 ---
 
 ## Suggested order
 
-B2 → B5 → B12 (small, immediate QoL) → B1 (unlocks B8's detail path) → B3 → B10 →
-B9 → B7 → B11 → B4 → B6 → B8. Adjust freely — only real dependency: **B8 depends on
-B1** (DynamicObject YAML/Events), and **B10's `/`-to-filter depends on B2**.
+B14 → B15 → B16 → B17 (P0, in order) → B18 → B19 → B20 → B21 → B22–B26 as
+convenient. Only hard dependency: **B16** builds on B6's forward plumbing
+(shipped); **B18** builds on B13's pattern (shipped).
