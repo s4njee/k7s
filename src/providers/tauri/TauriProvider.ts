@@ -9,6 +9,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { exportFilename } from "../../lib/logview";
 import type {
   ClusterInfo,
   ClusterStatus,
@@ -32,6 +33,7 @@ import type {
   ResourceRef,
   ShellHandle,
   Row,
+  SavedLog,
   Unsub,
 } from "../types";
 
@@ -239,6 +241,8 @@ export class TauriProvider implements DataProvider {
       container,
       tail: opts.tail ?? null,
       sinceTime: opts.sinceTime ?? null,
+      sinceSeconds: opts.sinceSeconds ?? null,
+      previous: opts.previous ?? false,
     });
 
     const offLine = subscribe<{ lines: LogLine[] }>(`log-line:${streamId}`, (p) => onLines(p.lines));
@@ -255,6 +259,34 @@ export class TauriProvider implements DataProvider {
         void invoke("stop_log_stream", { streamId });
       },
     };
+  }
+
+  async saveLogs(
+    ref: ResourceRef,
+    container: string,
+    opts: { sinceSeconds?: number; previous?: boolean },
+  ): Promise<SavedLog | null> {
+    // Lazy-import the dialog plugin so it isn't pulled into demo bundles.
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const path = await save({
+      title: "Save logs",
+      defaultPath: exportFilename(ref.name, container, opts.previous ?? false),
+      filters: [{ name: "Log", extensions: ["log", "txt"] }],
+    });
+    if (!path) return null; // cancelled
+
+    // The backend writes the file itself: a container's whole log can be tens of
+    // megabytes, and there's no reason to drag that through the IPC bridge and
+    // the webview's heap just to write it back out to disk.
+    const lines = await invoke<number>("export_logs", {
+      namespace: ref.namespace ?? "",
+      pod: ref.name,
+      container,
+      sinceSeconds: opts.sinceSeconds ?? null,
+      previous: opts.previous ?? false,
+      path,
+    });
+    return { path, lines };
   }
 
   // ---- shell / exec ----

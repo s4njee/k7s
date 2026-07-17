@@ -265,6 +265,22 @@ export interface LogOptions {
   sinceTime?: string;
   /** Number of historical lines to seed with on first open. */
   tail?: number;
+  /**
+   * Only lines from the last N seconds (B29). Ignored when `sinceTime` is set —
+   * the API rejects both, and the resume anchor is the more precise of the two.
+   */
+  sinceSeconds?: number;
+  /**
+   * Read the previous container generation (B29). A snapshot, not a stream: the
+   * previous container is dead, so the read ends rather than following.
+   */
+  previous?: boolean;
+}
+
+/** Result of saving a log to disk (B29). */
+export interface SavedLog {
+  path: string;
+  lines: number;
 }
 
 /** Handle for a running log stream; call {@link stop} to cancel it. */
@@ -450,6 +466,19 @@ export interface DataProvider {
     onLines: (lines: LogLine[]) => void,
     onClosed: (reason: string) => void,
   ): Promise<LogHandle>;
+
+  /**
+   * Save a pod's full logs to a file the user picks (B29).
+   *
+   * Not "save what's on screen": the view holds a ring buffer, and the reason to
+   * export is usually the part that scrolled away — so this re-reads with no tail
+   * cap. Returns null if the user cancelled the save dialog.
+   */
+  saveLogs(
+    ref: ResourceRef,
+    container: string,
+    opts: { sinceSeconds?: number; previous?: boolean },
+  ): Promise<SavedLog | null>;
 
   // ---- shell / exec (B4) ----
   startShell(

@@ -87,6 +87,15 @@ current container of a crash-looper has seconds of logs; the answer is always
 in the **previous** container's output. freya has a live specimen with 3258
 restarts to prove it on.*
 
+> **Correction (found while building this).** The "always" above is wrong. While
+> a container sits in CrashLoopBackOff it *isn't running*, so the API already
+> serves the last terminated container for a plain read — `current` and
+> `previous` return identical bytes, which is exactly what freya's wiki pod shows.
+> They diverge only once the container has restarted and is running again: then
+> the live stream shows the new attempt's first seconds and `previous` is the only
+> way to see why the last one died. Still worth having — that's the moment you're
+> usually looking — but the justification was overstated.
+
 **Do:** Backend: `LogParams.previous` and `since_seconds` threaded through
 `start_log_stream` (kube supports both natively). Frontend, in the logs
 toolbar: a "previous" toggle (shown only when `restarts > 0`), a since selector
@@ -96,13 +105,29 @@ change like the container cycler does), and a save button that writes the
 just the ring buffer — the backend re-fetches without `tail` for the export so
 the file isn't capped at the on-screen 200 lines.
 
-**Accept:**
-- [ ] On `wiki-6b6d775f4-djpwx`, "previous" shows the dying container's last
-      output — the actual crash reason, which the live stream never contains.
-- [ ] Toggling previous/since swaps streams cleanly (no interleaved old lines,
-      follow state preserved); "previous" on a 0-restart pod isn't offered.
-- [ ] Saved file contains more lines than the ring buffer cap when the pod has
-      them, and ends with the newest on-screen line.
+**Accept:** *(shipped — needs a GUI pass)*
+- [x] `previous` reads the prior container generation and **terminates** rather
+      than hanging on a dead container — verified against the wiki crash-looper
+      with `cargo run --example logs_check`: returns in 6ms. (See the correction
+      above for what this fixture can and can't demonstrate.)
+- [x] Toggling previous/since empties the buffer rather than mixing generations;
+      "previous" isn't offered on a 0-restart pod (`hasPrevious`), and the follow
+      control is hidden for a previous read — there is nothing to follow.
+- [x] The export reaches past the ring buffer: `argocd-application-controller-0`
+      saves **13,553 lines / 4.8MB** where the view holds 200. A since window
+      still bounds it (5m → 22 lines).
+- [ ] **Not verified:** the toolbar itself — the controls, the save dialog, and
+      the footer's "↺ previous container" state.
+
+*The API constrains two things, both now pinned by tests: `previous` can't be
+followed (a dead container never emits again, so following it hangs the task
+instead of ending the stream), and `since_time` and `since_seconds` are mutually
+exclusive (sending both is a 400) — the resume anchor wins, since it's more
+precise and always inside the window anyway.*
+
+*The backend writes the export file itself rather than returning the text: 4.8MB
+has no business crossing the IPC bridge and landing in the webview's heap just to
+be written straight back out.*
 
 ### B30 — CRD printer columns
 *Why: custom kinds currently show NAME / NAMESPACE / AGE, which wastes the

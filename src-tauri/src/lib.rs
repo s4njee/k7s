@@ -71,6 +71,7 @@ pub fn run() {
             commands::unwatch_node_stats,
             commands::unwatch_custom_kind,
             commands::start_log_stream,
+            commands::export_logs,
             commands::stop_log_stream,
             commands::start_shell,
             commands::shell_input,

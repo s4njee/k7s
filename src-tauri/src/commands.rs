@@ -581,12 +581,15 @@ pub async fn get_events(
 
 /// Start following a container's logs; returns the new stream id.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn start_log_stream(
     namespace: String,
     pod: String,
     container: String,
     tail: Option<i64>,
     since_time: Option<String>,
+    since_seconds: Option<i64>,
+    previous: bool,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<String> {
     let client = require_client(&mgr).await?;
@@ -596,7 +599,7 @@ pub async fn start_log_stream(
     let stream_id = format!("{}-{}", pod, STREAM_SEQ.fetch_add(1, Ordering::Relaxed));
     let app = manager.app();
 
-    let opts = logs::LogStreamOptions { tail, since_time };
+    let opts = logs::LogStreamOptions { tail, since_time, since_seconds, previous };
     let id_for_task = stream_id.clone();
     let handle = tokio::spawn(async move {
         logs::run_log_stream(client, app, id_for_task, namespace, pod, container, opts).await;
@@ -604,6 +607,65 @@ pub async fn start_log_stream(
 
     manager.add_log(stream_id.clone(), handle).await;
     Ok(stream_id)
+}
+
+/// Write a pod's full logs to `path` (B29).
+///
+/// Deliberately not "save what's on screen": the view holds a ring buffer of the
+/// last few hundred lines, and the reason you're exporting is usually that you
+/// want the part that scrolled away. This re-reads with no tail cap.
+///
+/// The backend writes the file itself rather than handing the text back for the
+/// frontend to save — a container's whole log can be tens of megabytes, and
+/// there's no reason to move that through the IPC bridge and into the webview's
+/// heap just to write it straight back out to disk.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn export_logs(
+    namespace: String,
+    pod: String,
+    container: String,
+    since_seconds: Option<i64>,
+    previous: bool,
+    path: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<usize> {
+    let client = require_client(&mgr).await?;
+    let api: Api<k8s_openapi::api::core::v1::Pod> = Api::namespaced(client.clone(), &namespace);
+
+    // No tail: the whole thing. No follow: this must terminate.
+    let opts = logs::LogStreamOptions { tail: None, since_time: None, since_seconds, previous };
+
+    // An empty container means "all of them" (B7), so the export mirrors what the
+    // view interleaves — one block per container, labelled, rather than a soup of
+    // lines whose origin the file can't show.
+    let containers = if container.is_empty() {
+        let p = api.get(&pod).await.map_err(|e| AppError::Kube(e.to_string()))?;
+        p.spec
+            .map(|s| s.containers.into_iter().map(|c| c.name).collect::<Vec<_>>())
+            .unwrap_or_default()
+    } else {
+        vec![container]
+    };
+
+    let mut out = String::new();
+    for name in &containers {
+        let mut lp = logs::log_params(name, &opts);
+        // log_params follows unless reading `previous`; an export must always end.
+        lp.follow = false;
+        let text = api.logs(&pod, &lp).await.map_err(|e| AppError::Kube(e.to_string()))?;
+        if containers.len() > 1 {
+            out.push_str(&format!("===== container: {name} =====\n"));
+        }
+        out.push_str(&text);
+        if !text.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+
+    let lines = out.lines().count();
+    std::fs::write(&path, out).map_err(|e| AppError::Other(format!("could not write {path}: {e}")))?;
+    Ok(lines)
 }
 
 /// Stop a log stream (idempotent). Called on pause and panel close.

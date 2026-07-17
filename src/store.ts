@@ -21,6 +21,7 @@ import type {
 } from "./providers/types";
 import { KIND_ORDER } from "./lib/kinds";
 import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
+import type { SinceOption } from "./lib/logview";
 
 /**
  * Ring-buffer cap for the log view (the design default, and the starting value
@@ -87,6 +88,12 @@ function selectionPatch(row: Row) {
     logSearch: "",
     containerIndex: 0,
     following: true,
+    // A different pod is a different question: "previous" and a narrow window
+    // are answers about the pod you were just looking at, and silently carrying
+    // them over would show the next pod's logs through a filter you'd forgotten
+    // you set.
+    logPrevious: false,
+    logSince: "all" as SinceOption,
   };
 }
 
@@ -166,6 +173,13 @@ export interface AppState {
   showTimestamps: boolean;
   following: boolean;
   logBuffer: LogLine[];
+  /**
+   * Read the previous container generation instead of the current one (B29) —
+   * what a crash-looper printed on its way down.
+   */
+  logPrevious: boolean;
+  /** How far back the read reaches (B29). */
+  logSince: SinceOption;
 
   // yaml tab
   yamlEditing: boolean;
@@ -224,6 +238,8 @@ export interface AppState {
   toggleTimestamps: () => void;
   toggleFollow: () => void;
   setFollowing: (value: boolean) => void;
+  setLogPrevious: (value: boolean) => void;
+  setLogSince: (value: SinceOption) => void;
   appendLogs: (lines: LogLine[]) => void;
   clearLogs: () => void;
 
@@ -268,6 +284,8 @@ export const useStore = create<AppState>((set) => ({
   showTimestamps: true,
   following: true,
   logBuffer: [],
+  logPrevious: false,
+  logSince: "all",
 
   yamlEditing: false,
   yamlDraft: "",
@@ -406,6 +424,11 @@ export const useStore = create<AppState>((set) => ({
   toggleTimestamps: () => set((s) => ({ showTimestamps: !s.showTimestamps })),
   toggleFollow: () => set((s) => ({ following: !s.following })),
   setFollowing: (value) => set({ following: value }),
+  // Both of these change *which lines exist*, not just which are shown, so the
+  // buffer is emptied rather than appended to — mixing a previous container's
+  // output into the current one's would be worse than useless.
+  setLogPrevious: (value) => set({ logPrevious: value, logBuffer: [] }),
+  setLogSince: (value) => set({ logSince: value, logBuffer: [] }),
   // Append new lines, capping the buffer at the configured size (drop oldest).
   appendLogs: (lines) =>
     set((s) => {

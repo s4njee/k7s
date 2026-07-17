@@ -40,12 +40,19 @@ struct LogBatch {
 }
 
 /// Options mirrored from the frontend `LogOptions`.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct LogStreamOptions {
     /// Seed with this many historical lines on first open.
     pub tail: Option<i64>,
     /// Resume from this time (used on un-pause), RFC3339.
     pub since_time: Option<String>,
+    /// Only lines from the last N seconds (B29). Mutually exclusive with
+    /// `since_time` at the API — see [`log_params`] for which wins.
+    pub since_seconds: Option<i64>,
+    /// Read the *previous* container instead of the current one (B29): what a
+    /// crash-looper printed on its way down, which the running container can't
+    /// tell you.
+    pub previous: bool,
 }
 
 /// Run a follow-log stream until the task is aborted or the stream ends.
@@ -79,19 +86,35 @@ pub async fn run_log_stream(
 }
 
 /// Build the LogParams shared by single- and multi-container streams.
-fn log_params(container: &str, opts: &LogStreamOptions) -> LogParams {
+///
+/// Two rules here are the API's, not ours:
+///
+/// - **`previous` can't be followed.** The previous container is dead; it will
+///   never emit another line, so `follow` would hang the task until it's aborted
+///   rather than ending the stream. A previous read is a snapshot.
+/// - **`since_time` and `since_seconds` are mutually exclusive** — sending both
+///   is a 400. The resume anchor wins: it's the more precise of the two, and it's
+///   always inside the window the user picked anyway, so honouring it can't show
+///   them lines older than they asked for.
+pub fn log_params(container: &str, opts: &LogStreamOptions) -> LogParams {
     let mut lp = LogParams {
-        follow: true,
+        follow: !opts.previous,
         timestamps: true,
         container: Some(container.to_string()),
+        previous: opts.previous,
         ..Default::default()
     };
     lp.tail_lines = opts.tail;
-    if let Some(ts) = &opts.since_time {
-        // Parse the resume time; ignore a malformed value rather than failing.
-        if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
-            lp.since_time = Some(dt.with_timezone(&Utc));
+
+    match (&opts.since_time, opts.since_seconds) {
+        (Some(ts), _) => {
+            // Parse the resume time; ignore a malformed value rather than failing.
+            if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
+                lp.since_time = Some(dt.with_timezone(&Utc));
+            }
         }
+        (None, Some(secs)) => lp.since_seconds = Some(secs),
+        (None, None) => {}
     }
     lp
 }
@@ -348,5 +371,73 @@ mod tests {
         assert_eq!(detect_level("FATAL could not bind"), "ERROR");
         assert_eq!(detect_level("PANIC nil deref"), "ERROR");
         assert_eq!(detect_level("TRACE entering fn"), "DEBUG");
+    }
+
+    // ---- LogParams construction (B29) ----
+
+    /// The default read follows the running container, seeded by tail.
+    #[test]
+    fn default_params_follow_the_current_container() {
+        let lp = log_params("app", &LogStreamOptions { tail: Some(200), ..Default::default() });
+        assert!(lp.follow);
+        assert!(!lp.previous);
+        assert_eq!(lp.tail_lines, Some(200));
+        assert_eq!(lp.container.as_deref(), Some("app"));
+        assert!(lp.timestamps, "the parser needs the RFC3339 prefix");
+    }
+
+    /// A previous read must not follow: that container is dead and will never emit
+    /// another line, so following it would hang the task instead of ending it.
+    #[test]
+    fn previous_never_follows() {
+        let lp = log_params("app", &LogStreamOptions { previous: true, ..Default::default() });
+        assert!(lp.previous);
+        assert!(!lp.follow, "a terminated container is a snapshot, not a stream");
+    }
+
+    /// The API rejects since_time and since_seconds together, so only one is set.
+    #[test]
+    fn since_time_and_since_seconds_are_never_both_sent() {
+        let lp = log_params(
+            "app",
+            &LogStreamOptions {
+                since_time: Some("2026-07-17T12:00:00Z".into()),
+                since_seconds: Some(300),
+                ..Default::default()
+            },
+        );
+        assert!(lp.since_time.is_some());
+        assert_eq!(lp.since_seconds, None, "sending both is a 400");
+    }
+
+    /// The resume anchor wins, because it's more precise — and it's always inside
+    /// the window the user picked, so this can't show them older lines than asked.
+    #[test]
+    fn the_resume_anchor_wins_over_the_window() {
+        let lp = log_params(
+            "app",
+            &LogStreamOptions {
+                since_time: Some("2026-07-17T12:00:00Z".into()),
+                ..Default::default()
+            },
+        );
+        assert!(lp.since_time.is_some());
+    }
+
+    /// A window with no anchor is the plain "last 5 minutes" case.
+    #[test]
+    fn a_window_alone_sets_since_seconds() {
+        let lp = log_params("app", &LogStreamOptions { since_seconds: Some(300), ..Default::default() });
+        assert_eq!(lp.since_seconds, Some(300));
+        assert!(lp.since_time.is_none());
+    }
+
+    /// A malformed resume anchor is ignored rather than failing the stream — the
+    /// worst case is re-showing a few lines, which beats no logs at all.
+    #[test]
+    fn a_malformed_anchor_is_ignored() {
+        let lp = log_params("app", &LogStreamOptions { since_time: Some("nonsense".into()), ..Default::default() });
+        assert!(lp.since_time.is_none());
+        assert!(lp.follow);
     }
 }

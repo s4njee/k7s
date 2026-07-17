@@ -29,6 +29,7 @@ import type {
   ResourceRef,
   ShellHandle,
   Row,
+  SavedLog,
   Unsub,
 } from "../types";
 import { KIND_ORDER } from "../../lib/kinds";
@@ -365,6 +366,13 @@ export class MockProvider implements DataProvider {
         clearInterval(timer);
       },
     };
+  }
+
+  async saveLogs(): Promise<SavedLog | null> {
+    // Demo mode is a browser page: no filesystem, and no native dialog to pick a
+    // path with. Reporting "cancelled" is the honest answer — the button does
+    // nothing rather than claiming to have written a file that doesn't exist.
+    return null;
   }
 
   // ---- shell / exec (demo: a local echo shell) ----

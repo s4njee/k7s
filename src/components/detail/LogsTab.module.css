@@ -154,3 +154,29 @@
   font-size: 10px;
   color: var(--text-faint);
 }
+
+/* ---------- Log read options (B29) ---------- */
+
+/* The since window. Matches the toolbar's other controls rather than the
+   browser's default select chrome. */
+.select {
+  flex: none;
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 3px 4px;
+  outline: none;
+  cursor: pointer;
+}
+.select:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+/* Transient "saved N lines" feedback in the footer. */
+.saveNote {
+  color: var(--accent);
+}
