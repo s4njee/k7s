@@ -167,6 +167,51 @@ export const KINDS_WITH_PROPERTIES: ReadonlySet<string> = new Set<string>([
   "nodes",
 ]);
 
+/** Detail-panel tabs, in strip order. Mirrors DetailTab in the store. */
+export type DetailTabId = "logs" | "properties" | "metrics" | "shell" | "yaml" | "events";
+
+/** Tab id → label, in the order the strip renders them. */
+export const DETAIL_TABS: { id: DetailTabId; label: string }[] = [
+  { id: "logs", label: "Logs" },
+  { id: "properties", label: "Properties" },
+  { id: "metrics", label: "Metrics" },
+  { id: "shell", label: "Shell" },
+  { id: "yaml", label: "YAML" },
+  { id: "events", label: "Events" },
+];
+
+/**
+ * Which tabs a selected object gets.
+ *
+ * One source of truth, because there are three consumers that must agree: the
+ * tab strip, the body that renders beneath it, and the `[`/`]` cycle keys. They
+ * had already drifted — the cycle keys still believed non-pods had only
+ * YAML+Events, which stopped being true when Properties grew past pods (B18),
+ * Metrics arrived (B27) and Helm dropped Events (B26). Cycling would have landed
+ * on tabs that weren't there.
+ *
+ * The rules: Logs and Shell need a running container, so they're pods-only.
+ * Properties needs a backend gatherer. Metrics comes from a node's node-exporter.
+ * A Helm release has no Kubernetes events of its own.
+ */
+export function tabsFor(kind: KindId, isPod: boolean): DetailTabId[] {
+  return DETAIL_TABS.filter((t) => {
+    switch (t.id) {
+      case "logs":
+      case "shell":
+        return isPod;
+      case "properties":
+        return KINDS_WITH_PROPERTIES.has(kind);
+      case "metrics":
+        return kind === "nodes";
+      case "events":
+        return kind !== "helm";
+      default:
+        return true;
+    }
+  }).map((t) => t.id);
+}
+
 // ---------------------------------------------------------------------------
 // Custom (CRD-backed) kinds — B15
 // ---------------------------------------------------------------------------

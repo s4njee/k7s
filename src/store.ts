@@ -72,6 +72,24 @@ const EMPTY_ROWS: Row[] = [];
  */
 export const NODE_SAMPLE_CAP = 240;
 
+/**
+ * The state change that *is* selecting a row: open the panel on a sensible tab
+ * and reset the per-object view state. Shared by selectRow and jumpTo (B28) so
+ * arriving via the palette and via a click are the same thing.
+ */
+function selectionPatch(row: Row) {
+  return {
+    selectedRow: row,
+    // Pods open on Logs; every other kind lacks that tab, so YAML is the default.
+    activeTab: (row.pod ? "logs" : "yaml") as DetailTab,
+    yamlEditing: false,
+    logBuffer: [] as LogLine[],
+    logSearch: "",
+    containerIndex: 0,
+    following: true,
+  };
+}
+
 /** A copy of `obj` without `key`. */
 function omit<T>(obj: Record<string, T>, key: string): Record<string, T> {
   if (!(key in obj)) return obj;
@@ -116,6 +134,8 @@ export interface AppState {
   settings: Settings;
   /** Whether the settings panel is open. */
   settingsOpen: boolean;
+  /** Whether the command palette is open (B28). */
+  paletteOpen: boolean;
   podMetrics: PodMetricsMap;
   nodeMetrics: NodeMetricsMap;
   /** Active port-forwards (B6). */
@@ -181,6 +201,16 @@ export interface AppState {
   /** Merge a settings change (already sanitised by the caller). */
   setSettings: (patch: Partial<Settings>) => void;
   setSettingsOpen: (open: boolean) => void;
+  setPaletteOpen: (open: boolean) => void;
+  /**
+   * Go to a kind, optionally selecting a row within it (B28).
+   *
+   * One atomic update rather than setNav + setNamespace + selectRow: each of
+   * those clears the selection on its own, so calling them in sequence lands on
+   * the kind with nothing selected. The order that happens to work is exactly
+   * the kind of trap this avoids.
+   */
+  jumpTo: (kind: KindId, row?: Row) => void;
   resetData: () => void;
 
   // detail panel
@@ -222,6 +252,7 @@ export const useStore = create<AppState>((set) => ({
   customKinds: [],
   settings: DEFAULT_SETTINGS,
   settingsOpen: false,
+  paletteOpen: false,
   podMetrics: {},
   nodeMetrics: {},
   portForwards: [],
@@ -308,6 +339,31 @@ export const useStore = create<AppState>((set) => ({
       return { settings, logBuffer };
     }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setPaletteOpen: (open) => set({ paletteOpen: open }),
+  jumpTo: (kind, row) =>
+    set((s) => {
+      // Same resets as setNav: filter and sort are scoped to the kind you were
+      // looking at, and the palette closes behind you.
+      const base = {
+        nav: kind,
+        openMenu: null,
+        tableFilter: "",
+        sortCol: null,
+        sortDir: "asc" as const,
+        paletteOpen: false,
+      };
+      if (!row) return { ...base, selectedRow: null };
+
+      // A namespace filter that would hide the row moves to the row's own
+      // namespace. Jumping somewhere and landing on an empty table because of a
+      // filter set ten minutes ago is worse than the filter changing under you.
+      const namespace =
+        row.namespace && s.namespace !== "all" && s.namespace !== row.namespace
+          ? row.namespace
+          : s.namespace;
+
+      return { ...base, namespace, ...selectionPatch(row) };
+    }),
   // Wipe all live data on disconnect/context-switch (Story 6.1). The backend also
   // aborts every forward/shell on reset, so we clear the local list here too.
   resetData: () =>
@@ -337,16 +393,7 @@ export const useStore = create<AppState>((set) => ({
   // Selecting a row opens the panel and resets log/yaml view state. Pods open on
   // the Logs tab; other kinds have no Logs tab, so they open on YAML.
   // (The logs component re-seeds the stream in response to a pod selection.)
-  selectRow: (row) =>
-    set({
-      selectedRow: row,
-      activeTab: row.pod ? "logs" : "yaml",
-      yamlEditing: false,
-      logBuffer: [],
-      logSearch: "",
-      containerIndex: 0,
-      following: true,
-    }),
+  selectRow: (row) => set(selectionPatch(row)),
   closeDetail: () => set({ selectedRow: null }),
   // Switching tabs cancels any in-progress YAML edit (design behavior).
   setActiveTab: (tab) => set({ activeTab: tab, yamlEditing: false }),

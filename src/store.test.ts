@@ -20,6 +20,94 @@ beforeEach(() => {
     // Settings are now part of that slate: a test that raises the log cap would
     // otherwise leak it into every test that runs after it (B23).
     settings: DEFAULT_SETTINGS,
+    namespace: "all",
+    paletteOpen: false,
+  });
+});
+
+describe("jumpTo (B28)", () => {
+  const pod = (name: string, namespace: string): Row => ({
+    uid: `${namespace}/${name}`,
+    name,
+    namespace,
+    cells: [],
+    pod: {
+      node: "freya",
+      containers: ["app"],
+      status: "Running",
+      ready: "1/1",
+      restarts: 0,
+      creationTs: "",
+      statusTone: "ok",
+    },
+  });
+
+  it("navigates to a kind and clears the selection", () => {
+    useStore.setState({ selectedRow: pod("x", "prod") });
+    useStore.getState().jumpTo("nodes");
+    const s = useStore.getState();
+    expect(s.nav).toBe("nodes");
+    expect(s.selectedRow).toBeNull();
+  });
+
+  // The reason jumpTo exists: setNav and setNamespace each clear the selection,
+  // so doing this in three calls lands on the kind with nothing selected.
+  it("sets kind and selection together", () => {
+    const row = pod("wiki-6b6d775f4-djpwx", "wiki");
+    useStore.setState({ nav: "nodes" });
+    useStore.getState().jumpTo("pods", row);
+    const s = useStore.getState();
+    expect(s.nav).toBe("pods");
+    expect(s.selectedRow).toBe(row);
+    expect(s.activeTab).toBe("logs");
+  });
+
+  it("moves the namespace filter when it would hide the row", () => {
+    useStore.setState({ namespace: "prod" });
+    useStore.getState().jumpTo("pods", pod("wiki-x", "wiki"));
+    // Landing on an empty table because of a filter set ten minutes ago is worse
+    // than the filter moving.
+    expect(useStore.getState().namespace).toBe("wiki");
+    expect(useStore.getState().selectedRow?.name).toBe("wiki-x");
+  });
+
+  it("leaves an 'all' filter alone — it already shows the row", () => {
+    useStore.setState({ namespace: "all" });
+    useStore.getState().jumpTo("pods", pod("wiki-x", "wiki"));
+    expect(useStore.getState().namespace).toBe("all");
+  });
+
+  it("leaves a filter that already matches alone", () => {
+    useStore.setState({ namespace: "wiki" });
+    useStore.getState().jumpTo("pods", pod("wiki-x", "wiki"));
+    expect(useStore.getState().namespace).toBe("wiki");
+  });
+
+  it("leaves the filter alone for a cluster-scoped row", () => {
+    useStore.setState({ namespace: "prod" });
+    const node: Row = { uid: "freya", name: "freya", cells: [] };
+    useStore.getState().jumpTo("nodes", node);
+    expect(useStore.getState().namespace).toBe("prod");
+  });
+
+  it("clears the table filter and sort, which belonged to the old kind", () => {
+    useStore.setState({ tableFilter: "old", sortCol: 2, sortDir: "desc" });
+    useStore.getState().jumpTo("pods", pod("x", "prod"));
+    const s = useStore.getState();
+    expect(s.tableFilter).toBe("");
+    expect(s.sortCol).toBeNull();
+  });
+
+  it("closes the palette behind you", () => {
+    useStore.setState({ paletteOpen: true });
+    useStore.getState().jumpTo("nodes");
+    expect(useStore.getState().paletteOpen).toBe(false);
+  });
+
+  it("opens a non-pod on YAML, matching a click", () => {
+    const release: Row = { uid: "helm:kube-system/traefik", name: "traefik", namespace: "kube-system", cells: [] };
+    useStore.getState().jumpTo("helm", release);
+    expect(useStore.getState().activeTab).toBe("yaml");
   });
 });
 

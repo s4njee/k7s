@@ -11,11 +11,11 @@
 
 import { useState } from "react";
 import styles from "./DetailPanel.module.css";
-import { useStore, type DetailTab } from "../../store";
+import { useStore } from "../../store";
 import { useNow } from "../../hooks/useNow";
 import { formatAge } from "../../lib/format";
 import { toneColor } from "../../lib/tone";
-import { kindMeta, KINDS_WITH_PROPERTIES } from "../../lib/kinds";
+import { DETAIL_TABS, kindMeta, KINDS_WITH_PROPERTIES, tabsFor } from "../../lib/kinds";
 import { drainErrors, drainSummary, drainTone, pdbBlocked } from "../../lib/drain";
 import { LogsTab } from "./LogsTab";
 import { PropertiesTab } from "./PropertiesTab";
@@ -25,21 +25,6 @@ import { YamlTab } from "./YamlTab";
 import { EventsTab } from "./EventsTab";
 import { ActionsMenu } from "./ActionsMenu";
 import type { DrainProgress } from "../../providers/types";
-
-const ALL_TABS: { id: DetailTab; label: string }[] = [
-  { id: "logs", label: "Logs" },
-  { id: "properties", label: "Properties" },
-  { id: "metrics", label: "Metrics" },
-  { id: "shell", label: "Shell" },
-  { id: "yaml", label: "YAML" },
-  { id: "events", label: "Events" },
-];
-
-/**
- * Tabs that need a running container, so they only apply to pods. Properties is
- * no longer among them: it shows for any kind with a gatherer (B18).
- */
-const POD_ONLY_TABS = new Set<DetailTab>(["logs", "shell"]);
 
 export function DetailPanel() {
   const row = useStore((s) => s.selectedRow);
@@ -62,18 +47,10 @@ export function DetailPanel() {
 
   const meta = row.pod; // present only for pods
   const isPod = !!meta;
-  // Logs/Shell need a container, so they're pod-only. Properties shows only for
-  // kinds with a gatherer — otherwise it'd be a tab that only ever errors (B18).
-  // A Helm release has no Kubernetes events of its own (B26): its YAML is the
-  // rendered manifest, and that's the whole detail there is.
-  const tabs = ALL_TABS.filter((t) => {
-    if (POD_ONLY_TABS.has(t.id)) return isPod;
-    if (t.id === "properties") return KINDS_WITH_PROPERTIES.has(nav);
-    // Plots come from a node's node-exporter (B27), so they're nodes-only.
-    if (t.id === "metrics") return nav === "nodes";
-    if (t.id === "events") return nav !== "helm";
-    return true;
-  });
+  // Which tabs this kind gets — shared with the `[`/`]` cycle keys, so the strip
+  // and the keyboard can't disagree about what exists (see lib/kinds.ts).
+  const tabIds = tabsFor(nav, isPod);
+  const tabs = DETAIL_TABS.filter((t) => tabIds.includes(t.id));
   const statusColor = meta ? toneColor(meta.statusTone) : "var(--text-muted)";
   // Custom kinds resolve their label from discovery, so this is a runtime lookup.
   const kindLabel = kindMeta(nav, customKinds)?.label ?? nav;

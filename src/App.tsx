@@ -17,6 +17,7 @@ import { ResourceTable } from "./components/table/ResourceTable";
 import { DetailPanel } from "./components/detail/DetailPanel";
 import { ForwardsBar } from "./components/forwards/ForwardsBar";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
+import { CommandPalette } from "./components/palette/CommandPalette";
 
 export default function App() {
   // Wire provider → store and connect on mount.
@@ -38,8 +39,10 @@ export default function App() {
         <ForwardsBar />
         <StatusBar />
       </div>
-      {/* Modal, so it sits outside the layout flow (B23). */}
+      {/* Modals, outside the layout flow. The palette is last so it layers over
+          everything — ⌘K works from anywhere, including the settings panel. */}
       <SettingsPanel />
+      <CommandPalette />
     </div>
   );
 }

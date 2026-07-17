@@ -9,7 +9,7 @@
  * DOM is windowed. See `VIRTUAL_THRESHOLD` for why small tables opt out entirely.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./ResourceTable.module.css";
 import { rowsFor, useStore } from "../../store";
 import { useNow } from "../../hooks/useNow";
@@ -96,19 +96,39 @@ export function ResourceTable() {
   const { virtual, window: win } = useVirtualRows(scrollRef, rows.length);
   const visible = virtual ? rows.slice(win.start, win.end) : rows;
 
-  // Keep the keyboard highlight on screen. Virtualized rows may not exist in the
-  // DOM at all, so the position is computed rather than scrollIntoView'd.
+  /** Bring row `index` on screen, whichever rendering mode is in play. */
+  const revealRow = useCallback(
+    (index: number) => {
+      const el = scrollRef.current;
+      if (!el || index < 0) return;
+      if (virtual) {
+        // A windowed row may not exist in the DOM at all, so its position is
+        // computed rather than scrollIntoView'd.
+        const to = scrollToShow(index, el.scrollTop, el.clientHeight, ROW_HEIGHT, headerHeight(el));
+        if (to !== null) el.scrollTop = to;
+      } else {
+        // Natural row heights here, so let the browser measure it.
+        el.querySelector(`[data-row-index="${index}"]`)?.scrollIntoView({ block: "nearest" });
+      }
+    },
+    [virtual],
+  );
+
+  // Keep the keyboard highlight on screen.
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || highlight < 0) return;
-    if (virtual) {
-      const to = scrollToShow(highlight, el.scrollTop, el.clientHeight, ROW_HEIGHT, headerHeight(el));
-      if (to !== null) el.scrollTop = to;
-    } else {
-      // Natural row heights here, so let the browser measure it.
-      el.querySelector(`[data-row-index="${highlight}"]`)?.scrollIntoView({ block: "nearest" });
-    }
-  }, [highlight, virtual]);
+    revealRow(highlight);
+  }, [highlight, revealRow]);
+
+  // Same for a row selected from somewhere other than this table — the command
+  // palette jumps straight to an object (B28), and landing on it scrolled out of
+  // sight would make the jump feel like it missed. Keyed on the uid rather than
+  // the index so a live row update (a restart count ticking) doesn't yank the
+  // scroll back while you're reading elsewhere.
+  useEffect(() => {
+    if (!selectedUid) return;
+    revealRow(rows.findIndex((r) => r.uid === selectedUid));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUid, nav]);
 
   return (
     <div className={styles.container}>

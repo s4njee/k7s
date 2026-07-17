@@ -1,33 +1,57 @@
 /**
- * App-level keyboard shortcuts (B10):
- *   Esc     cascade — close an open menu, else clear the filter, else close detail
- *   [ / ]   cycle the detail panel's tabs (when a row is selected)
+ * App-level keyboard shortcuts (B10, B28):
+ *   ⌘K / ⌃K  open the command palette
+ *   :        the same, in the k9s idiom (ignored while typing)
+ *   Esc      cascade — close the palette, else a menu, else clear the filter,
+ *            else close the detail panel
+ *   [ / ]    cycle the detail panel's tabs (when a row is selected)
  *
- * Esc works even while typing (so it can blur/clear the filter); the tab-cycle
- * keys are ignored while typing.
+ * Esc works even while typing (so it can clear the filter field); the other keys
+ * are ignored there, or `:` would be unusable in a filter.
  */
 
 import { useEffect } from "react";
-import { useStore, type DetailTab } from "../store";
+import { useStore } from "../store";
 import { isTypingTarget } from "../lib/dom";
+import { tabsFor } from "../lib/kinds";
 
 export function useGlobalKeys(): void {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const s = useStore.getState();
+      const typing = isTypingTarget(document.activeElement);
+
+      // ⌘K is the near-universal binding for this; ⌃K covers non-Mac habits.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        s.setPaletteOpen(!s.paletteOpen);
+        return;
+      }
+
+      // k9s muscle memory. Only outside a text field — it's a legal character.
+      if (e.key === ":" && !typing && !s.paletteOpen) {
+        e.preventDefault();
+        s.setPaletteOpen(true);
+        return;
+      }
 
       if (e.key === "Escape") {
-        if (s.openMenu) s.closeMenus();
+        // The palette handles its own Escape (and stops it here), so that closing
+        // it doesn't also clear the filter underneath. This is the fallback for
+        // when focus has escaped the input.
+        if (s.paletteOpen) s.setPaletteOpen(false);
+        else if (s.openMenu) s.closeMenus();
         else if (s.tableFilter) s.setTableFilter("");
         else if (s.selectedRow) s.closeDetail();
         return;
       }
 
-      if ((e.key === "[" || e.key === "]") && s.selectedRow && !isTypingTarget(document.activeElement)) {
-        // Cycle among the tabs available for this row (pods also have Logs).
-        const tabs: DetailTab[] = s.selectedRow.pod
-          ? ["logs", "properties", "shell", "yaml", "events"]
-          : ["yaml", "events"];
+      if ((e.key === "[" || e.key === "]") && s.selectedRow && !typing) {
+        // Cycle the tabs this kind actually has. The list is shared with the tab
+        // strip (lib/kinds.ts) — when it was duplicated here, it drifted, and
+        // cycling landed on tabs that no longer existed.
+        const tabs = tabsFor(s.nav, !!s.selectedRow.pod);
+        if (tabs.length === 0) return;
         const i = Math.max(0, tabs.indexOf(s.activeTab));
         const next = e.key === "]" ? (i + 1) % tabs.length : (i - 1 + tabs.length) % tabs.length;
         s.setActiveTab(tabs[next]);

@@ -54,17 +54,32 @@ Fuzzy match is subsequence-based with contiguous-run and word-boundary bonuses
 nav + namespace + selects the row (reuse `selectRow`); the row must end up
 visible in the virtualized table (B21's `scrollToShow`).
 
-**Accept:**
-- [ ] From Pods, `⌘K wiki` → the crash-looping wiki pod opens with two
-      keystrokes and Enter; `⌘K releases` switches to the Helm view;
-      `⌘K applications` jumps to the Argo CRD kind (and lazily starts its
-      watcher, exactly as clicking the sidebar does).
-- [ ] Objects of *unwatched* CRD kinds are absent from results (their rows
-      aren't loaded) — the kind itself still matches, and jumping to it loads
-      them; no phantom entries.
-- [ ] Esc cascade unchanged; palette traps focus; j/k + arrows move the
-      selection; the fuzzy scorer's ranking is pinned by vitest cases
-      ("wik" ranks `wiki-…` above `kube-wiki-…`).
+**Accept:** *(shipped — needs a GUI pass to confirm it feels right)*
+- [x] `wik` ranks the crash-looper first; `releases` reaches the Helm view;
+      `applications` reaches the Argo CRD kind (by its id — the plural doesn't
+      match the Kind label "Application"). Pinned by vitest against
+      freya-shaped data.
+- [x] Objects of unwatched CRD kinds are absent (their rows aren't loaded); the
+      kind itself still matches, and jumping to it starts its watcher.
+- [x] Esc closes only the palette, leaving the filter and detail panel behind it
+      alone — tested by dispatching real key events at the document listener.
+- [x] Ranking, `ns:` parsing, and `jumpTo`'s namespace behaviour are unit-tested
+      (54 new cases).
+- [ ] **Not verified:** how it looks and feels — highlight legibility, focus,
+      the jumped-to row being visible in a long list.
+
+*Two deviations from the sketch above, both deliberate. **j/k don't move the
+cursor**: in the palette you're typing a name, and names contain j and k — arrows
+and ⌃n/⌃p idioms are free, letters aren't. And the **object actions are only
+cordon/uncordon**: delete, drain, scale and forward each need a confirmation or
+a parameter, and that UI lives in the detail panel's actions menu — a palette
+where Enter can delete a pod is a footgun, not a shortcut. B34's rollout restart
+will want the same treatment (a confirm), so it belongs there too.*
+
+*Also fixed in passing: the `[`/`]` tab-cycle keys had drifted from the tab strip
+— they still believed non-pods had only YAML+Events, which stopped being true at
+B18 (Properties beyond pods), B26 (Helm has no Events) and B27 (Metrics), so
+cycling landed on tabs that weren't rendered. Both now read one `tabsFor()`.*
 
 ### B29 — Crash-loop debugging: previous logs, since, save-to-file
 *Why: the single most common debugging motion the app can't do today. The
