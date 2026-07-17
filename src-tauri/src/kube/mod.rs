@@ -9,11 +9,13 @@ pub mod discovery;
 pub mod drain;
 pub mod dto;
 pub mod exec;
+pub mod exporter;
 pub mod helm;
 pub mod logs;
 pub mod manager;
 pub mod mappers;
 pub mod metrics;
+pub mod nodestats;
 pub mod portforward;
 pub mod properties;
 pub mod watchers;
@@ -86,6 +88,11 @@ pub mod events {
     /// The active port-forwards, pushed whenever one is added, removed, or fails
     /// (B16) — so the strip reflects failures without the UI polling for them.
     pub const FORWARDS_UPDATE: &str = "forwards-update";
+    /// One node-exporter sample for a node (B27): `{ node, sample }`. Only while
+    /// that node's Metrics tab is open.
+    pub const NODE_STATS: &str = "node-stats";
+    /// Why a node has no plots (B27): `{ node, message }`.
+    pub const NODE_STATS_ERROR: &str = "node-stats-error";
     /// Progress of a node drain (B20): `{ node, evicted, total, failures, done }`.
     /// One event carrying the node, rather than a per-node channel, so progress
     /// lands in the store and survives navigating away mid-drain.

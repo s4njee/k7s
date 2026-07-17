@@ -12,6 +12,8 @@ import type {
   DataProvider,
   DrainFailure,
   DrainProgress,
+  NodeSample,
+  NodeStatsError,
   EventItem,
   ForwardInfo,
   ImportResult,
@@ -50,6 +52,14 @@ const MOCK_STATUS: ClusterStatus = {
   memPercent: 63,
 };
 
+/** Cadence of the demo node-exporter series (B27) — brisk enough to watch. */
+const NODE_STATS_TICK_MS = 2000;
+
+/** Clamp a value into a range. */
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v));
+}
+
 /** Prototype shows a fixed "watch: 9 streams active". */
 const MOCK_WATCH_COUNT = 9;
 
@@ -66,6 +76,10 @@ export class MockProvider implements DataProvider {
   private customKindCbs = new Set<(k: CustomKind[]) => void>();
   private forwardCbs = new Set<(f: ForwardInfo[]) => void>();
   private drainCbs = new Set<(p: DrainProgress) => void>();
+  private nodeStatsCbs = new Set<(node: string, s: NodeSample) => void>();
+  private nodeStatsErrCbs = new Set<(e: NodeStatsError) => void>();
+  /** Live synthetic series per node (B27), cleared by unwatchNodeStats. */
+  private nodeTimers = new Map<string, ReturnType<typeof setInterval>>();
 
   // ---- one-shot commands ----
 
@@ -246,6 +260,82 @@ export class MockProvider implements DataProvider {
     return () => {
       this.drainCbs.delete(cb);
     };
+  }
+
+  onNodeStats(cb: (node: string, s: NodeSample) => void): Unsub {
+    this.nodeStatsCbs.add(cb);
+    return () => {
+      this.nodeStatsCbs.delete(cb);
+    };
+  }
+
+  onNodeStatsError(cb: (e: NodeStatsError) => void): Unsub {
+    this.nodeStatsErrCbs.add(cb);
+    return () => {
+      this.nodeStatsErrCbs.delete(cb);
+    };
+  }
+
+  // ---- node-exporter statistics (B27) ----
+  //
+  // Demo mode synthesises a plausible series on the same cadence the real scraper
+  // uses, so the plots can be worked on without a cluster. One node deliberately
+  // has no exporter: the error path is as much a part of the tab as the charts.
+
+  async watchNodeStats(node: string): Promise<void> {
+    if (this.nodeTimers.has(node)) return;
+
+    if (node.endsWith("06")) {
+      this.nodeStatsErrCbs.forEach((cb) =>
+        cb({ node, message: `no node-exporter pod found on ${node} — install one, or its port isn't 9100` }),
+      );
+      return;
+    }
+
+    // A per-node seed keeps each node's curve distinct but stable across a
+    // session, rather than every node drawing the same random walk.
+    let cpu = 20 + (node.charCodeAt(node.length - 1) % 5) * 8;
+    let rx = 2e6;
+    let tx = 5e5;
+    const total = 64 * 1024 ** 3;
+    let used = total * 0.42;
+
+    const tick = () => {
+      // Random walks, bounded — enough to look like a machine rather than noise.
+      cpu = clamp(cpu + (Math.random() - 0.5) * 14, 1, 98);
+      used = clamp(used + (Math.random() - 0.5) * 1e9, total * 0.15, total * 0.9);
+      rx = Math.max(0, rx + (Math.random() - 0.5) * 1.2e6);
+      tx = Math.max(0, tx + (Math.random() - 0.5) * 4e5);
+      const load = (cpu / 100) * 8;
+      const sample: NodeSample = {
+        ts: Date.now(),
+        cpuPercent: cpu,
+        memUsedBytes: used,
+        memTotalBytes: total,
+        netRxBps: rx,
+        netTxBps: tx,
+        load1: load,
+        load5: load * 0.9,
+        load15: load * 0.8,
+        filesystems: [
+          { mountpoint: "/", usedBytes: 67e9, sizeBytes: 1920e9 },
+          { mountpoint: "/home", usedBytes: 8e9, sizeBytes: 1861e9 },
+          { mountpoint: "/mnt/data", usedBytes: 9078e9, sizeBytes: 20059e9 },
+        ],
+      };
+      this.nodeStatsCbs.forEach((cb) => cb(node, sample));
+    };
+    // First point promptly so the tab isn't empty while you wait.
+    setTimeout(tick, 200);
+    this.nodeTimers.set(node, setInterval(tick, NODE_STATS_TICK_MS));
+  }
+
+  async unwatchNodeStats(node: string): Promise<void> {
+    const t = this.nodeTimers.get(node);
+    if (t !== undefined) {
+      clearInterval(t);
+      this.nodeTimers.delete(node);
+    }
   }
 
   // ---- log streaming ----

@@ -19,6 +19,7 @@ import { kindMeta, KINDS_WITH_PROPERTIES } from "../../lib/kinds";
 import { drainErrors, drainSummary, drainTone, pdbBlocked } from "../../lib/drain";
 import { LogsTab } from "./LogsTab";
 import { PropertiesTab } from "./PropertiesTab";
+import { MetricsTab } from "./MetricsTab";
 import { ShellTab } from "./ShellTab";
 import { YamlTab } from "./YamlTab";
 import { EventsTab } from "./EventsTab";
@@ -28,6 +29,7 @@ import type { DrainProgress } from "../../providers/types";
 const ALL_TABS: { id: DetailTab; label: string }[] = [
   { id: "logs", label: "Logs" },
   { id: "properties", label: "Properties" },
+  { id: "metrics", label: "Metrics" },
   { id: "shell", label: "Shell" },
   { id: "yaml", label: "YAML" },
   { id: "events", label: "Events" },
@@ -67,6 +69,8 @@ export function DetailPanel() {
   const tabs = ALL_TABS.filter((t) => {
     if (POD_ONLY_TABS.has(t.id)) return isPod;
     if (t.id === "properties") return KINDS_WITH_PROPERTIES.has(nav);
+    // Plots come from a node's node-exporter (B27), so they're nodes-only.
+    if (t.id === "metrics") return nav === "nodes";
     if (t.id === "events") return nav !== "helm";
     return true;
   });
@@ -140,6 +144,8 @@ export function DetailPanel() {
       {activeTab === "logs" && isPod && <LogsTab />}
       {/* Mirrors the tab list above: Properties is no longer pod-only (B18). */}
       {activeTab === "properties" && KINDS_WITH_PROPERTIES.has(nav) && <PropertiesTab />}
+      {/* Mounting is what starts the scraper, so this must mirror the tab list. */}
+      {activeTab === "metrics" && nav === "nodes" && <MetricsTab />}
       {activeTab === "shell" && isPod && <ShellTab />}
       {activeTab === "yaml" && <YamlTab />}
       {activeTab === "events" && <EventsTab />}

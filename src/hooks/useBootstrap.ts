@@ -28,6 +28,8 @@ export function useBootstrap(): void {
       setCustomKinds,
       setPortForwards,
       setDrain,
+      addNodeSample,
+      setNodeStatsError,
     } = useStore.getState();
 
     // Reconcile cluster-status into the connection lifecycle (Story 6.2): a live
@@ -64,6 +66,10 @@ export function useBootstrap(): void {
       provider.onForwards(setPortForwards),
       // Node drain progress (B20) — lands in the store so it survives navigation.
       provider.onDrainProgress(setDrain),
+      // node-exporter samples (B27). Subscribed for the app's lifetime, but the
+      // backend only emits for nodes whose Metrics tab is open.
+      provider.onNodeStats(addNodeSample),
+      provider.onNodeStatsError((e) => setNodeStatsError(e.node, e.message)),
     ];
 
     // Discover contexts, restore saved preferences, then connect (B11).

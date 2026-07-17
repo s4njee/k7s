@@ -322,6 +322,40 @@ export interface DrainProgress {
   done: boolean;
 }
 
+/** One mounted filesystem on a node (B27). */
+export interface Filesystem {
+  mountpoint: string;
+  usedBytes: number;
+  sizeBytes: number;
+}
+
+/**
+ * One node-exporter sample, rates already computed by the backend (B27).
+ * The frontend only plots these.
+ */
+export interface NodeSample {
+  /** Epoch milliseconds — the x axis. */
+  ts: number;
+  /** Busy CPU across all cores, 0–100. */
+  cpuPercent: number;
+  memUsedBytes: number;
+  memTotalBytes: number;
+  /** Bytes/second over physical interfaces. */
+  netRxBps: number;
+  netTxBps: number;
+  load1: number;
+  load5: number;
+  load15: number;
+  /** Slow-moving, so shown as a current bar chart rather than a series. */
+  filesystems: Filesystem[];
+}
+
+/** Why a node has no plots (B27). */
+export interface NodeStatsError {
+  node: string;
+  message: string;
+}
+
 /** Unsubscribe function returned by the `on*` event subscriptions. */
 export type Unsub = () => void;
 
@@ -368,6 +402,16 @@ export interface DataProvider {
    */
   drainNode(node: string): Promise<void>;
 
+  // ---- node-exporter statistics (B27) ----
+  /**
+   * Start scraping a node's node-exporter. Lazy, like custom kinds: each scrape
+   * moves a few hundred KB and holds a port-forward, so it runs only while the
+   * node's Metrics tab is open. Safe to call twice.
+   */
+  watchNodeStats(node: string): Promise<void>;
+  /** Stop scraping a node (idempotent). */
+  unwatchNodeStats(node: string): Promise<void>;
+
   // ---- persisted preferences (B11) ----
   /** Load persisted UI preferences, or null if none / not supported (demo). */
   loadPrefs(): Promise<Prefs | null>;
@@ -393,6 +437,10 @@ export interface DataProvider {
   onWatchStatus(cb: (activeStreams: number) => void): Unsub;
   /** Progress of running node drains (B20). */
   onDrainProgress(cb: (progress: DrainProgress) => void): Unsub;
+  /** node-exporter samples for nodes being watched (B27). */
+  onNodeStats(cb: (node: string, sample: NodeSample) => void): Unsub;
+  /** Why a watched node has no samples (B27). */
+  onNodeStatsError(cb: (err: NodeStatsError) => void): Unsub;
 
   // ---- log streaming ----
   startLogs(

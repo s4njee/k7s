@@ -330,6 +330,38 @@ manifests may feel heavy.*
 
 ---
 
+## Added after v2
+
+### B27 — Node metrics plots (node-exporter → plotly)
+*Nodes show one CPU/MEM percentage and no history; node-exporter has the rest.*
+
+**Do:** A Metrics tab on nodes plotting CPU busy %, memory used, network rx/tx,
+load, and filesystem usage, scraped from the node's node-exporter and drawn with
+plotly.js-basic-dist-min.
+
+**Accept:** *(shipped — needs a GUI pass to confirm the charts render)*
+- [x] Data reaches the app on freya: verified with `cargo run --example
+      nodestats_check` — the exporter is found automatically, and samples read
+      cpu 0.8–2.3%, mem 24.1% (16.0/66.4 GiB), tx ~194 KiB/s, load 3.12/3.53/3.70,
+      21 filesystems.
+- [x] Scraping is lazy: it runs only while a node's Metrics tab is open, and the
+      sidebar's watch count includes it.
+- [x] plotly is loaded on first use, so the main bundle stays 872KB and its 1.13MB
+      chunk only downloads if you open the tab.
+- [ ] **Not verified:** the charts themselves rendering, and the NotReady-node
+      error state.
+
+*The data source is the finding here. **Prometheus has no node metrics on freya**
+— `up{job="node-exporter"}` is 0 for all three targets, whose IPs (.153/.118/.104)
+no longer match the nodes (.156/.104/.118). And the **API server's pod proxy times
+out** even for the Ready node. Only the port-forward path (B6's machinery) works,
+so the plots are live-only: an exporter serves counters, not history, and there is
+nothing to backfill from. Fixing Prometheus's scrape config is a cluster change,
+not an app change — once it scrapes, a Prometheus-backed history mode is a
+natural follow-up.*
+
+---
+
 ## Suggested order
 
 ~~B14 → B15 → B16 → B17 (P0, in order)~~ **shipped** → B18 → B19 → B20 → B21 →

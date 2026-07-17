@@ -7,8 +7,8 @@ use crate::error::{AppError, AppResult};
 use crate::kube::client::{self, ClusterInfo, ContextInfo};
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
 use crate::kube::{
-    discovery, drain, exec, helm, logs, mappers, metrics, portforward, properties, watchers,
-    ClientManager, ResourceKind,
+    discovery, drain, exec, helm, logs, mappers, metrics, nodestats, portforward, properties,
+    watchers, ClientManager, ResourceKind,
 };
 use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::core::v1::Event;
@@ -487,6 +487,39 @@ pub async fn drain_node(name: String, mgr: State<'_, Arc<ClientManager>>) -> App
         drain::run_drain(client, app, name).await;
     });
     manager.push_task(task).await;
+    Ok(())
+}
+
+/// Start scraping a node's node-exporter for plots (B27), if not already running.
+///
+/// Called when a node's Metrics tab opens. Lazy for the same reason CRD watchers
+/// are: each scrape moves a few hundred KB and holds a port-forward, which is not
+/// something to run for every node in the background.
+#[tauri::command]
+pub async fn watch_node_stats(node: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+    let manager: Arc<ClientManager> = (*mgr).clone();
+    if manager.has_node_scraper(&node).await {
+        return Ok(());
+    }
+    let client = require_client(&mgr).await?;
+    let app = manager.app();
+    // Reuses the metrics poll interval from settings (B23): it's the same question
+    // ("how often should we ask the cluster how it's doing"), so it would be odd
+    // for the plots to march to a different drum than the table's CPU column.
+    let every = poll_intervals(&app).metrics;
+    let n = node.clone();
+    let task = tokio::spawn(async move {
+        nodestats::run_node_stats(client, app, n, every).await;
+    });
+    manager.add_node_scraper(node, task).await;
+    Ok(())
+}
+
+/// Stop scraping a node (B27). Idempotent, so the frontend can call it
+/// unconditionally when the tab closes; drops the port-forward with it.
+#[tauri::command]
+pub async fn unwatch_node_stats(node: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+    mgr.remove_node_scraper(&node).await;
     Ok(())
 }
 

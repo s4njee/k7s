@@ -12,6 +12,7 @@ import type {
   CustomKind,
   DrainProgress,
   ForwardInfo,
+  NodeSample,
   KindId,
   LogLine,
   NodeMetricsMap,
@@ -28,7 +29,7 @@ import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
 export const LOG_BUFFER_CAP = DEFAULT_SETTINGS.logBufferCap;
 
 /** Detail-panel tab identifiers. */
-export type DetailTab = "logs" | "properties" | "shell" | "yaml" | "events";
+export type DetailTab = "logs" | "properties" | "metrics" | "shell" | "yaml" | "events";
 
 /** Which dropdown menu (if any) is currently open — only one at a time. */
 export type OpenMenu = "cluster" | "ns" | null;
@@ -63,6 +64,21 @@ export function rowsFor(rows: RowMap, kind: KindId): Row[] {
 
 /** Shared empty array so `rowsFor` returns a stable reference (avoids re-renders). */
 const EMPTY_ROWS: Row[] = [];
+
+/**
+ * Points kept per node's metric series (B27). At the default 15s poll that's an
+ * hour of history; the series is live-only anyway, so this only bounds memory for
+ * a tab left open all day.
+ */
+export const NODE_SAMPLE_CAP = 240;
+
+/** A copy of `obj` without `key`. */
+function omit<T>(obj: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in obj)) return obj;
+  const next = { ...obj };
+  delete next[key];
+  return next;
+}
 
 export interface AppState {
   // ---------- connection & cluster ----------
@@ -110,6 +126,14 @@ export interface AppState {
    * navigating away — a drain takes minutes.
    */
   drains: Record<string, DrainProgress>;
+  /**
+   * node-exporter samples per node (B27), oldest first. Live-only: the series
+   * starts when you open a node's Metrics tab, because the exporter reports
+   * counters rather than history — there is nothing to backfill from.
+   */
+  nodeSamples: Record<string, NodeSample[]>;
+  /** Why a node has no samples (no exporter, forward failed), keyed by node. */
+  nodeStatsErrors: Record<string, string>;
 
   // ---------- detail panel ----------
   /** Selected row (null → panel closed). Pods also get a Logs tab. */
@@ -151,6 +175,9 @@ export interface AppState {
   setNodeMetrics: (m: NodeMetricsMap) => void;
   setPortForwards: (list: ForwardInfo[]) => void;
   setDrain: (progress: DrainProgress) => void;
+  /** Append a sample to a node's series, capped at NODE_SAMPLE_CAP. */
+  addNodeSample: (node: string, sample: NodeSample) => void;
+  setNodeStatsError: (node: string, message: string) => void;
   /** Merge a settings change (already sanitised by the caller). */
   setSettings: (patch: Partial<Settings>) => void;
   setSettingsOpen: (open: boolean) => void;
@@ -199,6 +226,8 @@ export const useStore = create<AppState>((set) => ({
   nodeMetrics: {},
   portForwards: [],
   drains: {},
+  nodeSamples: {},
+  nodeStatsErrors: {},
 
   selectedRow: null,
   activeTab: "logs",
@@ -253,6 +282,20 @@ export const useStore = create<AppState>((set) => ({
   setNodeMetrics: (m) => set({ nodeMetrics: m }),
   setPortForwards: (list) => set({ portForwards: list }),
   setDrain: (p) => set((s) => ({ drains: { ...s.drains, [p.node]: p } })),
+  addNodeSample: (node, sample) =>
+    set((s) => {
+      const next = (s.nodeSamples[node] ?? []).concat(sample);
+      return {
+        nodeSamples: {
+          ...s.nodeSamples,
+          [node]: next.length > NODE_SAMPLE_CAP ? next.slice(-NODE_SAMPLE_CAP) : next,
+        },
+        // A sample arriving means whatever was wrong isn't any more.
+        nodeStatsErrors: omit(s.nodeStatsErrors, node),
+      };
+    }),
+  setNodeStatsError: (node, message) =>
+    set((s) => ({ nodeStatsErrors: { ...s.nodeStatsErrors, [node]: message } })),
   setSettings: (patch) =>
     set((s) => {
       const settings = { ...s.settings, ...patch };
@@ -280,6 +323,10 @@ export const useStore = create<AppState>((set) => ({
       portForwards: [],
       // Drains belong to the old connection; the backend aborts them on reset.
       drains: {},
+      // As do node samples — a different cluster's nodes are different machines,
+      // and the backend has dropped their scrapers (B27).
+      nodeSamples: {},
+      nodeStatsErrors: {},
       selectedRow: null,
       logBuffer: [],
       clusterStatus: null,

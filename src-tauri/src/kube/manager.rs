@@ -77,6 +77,9 @@ struct Inner {
     /// from `tasks` because these are aborted individually when the user navigates
     /// away, not only on reset.
     custom_watchers: HashMap<String, JoinHandle<()>>,
+    /// Node-exporter scrapers, keyed by node name (B27). Same lifetime rule as
+    /// custom watchers: one runs only while its node's Metrics tab is open.
+    node_scrapers: HashMap<String, JoinHandle<()>>,
 }
 
 /// A context imported from a non-default kubeconfig file: its source path and the
@@ -147,6 +150,10 @@ impl ClientManager {
         }
         // Lazily-started CRD watchers (B15) are connection-scoped too.
         for (_, t) in inner.custom_watchers.drain() {
+            t.abort();
+        }
+        // As are node-exporter scrapers (B27) — each holds a port-forward.
+        for (_, t) in inner.node_scrapers.drain() {
             t.abort();
         }
         // The discovered kinds belong to the old cluster; the next connect re-discovers.
@@ -333,6 +340,34 @@ impl ClientManager {
         }
     }
 
+    /// Register a node-exporter scraper (B27). Replaces any existing one for the
+    /// same node, so opening the tab twice can't leave a forward behind.
+    pub async fn add_node_scraper(&self, node: String, handle: JoinHandle<()>) {
+        {
+            let mut inner = self.inner.write().await;
+            if let Some(old) = inner.node_scrapers.insert(node, handle) {
+                old.abort();
+            }
+        }
+        self.emit_watch().await;
+    }
+
+    /// True when this node is already being scraped.
+    pub async fn has_node_scraper(&self, node: &str) -> bool {
+        self.inner.read().await.node_scrapers.contains_key(node)
+    }
+
+    /// Stop scraping a node (idempotent), dropping its port-forward with it.
+    pub async fn remove_node_scraper(&self, node: &str) {
+        let existed = {
+            let mut inner = self.inner.write().await;
+            inner.node_scrapers.remove(node).map(|h| h.abort()).is_some()
+        };
+        if existed {
+            self.emit_watch().await;
+        }
+    }
+
     /// Emit the current live-stream count (watchers + logs + shells + forwards).
     /// Custom kinds count only while their watcher is open (B15).
     async fn emit_watch(&self) {
@@ -340,6 +375,7 @@ impl ClientManager {
             let inner = self.inner.read().await;
             inner.watcher_count
                 + inner.custom_watchers.len()
+                + inner.node_scrapers.len()
                 + inner.logs.len()
                 + inner.shells.len()
                 + inner.forwards.len()

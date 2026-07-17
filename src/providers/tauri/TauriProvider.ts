@@ -15,6 +15,8 @@ import type {
   ContextInfo,
   DataProvider,
   DrainProgress,
+  NodeSample,
+  NodeStatsError,
   EventItem,
   ForwardInfo,
   ImportResult,
@@ -152,6 +154,16 @@ export class TauriProvider implements DataProvider {
     return invoke<void>("drain_node", { name: node });
   }
 
+  // ---- node-exporter statistics (B27) ----
+
+  watchNodeStats(node: string): Promise<void> {
+    return invoke<void>("watch_node_stats", { node });
+  }
+
+  unwatchNodeStats(node: string): Promise<void> {
+    return invoke<void>("unwatch_node_stats", { node });
+  }
+
   loadPrefs(): Promise<Prefs | null> {
     return invoke<Prefs | null>("load_prefs");
   }
@@ -198,6 +210,16 @@ export class TauriProvider implements DataProvider {
 
   onDrainProgress(cb: (progress: DrainProgress) => void): Unsub {
     return subscribe<DrainProgress>("drain-progress", cb);
+  }
+
+  onNodeStats(cb: (node: string, sample: NodeSample) => void): Unsub {
+    return subscribe<{ node: string; sample: NodeSample }>("node-stats", (p) =>
+      cb(p.node, p.sample),
+    );
+  }
+
+  onNodeStatsError(cb: (err: NodeStatsError) => void): Unsub {
+    return subscribe<NodeStatsError>("node-stats-error", cb);
   }
 
   // ---- log streaming ----
