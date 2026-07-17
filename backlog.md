@@ -1,372 +1,321 @@
-# k7s — Backlog (v2)
+# k7s — Backlog (v3)
 
-Prioritized next additions. The v1 backlog (B1–B13) is **shipped** on
-`feat/backlog-qol` — detail panel for all kinds, filter bar, actions
-(delete/scale/cordon), sorting, multi-container logs, keyboard nav, persisted
-state, namespace pod counts, shell/exec, port-forwarding, and the pod Properties
-panel — all verified against the live `freya` cluster. Numbering continues from
-there.
+New work only. Everything before this — the original epics (E1–E8) and both
+earlier backlogs (B1–B26 plus B27, the node-exporter plots) — is **shipped** on
+`feat/backlog-qol`; the per-item records, verification notes and design
+decisions live in the git log rather than being repeated here. Numbering
+continues from B27.
 
 Conventions are unchanged (see [tasks.md](tasks.md)): each item is
 self-contained with **Do**/**Accept**, the DoD is clippy `-D warnings` +
 `cargo test` + `tsc` + `vitest` + live or demo verification, colors come from
-tokens only. Backend work follows the established patterns: commands for
-one-shots, events for streams, abortable tasks registered in `ClientManager`
-([src-tauri/src/kube/manager.rs](src-tauri/src/kube/manager.rs)).
+tokens only. Backend patterns: commands for one-shots, events for streams,
+abortable tasks registered in
+[ClientManager](src-tauri/src/kube/manager.rs); lazy per-object work follows
+the CRD-watcher / node-scraper shape (start on open, stop on leave, counted in
+watch-status).
+
+### What the test cluster can and can't verify
+
+Acceptance criteria below are written against freya's *actual* state
+(2026-07-17), which constrains what "verified live" can honestly mean:
+
+- **Only `freya` is Ready.** `leo` and `mars` are NotReady, so anything
+  per-node is verifiable on exactly one node.
+- **metrics-server is broken (503)** — `metrics.k8s.io` items degrade to demo
+  verification, honestly noted.
+- **Prometheus has no node data** (scrape targets point at a decommissioned
+  node IP). B38 stays gated on that cluster-side fix.
+- Deployments are mostly single-replica; multi-pod acceptance uses the app's
+  own Scale action to make a second pod, then scales back.
+- Standing defects that make *great* test fixtures: `wiki/wiki-6b6d775f4-djpwx`
+  in CrashLoopBackOff (3258 restarts), `wiki/wiki-6b6d775f4-h97vb` stuck
+  Terminating for 16 days, `wiki-postgres` Pending for 13 days, recurring
+  FailedMount warnings in `cb8`.
 
 ---
 
-## P0 — highest priority — **all shipped**
+## P0 — highest priority
 
-*B14 → B17 are done and verified against freya. P1 (B18) is now the top of the
-list; see [Suggested order](#suggested-order).*
+### B28 — Command palette (⌘K)
+*Why first: every view in the app is now reachable, but only by mouse-walking
+the sidebar. One fuzzy box that jumps to any kind, any object, or any action is
+the single biggest daily-use upgrade left — it's the feature people actually
+touch a hundred times a day in Lens/k9s.*
 
-### B14 — Cluster-wide Events view
-*Why first: per-pod events expire after ~1h, so the per-pod tab is usually empty
-(observed on freya) — the cluster feed is where problems actually surface.*
+**Do:** ⌘K (and `:` like k9s) opens a centered palette over the app. Three
+result classes, ranked in one list: **kinds** ("pods", "Releases", discovered
+CRD kinds by Kind name), **objects** (fuzzy over `name` and `namespace/name`
+across all rows already in the store — no new backend), and **actions** for the
+current selection ("Restart rollout…", "Cordon", "Forward…"). Enter navigates /
+selects / runs; typing `ns:prod ` as a prefix scopes the namespace filter.
+Fuzzy match is subsequence-based with contiguous-run and word-boundary bonuses
+(pure function in `src/lib/fuzzy.ts`, unit-tested). Selecting an object sets
+nav + namespace + selects the row (reuse `selectRow`); the row must end up
+visible in the virtualized table (B21's `scrollToShow`).
 
-**Do:** Add an `events` pseudo-kind under the Cluster nav group (icon `☲`).
-Backend: one more watcher in `spawn_all` on core/v1 Events, mapped to columns
-TYPE, REASON, OBJECT (`kind/name`), NAMESPACE, AGE, COUNT, MESSAGE — TYPE toned
-Warning→`err`, Normal→`ok`; sort Warnings first, then newest; cap the snapshot at
-the latest ~500 to bound payloads. ns filter applies; rows are not clickable
-(v1). Also: give the per-pod Events tab an empty-state hint ("no recent events —
-events expire after ~1h").
+**Accept:**
+- [ ] From Pods, `⌘K wiki` → the crash-looping wiki pod opens with two
+      keystrokes and Enter; `⌘K releases` switches to the Helm view;
+      `⌘K applications` jumps to the Argo CRD kind (and lazily starts its
+      watcher, exactly as clicking the sidebar does).
+- [ ] Objects of *unwatched* CRD kinds are absent from results (their rows
+      aren't loaded) — the kind itself still matches, and jumping to it loads
+      them; no phantom entries.
+- [ ] Esc cascade unchanged; palette traps focus; j/k + arrows move the
+      selection; the fuzzy scorer's ranking is pinned by vitest cases
+      ("wik" ranks `wiki-…` above `kube-wiki-…`).
 
-**Accept:** *(shipped — commit `bd7a6a9`)*
-- [x] The freya feed shows the live FailedMount/FailedScheduling warnings at the
-      top and updates as they recur. Verified with `cargo run --example
-      events_check`: 13 events, 11 warnings, warnings sorted first.
-- [x] Event churn doesn't spam re-renders (existing debounce covers it); list
-      stays ≤ cap; ns filter narrows.
-- [x] Per-pod Events tab shows the TTL hint instead of a bare "no events".
+### B29 — Crash-loop debugging: previous logs, since, save-to-file
+*Why: the single most common debugging motion the app can't do today. The
+current container of a crash-looper has seconds of logs; the answer is always
+in the **previous** container's output. freya has a live specimen with 3258
+restarts to prove it on.*
 
-### B15 — CRD support (dynamic resource kinds)
-*Why: freya is CRD-heavy — Argo CD Applications, Traefik IngressRoutes, ARC
-RunnerSets, helm.cattle.io charts. Without CRDs the app can't show half the
-cluster's real state.*
+**Do:** Backend: `LogParams.previous` and `since_seconds` threaded through
+`start_log_stream` (kube supports both natively). Frontend, in the logs
+toolbar: a "previous" toggle (shown only when `restarts > 0`), a since selector
+(`5m / 1h / 24h / all` — maps to `since_seconds`, replacing the stream on
+change like the container cycler does), and a save button that writes the
+*full* current stream to a file via the existing dialog plugin (`.save()`), not
+just the ring buffer — the backend re-fetches without `tail` for the export so
+the file isn't capped at the on-screen 200 lines.
 
-**Do:** On connect, run API discovery (`kube::discovery::Discovery`) and emit a
-`custom-kinds` event `[{group, kind, plural, namespaced}]` for CRD-backed
-resources. Watch lazily: start a `DynamicObject` watcher only when the user opens
-that kind (register/unregister commands) so hundreds of CRDs don't spawn watchers.
-Generic columns NAME, NAMESPACE?, AGE. Frontend: a "Custom" nav section listing
-discovered kinds (scrollable, filterable if long); detail (YAML/Events) rides the
-existing DynamicObject path from B1. Watch count includes only open CRD watchers.
+**Accept:**
+- [ ] On `wiki-6b6d775f4-djpwx`, "previous" shows the dying container's last
+      output — the actual crash reason, which the live stream never contains.
+- [ ] Toggling previous/since swaps streams cleanly (no interleaved old lines,
+      follow state preserved); "previous" on a 0-restart pod isn't offered.
+- [ ] Saved file contains more lines than the ring buffer cap when the pod has
+      them, and ends with the newest on-screen line.
 
-**Accept:** *(shipped)*
-- [x] Argo CD `Application` and Traefik `IngressRoute` resources list live on
-      freya; YAML opens; ns filter works. Verified with `cargo run --example
-      crd_check`: 44 CRDs discovered, and a real reflector-backed dynamic watcher
-      produces the 2 live Applications as table rows.
-- [x] No CRD watcher runs until its kind is opened (watch-status proves it);
-      closing/leaving the kind stops it.
-- [x] RBAC-forbidden CRDs degrade like built-in kinds (empty table, no crash) —
-      discovery itself also degrades to "no Custom section" if listing CRDs is
-      forbidden.
+### B30 — CRD printer columns
+*Why: custom kinds currently show NAME / NAMESPACE / AGE, which wastes the
+whole point of B15 on CRDs like Argo's. The CRD itself declares its columns —
+`additionalPrinterColumns` with JSONPath — and we already fetch the full CRD at
+discovery and throw that part away. Verified on freya: the Application CRD
+declares Sync Status (`.status.sync.status`) and Health Status
+(`.status.health.status`), and the live apps read Synced/Progressing and
+Synced/Healthy.*
 
-*Note: discovery reads CustomResourceDefinitions directly rather than sweeping the
-discovery API and blocklisting built-in groups — a CRD is by definition a custom
-kind, so this needs no guessing and can't surface built-ins.*
+**Do:** Extend [discovery.rs](src-tauri/src/kube/discovery.rs) to carry each
+kind's printer columns (name, type, jsonPath; skip `priority > 0` columns —
+kubectl hides those without `-o wide` too). Implement a deliberately small
+JSONPath subset in a new `jsonpath.rs`: dotted field access plus `[n]` array
+index over `serde_json::Value` — that covers every column freya's 44 CRDs
+declare; anything it can't evaluate renders "—" rather than guessing.
+`map_dynamic` appends the evaluated columns between NAMESPACE and AGE; columns
+of type `date` render through the existing age cell; tone stays `secondary`
+(the backend can't know which values are "bad" for an arbitrary CRD — v1 takes
+no colour opinions). Frontend: `kindMeta` for a custom kind builds its column
+list from the discovered metadata instead of the fixed generic set.
 
-### B16 — Port-forward Services (and forward UX)
-*Why: B6 shipped pod forwarding only; the original spec included Services, and
-forwarding a Service is the common case ("give me grafana").*
+**Accept:**
+- [ ] Argo Applications on freya show SYNC STATUS and HEALTH STATUS live —
+      `cb8` reads Synced/Progressing, `csearch-v2` Synced/Healthy — matching
+      `kubectl get applications -n argocd` exactly.
+- [ ] Kinds with no printer columns keep the generic set; a jsonPath the subset
+      can't evaluate shows "—" and logs once (no crash, no wrong value).
+- [ ] The JSONPath subset is unit-tested against the exact expressions found on
+      freya's CRDs, plus array-index and missing-field cases.
 
-**Do:** Backend: for a Service ref, resolve selector → first Ready pod, then
-reuse the pod forward path; map named targetPorts to the container port. Add the
-Forward… action to Service rows' detail (ActionsMenu `canForward` for
-`services`). UX: after starting a forward, copy `localhost:PORT` to the clipboard
-and show it in the forwards strip immediately; forward errors (pod gone,
-connection refused per-connection) surface in the strip item as a red tone.
+### B31 — Workload logs (stern-style)
+*Why: "why is this Deployment misbehaving" means reading all its pods'
+logs interleaved, not opening pods one at a time. B7 already interleaves
+containers within a pod; this is the same idea one level up, and it's the
+feature that makes the Logs tab better than `kubectl logs`.*
 
-**Accept:** *(shipped)*
-- [x] Forwarding a Service opens a working local tunnel without picking a pod
-      manually. freya has no `grafana`, so verified with `cargo run --example
-      svc_forward_check` against `csearch-redis`: resolved to a Ready pod and a
-      Redis PING through the tunnel returned `+PONG`.
-- [x] Named targetPort services resolve correctly (`csearch-redis` 6379 →
-      `"redis"`); numeric remaps too (`argocd-server` 80 → 8080); selector-less
-      Services (`kubernetes`) and unpublished ports fail with readable messages.
-- [x] Stopping works; context switch kills all forwards (existing reset path).
+**Do:** Backend: `start_workload_logs(kind, ns, name)` resolves the workload's
+selector (Deployments/STS/DS — reuse the selector plumbing from
+[portforward.rs](src-tauri/src/kube/portforward.rs)'s service resolution),
+starts one log pump per matching pod, and multiplexes into a single stream id;
+lines carry a `pod` field the way B7 lines carry `container`. Pod set is
+re-resolved on a slow tick (~15s) so scale-ups join the stream and gone pods
+drop out; the whole bundle registers as *one* entry in the manager (one
+watch-count unit, one abort). Frontend: Deployments/STS/DS gain the Logs tab;
+the line prefix shows a short pod suffix (`-x2k4n`) tinted with the same
+per-source palette the container prefix uses.
 
-*Note: a Service forward follows one pod and does not load-balance — Kubernetes
-has no service-level forward primitive, so `kubectl port-forward svc/x` behaves
-the same way.*
-
-### B17 — Persist imported kubeconfigs
-*Why: deferred from B11 — imported contexts vanish on relaunch, which makes the
-import feature feel broken for daily use.*
-
-**Do:** Extend `Prefs` with `importedFiles: string[]`. On boot (TauriProvider
-path only), re-run `import_kubeconfig` for each saved path before the initial
-`listContexts` merge; drop paths that no longer parse (with a console warning,
-not an error). Save whenever an import succeeds.
-
-**Accept:** *(shipped)*
-- [x] Import a kubeconfig, relaunch → its contexts are still in the switcher and
-      connectable. `list_contexts` now returns the merged list, and imports are
-      restored *before* it is called.
-- [x] Deleting the file then relaunching drops it silently; default-kubeconfig
-      contexts always win name collisions (existing merge rule). Covered by
-      `cargo test`: a missing/unparseable kubeconfig errors, which `restore_imports`
-      turns into a drop, and the pruned list is what gets persisted.
+**Accept:**
+- [ ] Scale a stateless freya Deployment to 2 via the app's own Scale action:
+      both pods' lines interleave with distinct prefixes; scale back to 1 and
+      the second prefix stops appearing within a tick. (Uses the app to build
+      its own multi-pod fixture — freya runs almost everything single-replica.)
+- [ ] Search/timestamps/follow/save (B29) work unchanged on workload streams.
+- [ ] Closing the tab or navigating away tears down every per-pod pump
+      (watch-status returns to baseline — the same proof B15 uses).
 
 ## P1 — next
 
-### B18 — Properties for more kinds
-*Extend B13's panel beyond pods; same one-command pattern
-([properties.rs](src-tauri/src/kube/properties.rs)).*
+### B32 — Problems view
+*Why: the data to answer "is anything wrong?" is already streaming into the
+store — it's just scattered across six kinds. freya demonstrates today: two
+NotReady nodes, a CrashLoopBackOff, a pod stuck Terminating for 16 days, a
+13-day Pending, recurring FailedMount warnings.*
 
-**Do:** Per-kind property gatherers, one at a time in this order:
-**Deployments** (replica status, strategy, selector, owned ReplicaSets + their
-pod counts, conditions), **Services** (selector, endpoints/EndpointSlices with
-ready addresses → backing pod names, ports incl. nodePort), **Nodes** (conditions,
-taints, capacity vs allocatable, kubelet/OS/kernel versions, addresses),
-**PVC-view on StatefulSets** (volume claim templates + bound PVCs). Frontend: the
-Properties tab shows for these kinds (POD_ONLY set becomes per-kind capability).
+**Do:** A `problems` pseudo-kind at the top of the Cluster group (frontend-only
+aggregation, like the namespace pod counts — no new watchers). Sources, each
+with a one-line reason: NotReady/unschedulable nodes; pods whose status tone is
+err, Pending or Terminating beyond a threshold (10m / 30m); degraded
+workloads (ready < desired); failed Jobs; Warning events (already capped and
+sorted from B14). Columns: SEVERITY, KIND, OBJECT, REASON, AGE — severity red
+before amber, then newest. Rows navigate to the object (sets nav + selects, the
+B28/B33 jump). The sidebar item shows a count badge toned by the worst severity
+present; zero problems renders a deliberately quiet "nothing wrong" state.
 
-**Accept:** *(shipped)*
-- [x] Deployment properties on freya show ReplicaSets + conditions; Service
-      properties list ready endpoint pods; Node properties show taints and
-      capacity/allocatable. Verified with `cargo run --example properties_check`,
-      which gathers all five kinds off live objects and asserts those sections.
-- [x] Kinds without a gatherer simply don't show the tab (no dead tab) —
-      `KINDS_WITH_PROPERTIES` gates it, and a vitest asserts every listed kind
-      really has a gatherer.
+**Accept:**
+- [ ] freya today lists: leo + mars NotReady, the wiki crash-looper, the 16-day
+      Terminating pod, the 13-day Pending postgres, cb8's FailedMount warnings
+      — each with a legible reason, worst first.
+- [ ] Clicking the crash-looper row lands on that pod with the detail panel
+      open; clicking a node problem lands on the node.
+- [ ] The derivation is a pure function over store rows with vitest cases per
+      source (including "healthy cluster → empty").
 
-*Note: rather than a DTO + renderer per kind, gatherers return a generic section
-document (field grid / table / chips) that the frontend renders for any kind — so
-B18's remaining kinds, and future ones, are backend-only additions.*
+### B33 — Related-resource navigation
+*Why: the mental model of Kubernetes is a graph; the app shows disconnected
+tables. Also closes B14's deliberate v1 gap (events rows aren't clickable).*
 
-### B19 — Shell UX polish
-**Do:** Give the Shell tab its own container picker (small dropdown, defaults to
-the first container) instead of sharing the logs cycler index; add a "reconnect"
-affordance when the session ends (the `[reason]` line becomes a row with a
-`↻ reconnect` button); keep scrollback on reconnect.
+**Do:** Three jumps, all landing as nav + namespace + row selection:
+**owner** — the properties Overview's owner field becomes a link; ReplicaSet
+owners resolve *through* the RS to its Deployment backend-side (we don't list
+RS as a kind); **workload → pods** — a "view pods" affordance on
+Deployments/STS/DS rows that jumps to Pods with the workload's selector
+applied, which needs the table filter to accept `key=value[,k2=v2]` label
+selector syntax alongside name substrings (parser in `lib/filter.ts`,
+unit-tested; pods carry labels on the Row for this); **event → object** — B14
+rows become clickable when the involved object's kind is one we show, mapping
+Kind → nav id (including discovered CRDs by group/kind; unresolvable kinds stay
+inert rather than dead-clicking).
 
-**Accept:** *(shipped — needs a GUI pass to confirm)*
-- [x] Multi-container pod: logs cycler and shell container choice no longer
-      affect each other — the Shell tab holds its own choice.
-- [x] After `exit` in the shell, one click reconnects; scrollback preserved (the
-      terminal and the session now have separate lifetimes, so reconnecting
-      rebuilds only the session).
+**Accept:**
+- [ ] From the wiki crash-looper's properties, the owner link lands on the
+      `wiki` Deployment (resolved through its ReplicaSet).
+- [ ] "View pods" on `argocd-repo-server` shows exactly its pods, with the
+      selector visible in the filter box as removable text.
+- [ ] Clicking a FailedMount event on freya lands on the cb8 pod; an event for
+      an unlisted kind renders unclickable (cursor/tone say so).
 
-### B20 — Drain node
-*Finishes B3's stretch goal.*
+### B34 — Rollout actions: restart & undo
+*Why: scale/delete shipped in B3, but the most common workload verb is
+`kubectl rollout restart`, and its safety net is `rollout undo`. The B18
+properties panel already shows the ReplicaSet revision history this needs.*
 
-**Do:** Backend `drain_node(name)`: cordon, then list pods on the node (skip
-DaemonSet-owned and mirror pods) and create `Eviction`s; emit progress events
-(`drain-progress:{node}` with evicted/total); respect failures (PDB 429s) by
-reporting them rather than retry-looping. Frontend: Drain… in the node actions
-menu with confirm + progress in the header banner.
+**Do:** Backend: `restart_rollout(kind, ns, name)` patches
+`spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"]` to
+now (the exact mechanism kubectl uses — the annotation *is* the API);
+`undo_rollout(ns, name, revision)` for Deployments copies the target
+ReplicaSet's pod template back onto the Deployment (revisions come from the
+same owner-uid + revision-annotation logic properties.rs already has).
+Frontend: "Restart rollout…" (confirm) in the actions menu for
+Deployments/STS/DS; "Roll back to revision N…" offered per-row in the
+properties ReplicaSets table for non-current revisions, with a red confirm
+naming the revision. Progress is already visible — the READY column and
+conditions do that job.
 
-**Accept:** *(shipped — the destructive path is deliberately unexercised)*
-- [x] Cordons, then evicts non-DaemonSet pods; PDB blocks surface as a readable
-      message; uncordon restores schedulability (existing action).
-- [x] Selection rules verified **read-only** against freya with `cargo run
-      --example drain_check`, which reports what a drain *would* do: of 54 pods,
-      29 would be evicted and 25 skipped (DaemonSet-owned, completed jobs, a
-      failed pod). No pod was evicted and no node cordoned — draining a live node
-      is the operator's call, not a harness's.
-- [ ] **Not verified:** an actual drain, and a real PDB 429. Unit tests cover the
-      429 classification; the live path needs a cluster you're willing to disrupt.
+**Accept:**
+- [ ] Unit tests pin the restart patch shape and the undo template-copy
+      (fixture Deployment + two RS revisions → patch equals old template).
+- [ ] Live, against a scratch Deployment created for the test (see B36's
+      create-from-YAML; until then, one made with kubectl): restart cycles the
+      pod with a new RS revision; undo returns to the prior template.
+      *Restarting freya's real workloads is the operator's call — same honesty
+      rule as the B20 drain.*
+- [ ] Kinds without rollout semantics don't offer the actions.
 
-### B21 — Table virtualization
-*Scale safety: freya's 71 pods are fine, but 2–5k-pod clusters will jank the
-full-render table.*
+### B35 — Helm release detail: history & values
+*Why: B26 deliberately shipped list + manifest only. The other two questions
+you ask of a release — "what changed between revisions" and "what values is it
+running with" — are sitting in the same Secrets we already decode; freya's
+releases are all rev 1 today, so history is thin there, but the decode path is
+identical.*
 
-**Do:** Windowed rendering for the resource table (e.g. `@tanstack/react-virtual`,
-bundled locally): fixed row height (design rows are 28px), overscan ~20, sticky
-header preserved, keyboard highlight (B10) keeps the highlighted row scrolled
-into view. Ensure sorting/filtering still operate on the full dataset.
+**Do:** Selecting a release gains Properties-shaped detail (reuse the B18
+section renderer): an Overview (chart, app version, status, first/last
+deployed, description), a **History** table — every revision's Secret decoded:
+REVISION, STATUS, CHART, DESCRIPTION, UPDATED, newest first (the
+`latest_only` reduction already computes the grouping; this is its inverse
+view) — and a **Values** section rendering the release's `config` JSON (the
+user-supplied overrides; empty → "chart defaults"). Values pass through the
+same redaction stance as manifests: keys matching `password|secret|token|key`
+render `<redacted>` — a values blob is exactly where credentials end up.
+Still zero write operations.
 
-**Accept:** *(shipped — the fps claim needs your eyes)*
-- [x] A synthetic 5k-row mock kind exists to test against:
-      `VITE_DEMO=1 VITE_STRESS=5000 npm run dev` pads the mock pods list to 5000.
-- [x] j/k navigation works and keeps the highlight on screen (computed for
-      windowed rows, which may not be in the DOM at all).
-- [x] No visual change at freya's scale: tables under 200 rows render exactly as
-      before, windowing off. That threshold isn't just caution — windowing forces
-      `table-layout: fixed`, since auto layout sizes columns from the *rendered*
-      rows and would re-jig them as you scroll.
-- [ ] **Not measured:** the 60fps claim. The windowing math is unit-tested
-      (`src/lib/virtual.test.ts`), but frame rate needs the app in front of you.
+**Accept:**
+- [ ] freya's `traefik` release shows Overview + a 1-row history + its values
+      (or "chart defaults"), all decoded from the cluster, no helm CLI.
+- [ ] Multi-revision history is pinned by unit tests on synthetic v1/v2/v3
+      Secrets (correct order, superseded toned muted, current toned ok).
+- [ ] A values blob containing `dbPassword` shows `<redacted>`; the vitest/
+      cargo test proves the value string never reaches the payload.
 
-*Note: no dependency added — with a fixed row height the windowing is ~40 lines,
-and `@tanstack/react-virtual` assumes absolute positioning that a `<table>` with
-a sticky header doesn't give for free.*
+## P2 — later
 
-## P2 — quality of life
+### B36 — Create from YAML, and dry-run diff before apply
+**Do:** A "+ Create" affordance (topbar or ⌘K action): paste/edit a manifest in
+the CodeMirror editor, `create` it via the dynamic API (kind/ns parsed from the
+manifest itself). And for *edits*: Apply first sends the replace with
+`dryRun=All`, shows a unified diff (current ↔ server-normalized result) in the
+editor gutter/panel, and only then offers the real apply — mistakes surface
+before the cluster changes, and defaulting/mutation webhooks are visible in
+the diff. **Accept:** creating a scratch ConfigMap and a Deployment works (and
+gives B34 its live fixture); an edit that a webhook would mutate shows the
+mutation in the diff before apply; invalid manifests fail the dry-run with the
+server's message, cluster untouched.
 
-### B22 — Window state persistence
-**Do:** `tauri-plugin-window-state` (size/position/monitor), gated out of demo
-builds. **Accept:** relaunch restores window geometry.
+### B37 — Secret values: copy without display
+**Do:** The app's stance is that Secret values never render (B-series decision,
+docs/verification.md) — but *using* a secret is legitimate. Per key in a
+Secret's detail: a "copy value" button whose command decodes and writes the
+value to the clipboard **in Rust** (`tauri-plugin-clipboard-manager`), so the
+plaintext never enters the webview/DOM at all; UI shows only a "copied ✓"
+flash. **Accept:** pasted value matches `kubectl get secret … | base64 -d`;
+grep the emitted Tauri event traffic to prove the value isn't in it; YAML/table
+remain redacted.
 
-**Accept:** *(shipped)*
-- [x] Relaunch restores window geometry — verified by seeding a distinctive
-      1100x700 at (240,160), relaunching, and confirming the app restored it and
-      saved it back unchanged (a failed restore would have re-saved the 1440x900
-      default). Stable across three launches, with no HiDPI size-doubling.
-- [x] Nothing to gate for demo: it runs as a plain browser page with no Tauri
-      backend, so this code isn't in that build at all.
+### B38 — Prometheus-backed metrics history
+**Do:** When a Prometheus service is reachable (detect by conventional
+names/labels, query through the API-server service proxy — the transport is
+already proven against freya), B27's node charts backfill with
+`query_range` history and pods gain CPU/MEM sparklines; the live scraper stays
+as the fallback and freshest point. **Accept:** gated on the cluster-side
+scrape-target fix (freya's Prometheus currently holds zero `node_*` series —
+targets point at a decommissioned IP); until then, query plumbing verifies
+against `up`, and the fallback path is what B27 already proves. *Blocked on
+operator action; do not start before the scrape config is fixed.*
 
-*Two things this needed beyond adding the plugin. `rust-version = "1.77"` was
-stale enough that cargo silently resolved the plugin to a **v0.1.1 built for
-Tauri v1** rather than complaining — the real requirement is 1.77.2 (our
-toolchain is 1.94). And the plugin only saves when the app quits through Tauri,
-which SIGTERM isn't — so `dev/run.sh` (B24) would have thrown the geometry away
-every session, leaving B22 dead in exactly the workflow B24 standardised. The app
-now saves on SIGTERM too.*
-
-### B23 — Settings panel
-**Do:** A small settings surface (gear in the sidebar footer) for: log ring-buffer
-cap, metrics/status poll intervals, default namespace filter, and the shell
-command override. Persist via the existing Prefs file; live-apply where cheap.
-**Accept:** changing the ring buffer cap visibly changes log retention without
-restart; values survive relaunch.
-
-**Accept:** *(shipped)*
-- [x] The ring-buffer cap applies immediately: shrinking it trims the existing
-      buffer rather than waiting for the next line (covered by store tests).
-- [x] Values survive relaunch — verified by seeding all five into prefs.json,
-      running the app, and confirming it restored them and saved them back
-      unchanged (a failed restore would have written the defaults back).
-- [x] Poll intervals apply on next connect and say so in the panel; the shell
-      override applies to the next shell opened. Both are read by the backend
-      from the same prefs file, so there's one copy of the truth.
-
-*This found a silent data-loss bug: `save_prefs` round-trips the frontend's
-object **through the Rust `Prefs` struct**, and serde drops unknown fields — so
-any frontend-only setting was deleted on the first save. `logBufferCap` and
-`defaultNamespace` were being wiped while the backend's own three survived. The
-struct is the schema of prefs.json, not just the part Rust reads; a new
-frontend-only setting must be added there too.*
-
-### B24 — Dev launch hygiene
-*We hit this: orphaned `tauri dev` watchers + a dead vite made the app silently
-fall back to a stale bundled `dist/`, which looked like missing features.*
-
-**Do:** Add `dev/run.sh`: kills prior k7s dev processes (match real process
-names), frees port 1420, ensures a fresh `npm run tauri:dev`, and fails loudly if
-vite dies. Delete `dist/` in dev (or add a visible "BUNDLED BUILD" badge when
-`import.meta.env.DEV` is false but the app was launched via `tauri dev`… simplest:
-just remove stale dist as part of the script). Document in README.
-
-**Accept:** *(shipped)*
-- [x] Running `dev/run.sh` twice never yields two app instances or a stale-dist
-      window — verified by running it against a live first instance: it reclaimed
-      all four processes and came back to exactly 1 app / 1 vite / 1 listener /
-      no `dist/`.
-- [x] Fails loudly if vite dies: verified by killing vite under a running app —
-      it names the stale-bundle risk and stops the app.
-- [x] Never touches other projects: verified against a second Tauri app
-      (`rstorrent`) and another project's vite, both untouched.
-
-*Two bugs this found in its own first draft, both the very failure it targets:
-signalling `npm` left vite **and** the app orphaned (they're grandchildren), and
-the app binary can't be matched by path at all — cargo launches it as the
-relative `target/debug/k7s`, so every absolute pattern silently matched nothing.
-That second one is exactly the mistake that caused the original incident.*
-
-### B25 — Release CI
-**Do:** GitHub Actions workflow on a macOS runner: install deps, run the full
-test suite, `npm run tauri:build`, upload the `.app`/`.dmg` artifacts (the DMG
-styling step works on runners with a GUI session; otherwise ship the .app zip).
-Tag-triggered releases attach artifacts.
-**Accept:** pushing a tag produces a downloadable build with all suites green.
-
-**Accept:** *(shipped — unverified on GitHub; this repo has no remote)*
-- [x] Every command the workflow runs was executed locally, exactly as written:
-      `pnpm install --frozen-lockfile`, typecheck, vitest, clippy `-D warnings`,
-      `cargo test`, and the real `pnpm tauri build`, which produced a 6.3MB zipped
-      `.app` that round-trips into a valid arm64 bundle.
-- [x] DMG is best-effort (`continue-on-error`) per the note above; it builds here,
-      where there's a GUI session.
-- [ ] **Not verified:** the workflow running on GitHub. There is no remote to push
-      to, so the YAML is validated and its commands are proven, but Actions itself
-      has never executed it.
-
-*The DMG step **deletes** `bundle/macos/k7s.app` after folding it into the image
-("Cleaning …/k7s.app"), so the zip step has to come first. It does — and now says
-so, because the failure only appears if someone reorders two steps that look
-independent.*
-
-*Uses pnpm, not npm: `node_modules` is pnpm's and `pnpm-lock.yaml` is the newer
-file, so it's what these builds actually come from. `packageManager` in
-package.json now pins the version for CI and corepack alike.*
-
-### B26 — Helm releases view
-*freya is k3s + Helm; Lens parity feature.*
-
-**Do:** Parse `sh.helm.release.v1.*` Secrets (base64 → gzip → JSON) into a
-"Helm" nav kind: NAME, NAMESPACE, CHART, APP VERSION, REVISION, STATUS, UPDATED.
-Read-only v1 (no rollback). Detail shows the release's rendered manifest summary.
-**Accept:** freya's traefik and any user charts list with correct
-chart/version/status; secrets remain redacted elsewhere.
-
-**Accept:** *(shipped)*
-- [x] freya's releases list with correct chart/version/status — verified with
-      `cargo run --example helm_check`: traefik (traefik-40.1.3+up40.1.0, v3.7.1,
-      deployed), traefik-crd, and both ARC releases.
-- [x] Read-only: no Delete action, and `apply_yaml` refuses — a release's YAML is
-      a rendered manifest, so applying it would bypass Helm and desync the
-      release from what Helm believes it deployed.
-- [x] Secrets remain redacted elsewhere, *and* here: a chart that renders a
-      Secret has its values redacted in the manifest view, since otherwise the
-      Secrets view's redaction is just a door with a window next to it.
-
-*Two traps in the storage format. **Every revision is its own Secret** — a release
-upgraded five times has v1…v5 — so the view reduces to newest-per-release, as
-`helm list` does; freya only has v1s, so that's covered by unit tests instead.
-And the value is **double base64'd**: Helm writes base64(gzip(json)), which
-Kubernetes then base64s again for transport. A test fixture that encodes only
-once tests a decoder no cluster will ever feed — which is exactly the bug the
-first draft of the tests had.*
-
-*Known rough edge: freya's traefik-crd renders a 1.4MB manifest. It loads, but
-the YAML tab is not virtualized (B21 only covers tables), so very large
-manifests may feel heavy.*
+### B39 — Bulk selection & row context menu
+**Do:** Shift/⌘-click multi-select in the table; right-click context menu
+mirroring the detail actions menu (delete on N pods with one confirm listing
+them; cordon on multiple nodes). Selection state per kind, cleared on nav; the
+confirm always enumerates what it's about to do. **Accept:** deleting 3
+selected pods of a scaled deployment issues 3 deletes and one confirm;
+context-menu actions and detail-panel actions share one implementation (no
+drift).
 
 ---
 
-## Added after v2
+## Parking lot (one-liners, not yet worth a number)
 
-### B27 — Node metrics plots (node-exporter → plotly)
-*Nodes show one CPU/MEM percentage and no history; node-exporter has the rest.*
-
-**Do:** A Metrics tab on nodes plotting CPU busy %, memory used, network rx/tx,
-load, and filesystem usage, scraped from the node's node-exporter and drawn with
-plotly.js-basic-dist-min.
-
-**Accept:** *(shipped — needs a GUI pass to confirm the charts render)*
-- [x] Data reaches the app on freya: verified with `cargo run --example
-      nodestats_check` — the exporter is found automatically, and samples read
-      cpu 0.8–2.3%, mem 24.1% (16.0/66.4 GiB), tx ~194 KiB/s, load 3.12/3.53/3.70,
-      21 filesystems.
-- [x] Scraping is lazy: it runs only while a node's Metrics tab is open, and the
-      sidebar's watch count includes it.
-- [x] plotly is loaded on first use, so the main bundle stays 872KB and its 1.13MB
-      chunk only downloads if you open the tab.
-- [ ] **Not verified:** the charts themselves rendering, and the NotReady-node
-      error state.
-
-*The data source is the finding here. **Prometheus has no node metrics on freya**
-— `up{job="node-exporter"}` is 0 for all three targets, whose IPs (.153/.118/.104)
-no longer match the nodes (.156/.104/.118). And the **API server's pod proxy times
-out** even for the Ready node. Only the port-forward path (B6's machinery) works,
-so the plots are live-only: an exporter serves counters, not history, and there is
-nothing to backfill from. Fixing Prometheus's scrape config is a cluster change,
-not an app change — once it scrapes, a Prometheus-backed history mode is a
-natural follow-up.*
-
----
+- **Node debug shell** — Lens-style privileged nsenter pod; powerful, sharp
+  edges, needs its own safety design.
+- **App auto-update** — tauri-updater riding the B25 release pipeline; wants a
+  signing identity first.
+- **RBAC-aware actions** — `SelfSubjectAccessReview` to grey out verbs the
+  user can't perform instead of failing on click.
+- **Watch staleness badge** — a watcher stuck in backoff currently degrades
+  silently; surface per-kind staleness in the table header.
+- **Copy as kubectl** — per-row "copy kubectl command" (get/describe/logs
+  equivalents) for handing to people without k7s.
+- **Multi-cluster windows** — one connection per window via Tauri
+  multi-window; the ClientManager-per-window boundary already almost allows it.
+- **Light theme** — tokens.css is the single source; a second palette is
+  mechanical but needs design taste applied.
 
 ## Suggested order
 
-~~B14 → B15 → B16 → B17 (P0, in order)~~ **shipped** → B18 → B19 → B20 → B21 →
-B22–B26 as convenient. Only hard dependency: **B18** builds on B13's pattern
-(shipped).
-
-*B24 (dev launch hygiene) is worth pulling forward: the stale-dist trap it
-describes bit us again while verifying B14.*
+B28 → B29 → B30 → B31 (P0) → B32 → B33 → B34 → B35 (P1) → B36 → B37 → B39;
+B38 whenever the Prometheus scrape config gets fixed cluster-side.
+Dependencies: B33's object-jump is B28's jump machinery reused (build B28
+first); B34's live fixture wants B36's create (or a kubectl-made scratch
+Deployment); B35 reuses B18's section renderer and B26's decoder as-is.
