@@ -20,7 +20,7 @@ use k8s_openapi::api::core::v1::{
     ConfigMap, Event, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Secret,
     Service, ServiceAccount,
 };
-use k8s_openapi::api::networking::v1::Ingress;
+use k8s_openapi::api::networking::v1::{Ingress, IngressClass};
 use k8s_openapi::api::storage::v1::StorageClass;
 use kube::core::{ApiResource, DynamicObject};
 use kube::runtime::reflector::Lookup;
@@ -62,6 +62,7 @@ pub async fn spawn_all(mgr: &ClientManager, client: Client) -> usize {
     spawn::<CronJob>(mgr, &client, ResourceKind::Cronjobs, mappers::map_cronjob, identity).await;
     spawn::<Service>(mgr, &client, ResourceKind::Services, mappers::map_service, identity).await;
     spawn::<Ingress>(mgr, &client, ResourceKind::Ingresses, mappers::map_ingress, identity).await;
+    spawn::<IngressClass>(mgr, &client, ResourceKind::Ingressclasses, mappers::map_ingressclass, identity).await;
     spawn::<ConfigMap>(mgr, &client, ResourceKind::Configmaps, mappers::map_configmap, identity).await;
     spawn::<Secret>(mgr, &client, ResourceKind::Secrets, mappers::map_secret, identity).await;
     spawn::<ServiceAccount>(mgr, &client, ResourceKind::Serviceaccounts, mappers::map_serviceaccount, identity).await;
@@ -77,7 +78,7 @@ pub async fn spawn_all(mgr: &ClientManager, client: Client) -> usize {
     let helm_client = client.clone();
     let handle = tokio::spawn(async move { run_helm_watcher(helm_client, app).await });
     mgr.push_task(handle).await;
-    20
+    21
 }
 
 /// Spawn one watcher task and register it with the manager.

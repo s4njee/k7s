@@ -66,9 +66,58 @@ export function mockProperties(ref: ResourceRef): Properties | null {
       return nodeProperties(ref);
     case "helm":
       return helmProperties(ref);
+    case "ingresses":
+      return ingressProperties(ref);
     default:
       return null;
   }
+}
+
+/**
+ * Mock Ingress detail (B43): what it routes and where to. Includes a rule whose
+ * backend Service doesn't exist — an Ingress pointing at a missing Service is
+ * one of the most common ways this breaks, and it's what a 503 looks like.
+ */
+function ingressProperties(ref: ResourceRef): Properties {
+  const ns = ref.namespace;
+  return {
+    sections: [
+      fields("Overview", [
+        { label: "class", value: c("traefik"), nav: { kind: "ingressclasses", name: "traefik" } },
+        f("default backend", "—"),
+        f("address", "192.168.1.156"),
+      ]),
+      table(
+        "Rules",
+        ["HOST", "PATH", "PATH TYPE", "SERVICE", "PORT"],
+        [
+          [
+            n(`${ref.name}.freya.io`),
+            c("/"),
+            c("Prefix"),
+            link(ref.name, "services", ref.name, ns),
+            // A named port, not a number — the case a number-only reading drops.
+            c("http"),
+          ],
+          [
+            n(`${ref.name}.freya.io`),
+            c("/api"),
+            c("Prefix"),
+            c(`${ref.name}-api (not found)`, "warn"),
+            c("8080"),
+          ],
+        ],
+        "no rules — this Ingress routes nothing",
+      ),
+      table(
+        "TLS",
+        ["HOSTS", "SECRET"],
+        [[n(`${ref.name}.freya.io`), link(`${ref.name}-tls`, "secrets", `${ref.name}-tls`, ns)]],
+        "no TLS — served over HTTP",
+      ),
+      chips("Labels", [["app", ref.name]]),
+    ],
+  };
 }
 
 /** Tone for a Helm release status, matching the backend's status_tone. */

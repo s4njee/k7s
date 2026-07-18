@@ -408,6 +408,26 @@ const MOCK_PVS: [string, string, string, string, string, string, string, string]
   ["pv-archive-2025", "500Gi", "RWX", "Retain", "Released", "prod/old-archive", "nfs-slow", "180d"],
 ];
 
+/** [name, controller, parameters, age] */
+const MOCK_INGRESSCLASSES: [string, string, string, string][] = [
+  ["traefik (default)", "traefik.io/ingress-controller", "—", "62d"],
+  ["nginx", "k8s.io/ingress-nginx", "IngressParameters/nginx-tuning", "48d"],
+];
+
+function buildIngressClassRows(): Row[] {
+  return MOCK_INGRESSCLASSES.map(([name, controller, parameters, age]) => ({
+    // The "(default)" marker is display only; the object's name is the bare one.
+    uid: `ic:${name}`,
+    name: name.replace(" (default)", ""),
+    cells: [
+      { text: name, tone: "primary" },
+      { text: controller, tone: "secondary" },
+      { text: parameters, tone: "secondary" },
+      { text: age, tone: "muted" },
+    ],
+  }));
+}
+
 /** [name, ns, secrets, age] — one with a hand-attached token, the case worth
  * seeing, since modern clusters mint none automatically. */
 const MOCK_SERVICEACCOUNTS: [string, string, number, string][] = [
@@ -532,6 +552,7 @@ export function buildKindRows(kind: ResourceKind): Row[] {
   if (kind === "persistentvolumes") return buildPvRows();
   if (kind === "storageclasses") return buildStorageClassRows();
   if (kind === "serviceaccounts") return buildServiceAccountRows();
+  if (kind === "ingressclasses") return buildIngressClassRows();
   if (kind === "replicasets") return buildReplicaSetRows();
   const raw = MOCK_RESOURCES[kind] ?? [];
   const hasNamespaceCol = KIND_META[kind].columns[1] === "NAMESPACE";

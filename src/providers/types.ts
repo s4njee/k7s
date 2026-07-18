@@ -24,6 +24,7 @@ export type ResourceKind =
   | "cronjobs"
   | "services"
   | "ingresses"
+  | "ingressclasses"
   | "configmaps"
   | "secrets"
   | "serviceaccounts"

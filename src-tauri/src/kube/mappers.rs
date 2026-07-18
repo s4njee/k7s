@@ -14,7 +14,7 @@ use k8s_openapi::api::core::v1::{
     ConfigMap, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Secret, Service,
     ServiceAccount,
 };
-use k8s_openapi::api::networking::v1::Ingress;
+use k8s_openapi::api::networking::v1::{Ingress, IngressClass};
 use k8s_openapi::api::storage::v1::StorageClass;
 use kube::ResourceExt;
 
@@ -403,6 +403,51 @@ pub fn map_ingress(ing: &Ingress) -> Row {
         age_cell(ing),
     ];
     simple_row(ing, cells)
+}
+
+/// The annotation marking an IngressClass as the cluster default.
+const DEFAULT_INGRESS_CLASS_ANNOTATION: &str = "ingressclass.kubernetes.io/is-default-class";
+
+/// IngressClasses: NAME, CONTROLLER, PARAMETERS, AGE. Cluster-scoped.
+/// The default is marked in the name, as kubectl does — which controller picks up
+/// an Ingress that names no class is the question this answers.
+pub fn map_ingressclass(ic: &IngressClass) -> Row {
+    let is_default = ic
+        .metadata
+        .annotations
+        .as_ref()
+        .and_then(|a| a.get(DEFAULT_INGRESS_CLASS_ANNOTATION))
+        .is_some_and(|v| v == "true");
+    let name = if is_default {
+        format!("{} (default)", ic.name_any())
+    } else {
+        ic.name_any()
+    };
+    let spec = ic.spec.as_ref();
+
+    // Parameters point at a controller-specific config object when set; usually
+    // absent, but when present it's the only pointer to how the class is tuned.
+    let parameters = spec
+        .and_then(|s| s.parameters.as_ref())
+        .map(|p| format!("{}/{}", p.kind, p.name))
+        .unwrap_or_else(|| "—".into());
+
+    let cells = vec![
+        Cell::new(name, Tone::Primary),
+        Cell::new(
+            spec.and_then(|s| s.controller.clone()).unwrap_or_else(|| "—".into()),
+            Tone::Secondary,
+        ),
+        Cell::new(parameters, Tone::Secondary),
+        age_cell(ic),
+    ];
+    Row {
+        uid: uid_of(ic),
+        name: ic.name_any(),
+        namespace: None,
+        cells,
+        ..Default::default()
+    }
 }
 
 // ---------------------------------------------------------------------------

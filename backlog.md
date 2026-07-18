@@ -486,9 +486,40 @@ missed rather than in a new shape.*
 > gatherer that emits links and prefers a StatefulSet that actually declares
 > storage. 15/15 links resolve.
 >
-> **Still unlisted** (referenced, no table): PriorityClass, IngressClass,
-> ControllerRevision, Endpoints. **Never gathered**: imagePullSecrets,
-> `env.valueFrom`, Ingress backends (no `gather_ingress` at all), a Helm
+> *(Ingress backends and IngressClass were closed by B43.)*
+
+### B43 — Ingress detail: what it routes, and to what  ✅ shipped
+*Why: the last "invisible rather than merely unlinked" gap. Ingresses had no
+Properties tab at all, so the list showed HOSTS and CLASS and nothing about the
+backends — the thing an Ingress exists to describe.*
+
+> **Do:** `gather_ingress` — Overview (class, default backend, the address the
+> controller is answering on, from `status`), a **Rules** table
+> (HOST/PATH/PATH TYPE/SERVICE/PORT) and a **TLS** table (HOSTS/SECRET). Every
+> Service and Secret it names is existence-checked and linked, resolved once per
+> distinct name rather than once per rule — an Ingress routinely points many
+> paths at one backend.
+>
+> Two details the obvious version gets wrong, both pinned by tests: a backend
+> **port is a number *or* a name** (freya's only Ingress uses `http`, so a
+> number-only reading would show nothing), and a **host-less rule is a
+> catch-all**, rendered `*` as kubectl does.
+>
+> **IngressClasses** shipped alongside (Network, cluster-scoped, default marked
+> in the NAME). Not scope creep: the new panel's `class` field would otherwise
+> have been a brand-new dead end, which is the mistake this whole run kept
+> repeating.
+>
+> The "may not exist" rule now has one home — `ref_cell` — rather than being
+> re-derived per gatherer. A missing backend renders `name (not found)` in
+> amber, which is what an Ingress 503 actually looks like.
+>
+> Live: `lakitu/lakitu` renders `* · / · Prefix · lakitu · http`, address
+> 192.168.1.156, TLS empty with its note; 17/17 links across all four panels
+> resolve.
+>
+> **Still unlisted** (referenced, no table): PriorityClass, ControllerRevision,
+> Endpoints. **Never gathered**: imagePullSecrets, `env.valueFrom`, a Helm
 > release's installed objects. **Absent entirely**: NetworkPolicies (7 on
 > freya), RBAC (16 roles / 83 clusterroles), Leases, APIServices.
 

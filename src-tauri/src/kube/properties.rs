@@ -19,6 +19,7 @@ use k8s_openapi::api::core::v1::{
     ConfigMap, Node, PersistentVolume, PersistentVolumeClaim, Pod, Secret, Service,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
+use k8s_openapi::api::networking::v1::Ingress;
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use kube::api::{Api, ListParams};
 use kube::{Client, ResourceExt};
@@ -158,6 +159,20 @@ fn field_toned(label: &str, value: impl Into<String>, tone: Tone) -> Field {
     Field { label: label.into(), value: Cell::new(value.into(), tone), nav: None }
 }
 
+/// A cell naming another object that may not exist: link it when it does, say so
+/// when it doesn't (B42). A link to a 404 is worse than the plain text it
+/// replaced, and an absent reference is usually the answer to "why isn't this
+/// working" — a missing backend Service is what an Ingress 503 looks like.
+fn ref_cell(name: &str, exists: bool, target: NavTarget) -> Cell {
+    if name.is_empty() || name == DASH {
+        c(DASH)
+    } else if exists {
+        Cell::link(name.to_string(), Tone::Secondary, Some(target))
+    } else {
+        Cell::new(format!("{name} (not found)"), Tone::Warn)
+    }
+}
+
 /// A field that is a click-through link when `nav` is Some (B33).
 fn nav_field(label: &str, value: impl Into<String>, nav: Option<NavTarget>) -> Field {
     let f = field(label, value);
@@ -181,6 +196,7 @@ pub fn builtin_nav_id(kind: &str) -> Option<&'static str> {
         "CronJob" => "cronjobs",
         "Service" => "services",
         "Ingress" => "ingresses",
+        "IngressClass" => "ingressclasses",
         "ConfigMap" => "configmaps",
         "Secret" => "secrets",
         "ServiceAccount" => "serviceaccounts",
@@ -358,10 +374,172 @@ pub async fn gather(
         "deployments" => gather_deployment(client, namespace, name).await,
         "services" => gather_service(client, namespace, name).await,
         "statefulsets" => gather_statefulset(client, namespace, name).await,
+        "ingresses" => gather_ingress(client, namespace, name).await,
         "nodes" => gather_node(client, name).await,
         "helm" => gather_helm(client, namespace, name).await,
         other => Err(AppError::Other(format!("no properties for kind {other}"))),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Ingresses (B43)
+// ---------------------------------------------------------------------------
+
+/// An Ingress backend port, which is *either* a number or a named port on the
+/// Service — freya's only Ingress uses a name, which is the case a
+/// number-only reading would silently drop.
+fn backend_port(p: Option<&k8s_openapi::api::networking::v1::ServiceBackendPort>) -> String {
+    match p {
+        Some(port) => port
+            .number
+            .map(|n| n.to_string())
+            .or_else(|| port.name.clone())
+            .unwrap_or_else(|| DASH.into()),
+        None => DASH.into(),
+    }
+}
+
+/// Properties for an Ingress: what it routes, to which Services, over which
+/// certificates.
+///
+/// The routing table is the whole point — an Ingress is a pile of rules pointing
+/// at Services, and until now the app showed only HOSTS and CLASS, so the
+/// backends were invisible rather than merely unlinked. Every Service and Secret
+/// it names is existence-checked, because an Ingress pointing at a Service that
+/// isn't there is one of the most common ways this breaks.
+async fn gather_ingress(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
+    let api: Api<Ingress> = Api::namespaced(client.clone(), namespace);
+    let ing = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let spec = ing.spec.clone().unwrap_or_default();
+    let mut props = Properties::default();
+
+    // Resolve every referenced Service/Secret once, not once per rule: an Ingress
+    // routinely points many paths at the same backend.
+    let svc_api: Api<Service> = Api::namespaced(client.clone(), namespace);
+    let sec_api: Api<Secret> = Api::namespaced(client.clone(), namespace);
+    let mut svc_exists: BTreeMap<String, bool> = BTreeMap::new();
+    let mut sec_exists: BTreeMap<String, bool> = BTreeMap::new();
+
+    let backends = spec
+        .rules
+        .iter()
+        .flatten()
+        .flat_map(|r| r.http.iter().flat_map(|h| h.paths.iter()))
+        .filter_map(|p| p.backend.service.as_ref())
+        .chain(spec.default_backend.iter().filter_map(|b| b.service.as_ref()))
+        .map(|b| b.name.clone())
+        .filter(|n| !n.is_empty())
+        .collect::<std::collections::BTreeSet<_>>();
+    for n in backends {
+        let ok = svc_api.get_metadata(&n).await.is_ok();
+        svc_exists.insert(n, ok);
+    }
+    for t in spec.tls.iter().flatten() {
+        if let Some(s) = t.secret_name.clone().filter(|s| !s.is_empty()) {
+            let ok = sec_api.get_metadata(&s).await.is_ok();
+            sec_exists.insert(s, ok);
+        }
+    }
+
+    // ---- overview ----
+    let class = spec.ingress_class_name.clone().unwrap_or_else(|| DASH.into());
+    let default_backend = spec
+        .default_backend
+        .as_ref()
+        .and_then(|b| b.service.as_ref())
+        .map(|b| b.name.clone())
+        .unwrap_or_else(|| DASH.into());
+    // Where the controller is actually answering, from status.
+    let address = ing
+        .status
+        .as_ref()
+        .and_then(|s| s.load_balancer.as_ref())
+        .and_then(|lb| lb.ingress.as_ref())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|i| i.ip.clone().or_else(|| i.hostname.clone()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .filter(|a| !a.is_empty())
+        .unwrap_or_else(|| DASH.into());
+
+    props.fields(
+        "Overview",
+        vec![
+            nav_field(
+                "class",
+                class.clone(),
+                (class != DASH).then(|| NavTarget::cluster("ingressclasses", class.clone())),
+            ),
+            nav_field(
+                "default backend",
+                default_backend.clone(),
+                (default_backend != DASH)
+                    .then(|| NavTarget::namespaced("services", namespace, default_backend.clone())),
+            ),
+            field("address", address),
+        ],
+    );
+
+    // ---- rules ----
+    let mut rule_rows: Vec<Vec<Cell>> = Vec::new();
+    for rule in spec.rules.iter().flatten() {
+        // No host is a catch-all, which kubectl prints as "*".
+        let host = rule.host.clone().filter(|h| !h.is_empty()).unwrap_or_else(|| "*".into());
+        for path in rule.http.iter().flat_map(|h| h.paths.iter()) {
+            let svc = path.backend.service.as_ref();
+            let svc_name = svc.map(|b| b.name.clone()).unwrap_or_else(|| DASH.into());
+            let exists = svc_exists.get(&svc_name).copied().unwrap_or(false);
+            rule_rows.push(vec![
+                name_cell(host.clone()),
+                c(path.path.clone().unwrap_or_else(|| "/".into())),
+                c(path.path_type.clone()),
+                ref_cell(
+                    &svc_name,
+                    exists,
+                    NavTarget::namespaced("services", namespace, svc_name.clone()),
+                ),
+                c(backend_port(svc.and_then(|b| b.port.as_ref()))),
+            ]);
+        }
+    }
+    props.push_table(
+        "Rules",
+        Some("no rules — this Ingress routes nothing"),
+        &["HOST", "PATH", "PATH TYPE", "SERVICE", "PORT"],
+        rule_rows,
+    );
+
+    // ---- tls ----
+    let tls_rows: Vec<Vec<Cell>> = spec
+        .tls
+        .iter()
+        .flatten()
+        .map(|t| {
+            let secret = t.secret_name.clone().unwrap_or_else(|| DASH.into());
+            let exists = sec_exists.get(&secret).copied().unwrap_or(false);
+            vec![
+                name_cell(
+                    t.hosts
+                        .as_ref()
+                        .map(|h| h.join(", "))
+                        .filter(|h| !h.is_empty())
+                        .unwrap_or_else(|| "*".into()),
+                ),
+                ref_cell(
+                    &secret,
+                    exists,
+                    NavTarget::namespaced("secrets", namespace, secret.clone()),
+                ),
+            ]
+        })
+        .collect();
+    props.push_table("TLS", Some("no TLS — served over HTTP"), &["HOSTS", "SECRET"], tls_rows);
+
+    meta_sections(&mut props, &ing);
+    Ok(props)
 }
 
 // ---------------------------------------------------------------------------
@@ -1594,6 +1772,43 @@ mod tests {
         assert!(!dumped.contains("hunter2"), "the password must never reach the payload");
         assert!(vrows.iter().any(|r| r[0].text == "auth.password" && r[1].text == "<redacted>"));
         assert!(vrows.iter().any(|r| r[0].text == "replicas" && r[1].text == "3"));
+    }
+
+    /// An Ingress backend port is a number *or* a name; freya's only Ingress uses
+    /// a name, so a number-only reading would silently show nothing.
+    #[test]
+    fn backend_port_takes_a_number_or_a_name() {
+        let port = |v: serde_json::Value| -> k8s_openapi::api::networking::v1::ServiceBackendPort {
+            serde_json::from_value(v).unwrap()
+        };
+        assert_eq!(backend_port(Some(&port(serde_json::json!({ "number": 8080 })))), "8080");
+        assert_eq!(backend_port(Some(&port(serde_json::json!({ "name": "http" })))), "http");
+        // A number wins when both are somehow set, matching the API's precedence.
+        assert_eq!(backend_port(Some(&port(serde_json::json!({ "number": 80, "name": "http" })))), "80");
+        assert_eq!(backend_port(None), "—");
+    }
+
+    /// A reference that resolves becomes a link; one that doesn't says so rather
+    /// than linking to a 404 (B42) — the rule the whole audit kept re-learning.
+    #[test]
+    fn ref_cell_links_only_what_exists() {
+        let target = || NavTarget::namespaced("services", "prod", "api");
+
+        let present = ref_cell("api", true, target());
+        assert_eq!(present.text, "api");
+        assert!(present.nav.is_some());
+        assert_eq!(present.tone, Tone::Secondary);
+
+        let missing = ref_cell("api", false, target());
+        assert_eq!(missing.text, "api (not found)");
+        assert!(missing.nav.is_none(), "never link to something that isn't there");
+        assert_eq!(missing.tone, Tone::Warn);
+
+        // "nothing referenced" is not the same as "referenced but missing".
+        let none = ref_cell(DASH, false, target());
+        assert_eq!(none.text, DASH);
+        assert!(none.nav.is_none());
+        assert_eq!(none.tone, Tone::Secondary);
     }
 
     /// Owner-kind → nav id: kinds we list resolve; kinds we don't return None so

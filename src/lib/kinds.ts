@@ -106,6 +106,13 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     icon: "⇥",
     columns: ["NAME", "NAMESPACE", "HOSTS", "CLASS", "AGE"],
   },
+  // Cluster-scoped; the default is marked in the NAME, as kubectl does.
+  ingressclasses: {
+    group: "network",
+    label: "IngressClasses",
+    icon: "⇉",
+    columns: ["NAME", "CONTROLLER", "PARAMETERS", "AGE"],
+  },
   // ---- Config ----
   configmaps: {
     group: "config",
@@ -195,6 +202,7 @@ const CLUSTER_SCOPED: ReadonlySet<string> = new Set<string>([
   "namespaces",
   "persistentvolumes",
   "storageclasses",
+  "ingressclasses",
 ]);
 
 /** Groups in sidebar order. */
@@ -221,6 +229,7 @@ export const KINDS_WITH_PROPERTIES: ReadonlySet<string> = new Set<string>([
   "statefulsets",
   "nodes",
   "helm",
+  "ingresses",
 ]);
 
 /** Detail-panel tabs, in strip order. Mirrors DetailTab in the store. */
@@ -296,6 +305,7 @@ const BUILTIN_KIND_TO_NAV: Record<string, ResourceKind> = {
   CronJob: "cronjobs",
   Service: "services",
   Ingress: "ingresses",
+  IngressClass: "ingressclasses",
   ConfigMap: "configmaps",
   Secret: "secrets",
   ServiceAccount: "serviceaccounts",

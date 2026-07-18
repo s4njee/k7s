@@ -25,6 +25,7 @@ fn gvk_for(kind: &str) -> Option<(&'static str, &'static str, &'static str)> {
         "pods" => ("", "v1", "Pod"),
         "services" => ("", "v1", "Service"),
         "serviceaccounts" => ("", "v1", "ServiceAccount"),
+        "ingressclasses" => ("networking.k8s.io", "v1", "IngressClass"),
         "configmaps" => ("", "v1", "ConfigMap"),
         "secrets" => ("", "v1", "Secret"),
         "persistentvolumeclaims" => ("", "v1", "PersistentVolumeClaim"),
@@ -121,6 +122,15 @@ async fn main() -> anyhow::Result<()> {
     });
     if let Some(s) = with_storage.or_else(|| stss.first()) {
         panels.push(("statefulsets", s.namespace().unwrap_or_default(), s.name_any()));
+    }
+    if let Some(i) = Api::<k8s_openapi::api::networking::v1::Ingress>::all(client.clone())
+        .list(&ListParams::default())
+        .await?
+        .items
+        .into_iter()
+        .next()
+    {
+        panels.push(("ingresses", i.namespace().unwrap_or_default(), i.name_any()));
     }
 
     for (kind, pns, pname) in &panels {

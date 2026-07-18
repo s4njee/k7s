@@ -41,6 +41,8 @@ pub enum ResourceKind {
     Cronjobs,
     Services,
     Ingresses,
+    /// The controller an Ingress is handled by (cluster-scoped).
+    Ingressclasses,
     Configmaps,
     Secrets,
     /// The identity a pod runs as.
@@ -71,6 +73,7 @@ impl ResourceKind {
             ResourceKind::Cronjobs => "cronjobs",
             ResourceKind::Services => "services",
             ResourceKind::Ingresses => "ingresses",
+            ResourceKind::Ingressclasses => "ingressclasses",
             ResourceKind::Configmaps => "configmaps",
             ResourceKind::Secrets => "secrets",
             ResourceKind::Serviceaccounts => "serviceaccounts",

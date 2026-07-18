@@ -273,6 +273,7 @@ async fn resource_for(kind: &str, mgr: &ClientManager) -> AppResult<(ApiResource
         "cronjobs" => ("batch", "v1", "CronJob", true),
         "services" => ("", "v1", "Service", true),
         "ingresses" => ("networking.k8s.io", "v1", "Ingress", true),
+        "ingressclasses" => ("networking.k8s.io", "v1", "IngressClass", false),
         "configmaps" => ("", "v1", "ConfigMap", true),
         "secrets" => ("", "v1", "Secret", true),
         "serviceaccounts" => ("", "v1", "ServiceAccount", true),
