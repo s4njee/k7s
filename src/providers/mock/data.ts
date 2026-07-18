@@ -165,8 +165,26 @@ export function buildPodRows(): Row[] {
       { text: p.age, tone: "muted" },
       { text: p.status, tone: statusTone(p.status), dot: true },
     ];
-    return { uid: `pod:${p.ns}/${p.name}`, name: p.name, namespace: p.ns, cells, pod: meta };
+    return {
+      uid: `pod:${p.ns}/${p.name}`,
+      name: p.name,
+      namespace: p.ns,
+      cells,
+      pod: meta,
+      // A conventional app label so the "view pods" selector jump (B33) resolves
+      // in demo mode: derived from the pod name the way the workload's would be.
+      labels: { app: deriveApp(p.name) },
+    };
   });
+}
+
+/**
+ * The app a pod belongs to, from its name: strip a Deployment's
+ * "<rs-hash>-<pod-hash>" or a StatefulSet's "-<ordinal>" suffix. Demo-only, so a
+ * workload's `app=<name>` selector matches its pods' `app` label.
+ */
+function deriveApp(name: string): string {
+  return name.replace(/-[a-z0-9]{5,10}-[a-z0-9]{4,5}$/, "").replace(/-\d+$/, "");
 }
 
 /**
@@ -197,21 +215,26 @@ const MOCK_EVENTS: {
 
 /** Build the demo events feed. Events have no NAME column, so they skip the generic builder. */
 function buildEventRows(): Row[] {
-  return MOCK_EVENTS.map((e, i) => ({
-    // Synthetic id in the shape k8s uses for event names.
-    uid: `event:${e.ns}/${e.object}.${i}`,
-    name: `${e.object.split("/")[1]}.17c3f${i}`,
-    namespace: e.ns,
-    cells: [
-      { text: e.type, tone: e.type === "Warning" ? "err" : "ok" },
-      { text: e.reason, tone: "primary" },
-      { text: e.object, tone: "secondary" },
-      { text: e.ns, tone: "muted" },
-      { text: e.age, tone: "muted" },
-      { text: `×${e.count}`, tone: "secondary" },
-      { text: e.message, tone: "secondary" },
-    ],
-  }));
+  return MOCK_EVENTS.map((e, i) => {
+    const [kind, name] = e.object.split("/");
+    return {
+      // Synthetic id in the shape k8s uses for event names.
+      uid: `event:${e.ns}/${e.object}.${i}`,
+      name: `${name}.17c3f${i}`,
+      namespace: e.ns,
+      cells: [
+        { text: e.type, tone: e.type === "Warning" ? "err" : "ok" },
+        { text: e.reason, tone: "primary" },
+        { text: e.object, tone: "secondary" },
+        { text: e.ns, tone: "muted" },
+        { text: e.age, tone: "muted" },
+        { text: `×${e.count}`, tone: "secondary" },
+        { text: e.message, tone: "secondary" },
+      ],
+      // The object the event is about, for click-through (B33).
+      involved: { kind, name, namespace: e.ns },
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -318,7 +341,7 @@ function stressPods(pods: MockPod[]): MockPod[] {
  * Includes a `failed` and a `pending-upgrade` release: the statuses worth seeing
  * are the ones that aren't `deployed`.
  */
-const MOCK_HELM: [string, string, string, string, number, string, string][] = [
+export const MOCK_HELM: [string, string, string, string, number, string, string][] = [
   ["traefik", "kube-system", "traefik-27.0.2", "v3.0.0", 3, "deployed", "31d"],
   ["prometheus", "monitoring", "kube-prometheus-stack-58.2.1", "v0.73.2", 7, "deployed", "18d"],
   ["grafana", "monitoring", "grafana-7.3.9", "10.4.1", 2, "deployed", "31d"],
@@ -346,11 +369,139 @@ function buildHelmRows(): Row[] {
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Storage: PersistentVolumeClaims and PersistentVolumes
+// ---------------------------------------------------------------------------
+
+/** Tone for a claim/volume phase, matching the backend's pvc_tone / pv_tone. */
+function storageTone(phase: string): Tone {
+  if (phase === "Bound") return "ok";
+  if (phase === "Available") return "secondary";
+  if (phase === "Lost" || phase === "Failed") return "err";
+  return "warn"; // Pending / Released
+}
+
+/** [name, ns, status, volume, capacity, access, class, age] */
+const MOCK_PVCS: [string, string, string, string, string, string, string, string][] = [
+  ["valkyrie-data", "prod", "Bound", "pvc-0bc73481-5d44-439d", "20Gi", "RWO", "local-path", "31d"],
+  ["heimdall-data", "prod", "Bound", "pvc-1063061a-160c-401b", "5Gi", "RWO", "local-path", "31d"],
+  ["prometheus-data", "monitoring", "Bound", "pvc-a3269fdf-6ec2-4a07", "50Gi", "RWO", "local-path", "18d"],
+  ["grafana-data", "monitoring", "Bound", "pvc-c23b8f6e-6b7e-4707", "1Gi", "RWO", "local-path", "18d"],
+  // The case worth seeing: a claim that never bound, so it has no volume and
+  // shows what it *asked* for rather than an empty capacity.
+  ["reports-archive", "prod", "Pending", "—", "100Gi", "RWX", "nfs-slow", "13d"],
+];
+
+/** [name, capacity, access, reclaim, status, claim, class, age] */
+const MOCK_PVS: [string, string, string, string, string, string, string, string][] = [
+  ["pvc-0bc73481-5d44-439d", "20Gi", "RWO", "Delete", "Bound", "prod/valkyrie-data", "local-path", "31d"],
+  ["pvc-1063061a-160c-401b", "5Gi", "RWO", "Delete", "Bound", "prod/heimdall-data", "local-path", "31d"],
+  ["pvc-a3269fdf-6ec2-4a07", "50Gi", "RWO", "Delete", "Bound", "monitoring/prometheus-data", "local-path", "18d"],
+  ["pvc-c23b8f6e-6b7e-4707", "1Gi", "RWO", "Delete", "Bound", "monitoring/grafana-data", "local-path", "18d"],
+  // An unclaimed volume sitting idle, and one whose claim was deleted but whose
+  // data is still on disk — the two non-Bound states that matter.
+  ["pv-spare-ssd-01", "200Gi", "RWO", "Retain", "Available", "—", "fast-ssd", "62d"],
+  ["pv-archive-2025", "500Gi", "RWX", "Retain", "Released", "prod/old-archive", "nfs-slow", "180d"],
+];
+
+/** [name, provisioner, reclaim, binding, expansion, age] */
+const MOCK_STORAGECLASSES: [string, string, string, string, string, string][] = [
+  ["local-path (default)", "rancher.io/local-path", "Delete", "WaitForFirstConsumer", "false", "62d"],
+  ["fast-ssd", "csi.example.io/nvme", "Delete", "Immediate", "true", "62d"],
+  ["nfs-slow", "nfs.csi.k8s.io", "Retain", "Immediate", "true", "48d"],
+];
+
+function buildStorageClassRows(): Row[] {
+  return MOCK_STORAGECLASSES.map(([name, provisioner, reclaim, binding, expansion, age]) => ({
+    // The "(default)" marker is display only; the object's name is the bare one.
+    uid: `sc:${name}`,
+    name: name.replace(" (default)", ""),
+    cells: [
+      { text: name, tone: "primary" },
+      { text: provisioner, tone: "secondary" },
+      { text: reclaim, tone: "secondary" },
+      { text: binding, tone: "secondary" },
+      { text: expansion, tone: "secondary" },
+      { text: age, tone: "muted" },
+    ],
+  }));
+}
+
+/** [name, ns, desired, current, ready, age] — one live generation per workload
+ * plus a scaled-down predecessor, which is what a ReplicaSets list mostly is. */
+const MOCK_REPLICASETS: [string, string, number, number, number, string][] = [
+  ["valkyrie-api-6c8d9", "prod", 2, 2, 2, "4d2h"],
+  ["valkyrie-api-5b7f2", "prod", 0, 0, 0, "9d"],
+  ["heimdall-auth-7d9f4", "prod", 1, 1, 0, "31d"],
+  ["yggdrasil-web-84c6b", "staging", 3, 3, 3, "12d"],
+  ["yggdrasil-web-79a41", "staging", 0, 0, 0, "18d"],
+];
+
+function buildReplicaSetRows(): Row[] {
+  return MOCK_REPLICASETS.map(([name, ns, desired, current, ready, age]) => ({
+    uid: `rs:${ns}/${name}`,
+    name,
+    namespace: ns,
+    cells: [
+      { text: name, tone: "primary" },
+      { text: ns, tone: "muted" },
+      // A superseded generation (0 desired) is history, not a fault.
+      { text: String(desired), tone: desired === 0 ? "muted" : "secondary" },
+      { text: String(current), tone: "secondary" },
+      {
+        text: String(ready),
+        tone: desired === 0 ? "muted" : ready !== desired ? "warn" : "secondary",
+      },
+      { text: age, tone: "muted" },
+    ],
+  }));
+}
+
+function buildPvcRows(): Row[] {
+  return MOCK_PVCS.map(([name, ns, status, volume, capacity, access, cls, age]) => ({
+    uid: `pvc:${ns}/${name}`,
+    name,
+    namespace: ns,
+    cells: [
+      { text: name, tone: "primary" },
+      { text: ns, tone: "muted" },
+      { text: status, tone: storageTone(status), dot: true },
+      { text: volume, tone: "secondary" },
+      { text: capacity, tone: "secondary" },
+      { text: access, tone: "secondary" },
+      { text: cls, tone: "secondary" },
+      { text: age, tone: "muted" },
+    ],
+  }));
+}
+
+function buildPvRows(): Row[] {
+  return MOCK_PVS.map(([name, capacity, access, reclaim, status, claim, cls, age]) => ({
+    uid: `pv:${name}`,
+    name,
+    // Cluster-scoped: no namespace, so the namespace filter ignores these.
+    cells: [
+      { text: name, tone: "primary" },
+      { text: capacity, tone: "secondary" },
+      { text: access, tone: "secondary" },
+      { text: reclaim, tone: "secondary" },
+      { text: status, tone: storageTone(status), dot: true },
+      { text: claim, tone: "secondary" },
+      { text: cls, tone: "secondary" },
+      { text: age, tone: "muted" },
+    ],
+  }));
+}
+
 /** Build rows for a non-pod kind from MOCK_RESOURCES with the prototype's coloring. */
 export function buildKindRows(kind: ResourceKind): Row[] {
   if (kind === "pods") return buildPodRows();
   if (kind === "events") return buildEventRows();
   if (kind === "helm") return buildHelmRows();
+  if (kind === "persistentvolumeclaims") return buildPvcRows();
+  if (kind === "persistentvolumes") return buildPvRows();
+  if (kind === "storageclasses") return buildStorageClassRows();
+  if (kind === "replicasets") return buildReplicaSetRows();
   const raw = MOCK_RESOURCES[kind] ?? [];
   const hasNamespaceCol = KIND_META[kind].columns[1] === "NAMESPACE";
 
@@ -370,11 +521,15 @@ export function buildKindRows(kind: ResourceKind): Row[] {
       }
     });
 
+    const isWorkload =
+      kind === "deployments" || kind === "statefulsets" || kind === "daemonsets";
     return {
       uid: `${kind}:${r.ns}/${r.name}`,
       name: r.name,
       namespace: r.ns === "" ? undefined : r.ns,
       cells,
+      // Workloads select their pods by the conventional app label (B33).
+      ...(isWorkload ? { selector: { app: r.name } } : {}),
     };
   });
 }

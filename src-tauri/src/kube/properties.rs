@@ -11,11 +11,12 @@
 //!
 //! Kinds with a gatherer (see [`gather`]) show the tab; the rest don't.
 
-use super::dto::{Cell, Tone};
+use super::dto::{Cell, NavTarget, Tone};
+use super::helm;
 use crate::error::{AppError, AppResult};
 use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{
-    Node, PersistentVolume, PersistentVolumeClaim, Pod, Service,
+    ConfigMap, Node, PersistentVolume, PersistentVolumeClaim, Pod, Secret, Service,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
@@ -31,11 +32,22 @@ pub struct KeyValue {
     pub value: String,
 }
 
-/// One row of a field grid: a label and a toned value.
+/// One row of a field grid: a label, a toned value, and an optional nav target
+/// that makes the value a click-through link (B33).
 #[derive(Serialize)]
 pub struct Field {
     pub label: String,
     pub value: Cell,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nav: Option<NavTarget>,
+}
+
+impl Field {
+    /// Attach a nav target, making this field a link (builder style).
+    fn with_nav(mut self, target: NavTarget) -> Self {
+        self.nav = Some(target);
+        self
+    }
 }
 
 /// What a section renders as. Tagged so the frontend can switch on `type`.
@@ -138,12 +150,100 @@ fn muted(text: impl Into<String>) -> Cell {
 
 /// A field with a secondary-toned value.
 fn field(label: &str, value: impl Into<String>) -> Field {
-    Field { label: label.into(), value: c(value.into()) }
+    Field { label: label.into(), value: c(value.into()), nav: None }
 }
 
 /// A field whose value carries a tone (e.g. a status).
 fn field_toned(label: &str, value: impl Into<String>, tone: Tone) -> Field {
-    Field { label: label.into(), value: Cell::new(value.into(), tone) }
+    Field { label: label.into(), value: Cell::new(value.into(), tone), nav: None }
+}
+
+/// A field that is a click-through link when `nav` is Some (B33).
+fn nav_field(label: &str, value: impl Into<String>, nav: Option<NavTarget>) -> Field {
+    let f = field(label, value);
+    match nav {
+        Some(target) => f.with_nav(target),
+        None => f,
+    }
+}
+
+/// Map a built-in Kubernetes Kind (PascalCase) to the app's nav id, for the kinds
+/// we list. Returns None for kinds without a table (e.g. ReplicaSet, Endpoints),
+/// so an owner of that kind renders as plain text rather than a dead link (B33).
+pub fn builtin_nav_id(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        "Pod" => "pods",
+        "Deployment" => "deployments",
+        "ReplicaSet" => "replicasets",
+        "StatefulSet" => "statefulsets",
+        "DaemonSet" => "daemonsets",
+        "Job" => "jobs",
+        "CronJob" => "cronjobs",
+        "Service" => "services",
+        "Ingress" => "ingresses",
+        "ConfigMap" => "configmaps",
+        "Secret" => "secrets",
+        "PersistentVolumeClaim" => "persistentvolumeclaims",
+        "PersistentVolume" => "persistentvolumes",
+        "StorageClass" => "storageclasses",
+        "Node" => "nodes",
+        "Namespace" => "namespaces",
+        _ => return None,
+    })
+}
+
+/// Resolve a pod's controller owner into a display string and, where we can
+/// navigate to it, a nav target (B33).
+///
+/// A ReplicaSet owner is resolved *through* to its Deployment — that's the
+/// workload the user thinks of as the owner, and it stays the more useful
+/// destination even now that ReplicaSets are listed (B40). A bare ReplicaSet (no
+/// Deployment above it, or an RBAC-denied lookup) links to the ReplicaSet itself.
+pub async fn resolve_owner(client: &Client, namespace: &str, pod: &Pod) -> (String, Option<NavTarget>) {
+    let refs = pod.metadata.owner_references.as_ref();
+    let owner = refs.and_then(|o| o.iter().find(|r| r.controller == Some(true)).or_else(|| o.first()));
+    let Some(owner) = owner else {
+        return (DASH.into(), None);
+    };
+
+    if owner.kind == "ReplicaSet" {
+        let rs_api: Api<ReplicaSet> = Api::namespaced(client.clone(), namespace);
+        if let Ok(rs) = rs_api.get(&owner.name).await {
+            if let Some(dep) = rs
+                .metadata
+                .owner_references
+                .as_ref()
+                .and_then(|o| o.iter().find(|r| r.kind == "Deployment"))
+            {
+                return (
+                    format!("Deployment/{}", dep.name),
+                    Some(NavTarget {
+                        kind: "deployments".into(),
+                        namespace: Some(namespace.to_string()),
+                        name: dep.name.clone(),
+                    }),
+                );
+            }
+        }
+        // A bare ReplicaSet (no Deployment above it, or the lookup was denied).
+        // Since B40 lists ReplicaSets, this is a real destination now rather than
+        // the dead end it used to be.
+        return (
+            format!("ReplicaSet/{}", owner.name),
+            Some(NavTarget::namespaced("replicasets", namespace, owner.name.clone())),
+        );
+    }
+
+    let display = format!("{}/{}", owner.kind, owner.name);
+    match builtin_nav_id(&owner.kind) {
+        // A Node owner (static/mirror pods) is cluster-scoped; everything else
+        // shares the pod's namespace.
+        Some(nav) => {
+            let namespace = (nav != "nodes").then(|| namespace.to_string());
+            (display, Some(NavTarget { kind: nav.into(), namespace, name: owner.name.clone() }))
+        }
+        None => (display, None),
+    }
 }
 
 /// Map a BTreeMap of labels/annotations into a KeyValue list (sorted by BTreeMap).
@@ -258,8 +358,104 @@ pub async fn gather(
         "services" => gather_service(client, namespace, name).await,
         "statefulsets" => gather_statefulset(client, namespace, name).await,
         "nodes" => gather_node(client, name).await,
+        "helm" => gather_helm(client, namespace, name).await,
         other => Err(AppError::Other(format!("no properties for kind {other}"))),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Helm releases (B35)
+// ---------------------------------------------------------------------------
+
+/// Properties for a Helm release: an Overview, the full revision History, and the
+/// user-supplied Values.
+///
+/// Every revision is its own `helm.sh/release.v1` Secret (B26). Where the table
+/// keeps only the newest via `latest_only`, this is the inverse view: it decodes
+/// *all* of a release's revision Secrets — found by Helm's own `owner=helm,name=…`
+/// labels — to reconstruct the history. Still zero writes.
+async fn gather_helm(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
+    let api: Api<Secret> = Api::namespaced(client, namespace);
+    // Helm labels every release Secret with owner + release name; filtering here
+    // avoids decoding every Secret in the namespace.
+    let lp = ListParams::default().labels(&format!("owner=helm,name={name}"));
+    let secrets = api.list(&lp).await.map_err(|e| AppError::Kube(e.to_string()))?;
+
+    let releases: Vec<helm::Release> =
+        secrets.items.iter().filter_map(helm::decode_release).collect();
+    if releases.is_empty() {
+        return Err(AppError::NotFound(format!("no Helm release {name} in {namespace}")));
+    }
+    Ok(build_helm_properties(releases))
+}
+
+/// Build the release document from its decoded revisions (pure, so the ordering
+/// and toning are testable without a cluster). Newest revision leads the Overview
+/// and the History.
+fn build_helm_properties(mut releases: Vec<helm::Release>) -> Properties {
+    // Newest revision first — the current release leads, history follows.
+    releases.sort_by(|a, b| b.revision.cmp(&a.revision));
+    let current = &releases[0];
+
+    let mut props = Properties::default();
+
+    // ---- overview (from the current revision) ----
+    props.fields(
+        "Overview",
+        vec![
+            field("chart", current.chart.clone()),
+            field("app version", current.app_version.clone()),
+            field_toned("status", current.status.clone(), helm::status_tone(&current.status)),
+            field("revision", current.revision.to_string()),
+            Field {
+                label: "first deployed".into(),
+                value: Cell::age(Some(current.first_deployed.clone()).filter(|s| !s.is_empty())),
+                nav: None,
+            },
+            Field {
+                label: "last deployed".into(),
+                value: Cell::age(Some(current.updated.clone()).filter(|s| !s.is_empty())),
+                nav: None,
+            },
+            field("description", current.description.clone()),
+        ],
+    );
+
+    // ---- history (every revision, newest first) ----
+    let rows: Vec<Vec<Cell>> = releases
+        .iter()
+        .map(|r| {
+            vec![
+                name_cell(r.revision.to_string()),
+                Cell::status(r.status.clone(), helm::status_tone(&r.status)),
+                c(r.chart.clone()),
+                c(r.description.clone()),
+                Cell::age(Some(r.updated.clone()).filter(|s| !s.is_empty())),
+            ]
+        })
+        .collect();
+    props.push_table(
+        "History",
+        Some("no revisions"),
+        &["REVISION", "STATUS", "CHART", "DESCRIPTION", "UPDATED"],
+        rows,
+    );
+
+    // ---- values (user overrides, redacted, flattened) ----
+    let value_rows: Vec<Vec<Cell>> = helm::flatten_values(&current.config)
+        .into_iter()
+        .map(|(k, v)| vec![name_cell(k), c(v)])
+        .collect();
+    props.push_table(
+        "Values",
+        // An empty config isn't missing data — the release runs on the chart's
+        // own defaults, which is worth saying rather than showing a blank table.
+        Some("chart defaults (no overrides)"),
+        &["KEY", "VALUE"],
+        value_rows,
+    );
+
+    props
 }
 
 // ---------------------------------------------------------------------------
@@ -275,22 +471,24 @@ async fn gather_pod(client: Client, namespace: &str, name: &str) -> AppResult<Pr
     let mut props = Properties::default();
 
     // ---- overview ----
-    let owner = pod
-        .metadata
-        .owner_references
-        .as_ref()
-        .and_then(|o| o.first())
-        .map(|o| format!("{}/{}", o.kind, o.name))
-        .unwrap_or_else(|| DASH.into());
+    // The owner is a click-through link (B33); a ReplicaSet owner resolves through
+    // to its Deployment, since that's the workload the user means and we don't list
+    // ReplicaSets as a kind.
+    let (owner_text, owner_nav) = resolve_owner(&client, namespace, &pod).await;
 
     props.fields(
         "Overview",
         vec![
-            field("node", or_dash(spec.node_name.clone())),
+            nav_field(
+                "node",
+                or_dash(spec.node_name.clone()),
+                // Nodes are cluster-scoped, so no namespace on the target.
+                spec.node_name.clone().filter(|n| !n.is_empty()).map(|n| NavTarget::cluster("nodes", n)),
+            ),
             field("pod IP", or_dash(status.pod_ip.clone())),
             field("host IP", or_dash(status.host_ip.clone())),
             field("QoS", or_dash(status.qos_class.clone())),
-            field("owner", owner),
+            nav_field("owner", owner_text, owner_nav),
             field("service account", or_dash(spec.service_account_name.clone())),
             field("restart policy", or_dash(spec.restart_policy.clone())),
             field("priority class", or_dash(spec.priority_class_name.clone())),
@@ -300,6 +498,7 @@ async fn gather_pod(client: Client, namespace: &str, name: &str) -> AppResult<Pr
                     Some(t) => Cell::age(Some(t.0.to_rfc3339())),
                     None => muted(DASH),
                 },
+                nav: None,
             },
         ],
     );
@@ -410,10 +609,26 @@ async fn gather_pod(client: Client, namespace: &str, name: &str) -> AppResult<Pr
             .map(|v| {
                 vec![
                     name_cell(v.name.clone()),
-                    c(v.claim.clone()),
-                    c(v.pv.clone()),
+                    // The claim, its volume and its class are all listed kinds
+                    // now, so each cell links through (B40). `Cell::link` drops
+                    // the link when the value is an em dash — an unbound claim
+                    // has no PV to go to.
+                    Cell::link(
+                        v.claim.clone(),
+                        Tone::Secondary,
+                        Some(NavTarget::namespaced("persistentvolumeclaims", namespace, v.claim.clone())),
+                    ),
+                    Cell::link(
+                        v.pv.clone(),
+                        Tone::Secondary,
+                        Some(NavTarget::cluster("persistentvolumes", v.pv.clone())),
+                    ),
                     c(v.capacity.clone()),
-                    c(v.storage_class.clone()),
+                    Cell::link(
+                        v.storage_class.clone(),
+                        Tone::Secondary,
+                        Some(NavTarget::cluster("storageclasses", v.storage_class.clone())),
+                    ),
                     c(v.access_modes.clone()),
                     Cell::new(
                         v.phase.clone(),
@@ -439,10 +654,23 @@ async fn gather_pod(client: Client, namespace: &str, name: &str) -> AppResult<Pr
     props.push_table(
         "Other volumes",
         None,
-        &["VOLUME", "KIND", "MOUNTED AT"],
+        &["VOLUME", "KIND", "SOURCE", "MOUNTED AT"],
         other_vols
             .iter()
-            .map(|v| vec![name_cell(v.name.clone()), c(v.kind.clone()), c(mount_text(v))])
+            .map(|v| {
+                vec![
+                    name_cell(v.name.clone()),
+                    c(v.kind.clone()),
+                    if v.source_missing {
+                        // The mount is empty; that's the answer to "why is this
+                        // config not applying", so it's worth colouring.
+                        Cell::new(format!("{} (not found)", v.source), Tone::Warn)
+                    } else {
+                        Cell::link(v.source.clone(), Tone::Secondary, v.source_nav.clone())
+                    },
+                    c(mount_text(v)),
+                ]
+            })
             .collect(),
     );
 
@@ -462,6 +690,14 @@ struct VolumeInfo {
     storage_class: String,
     access_modes: String,
     phase: String,
+    /// For a ConfigMap/Secret-backed volume, the object it mounts, and a link to
+    /// it. The classification alone ("Secret") doesn't say *which* Secret, which
+    /// is the thing you opened the panel to find out.
+    source: String,
+    source_nav: Option<NavTarget>,
+    /// The referenced ConfigMap/Secret doesn't exist. Legal — a volume source can
+    /// be `optional: true` — but worth saying, because the mount is then empty.
+    source_missing: bool,
 }
 
 /// "/data, /var/lib (ro)".
@@ -497,6 +733,7 @@ async fn gather_volumes(
         }
         let mount_paths = if mounts.is_empty() { DASH.to_string() } else { mounts.join(", ") };
 
+        let (source, source_nav) = volume_source(v, namespace);
         let mut info = VolumeInfo {
             name: v.name.clone(),
             kind: volume_kind(v).to_string(),
@@ -508,7 +745,33 @@ async fn gather_volumes(
             storage_class: String::new(),
             access_modes: String::new(),
             phase: String::new(),
+            source,
+            source_nav,
+            source_missing: false,
         };
+
+        // A volume source may be `optional: true` and simply not exist (Argo's
+        // repo-server declares a TLS Secret that's only created if you enable
+        // TLS). Linking to it would be a link to a 404 — worse than the plain
+        // text it replaced — so confirm it's there first. `get_metadata` is used
+        // deliberately: an existence check must not pull a Secret's contents.
+        if let Some(nav) = info.source_nav.clone() {
+            let exists = match nav.kind.as_str() {
+                "configmaps" => {
+                    let api: Api<ConfigMap> = Api::namespaced(client.clone(), namespace);
+                    api.get_metadata(&nav.name).await.is_ok()
+                }
+                "secrets" => {
+                    let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
+                    api.get_metadata(&nav.name).await.is_ok()
+                }
+                _ => true,
+            };
+            if !exists {
+                info.source_missing = true;
+                info.source_nav = None;
+            }
+        }
 
         // Resolve PVC-backed volumes.
         if let Some(src) = &v.persistent_volume_claim {
@@ -570,6 +833,36 @@ async fn gather_volumes(
     out
 }
 
+/// The object a ConfigMap/Secret-backed volume mounts, with a link to it (B40).
+///
+/// `volume_kind` only classifies ("ConfigMap"), which leaves the panel saying a
+/// pod mounts *a* ConfigMap without saying which — and both kinds are listed, so
+/// the name is one click from being useful.
+fn volume_source(
+    v: &k8s_openapi::api::core::v1::Volume,
+    namespace: &str,
+) -> (String, Option<NavTarget>) {
+    if let Some(name) = v
+        .config_map
+        .as_ref()
+        .map(|cm| cm.name.clone())
+        .filter(|n| !n.is_empty())
+    {
+        let nav = NavTarget::namespaced("configmaps", namespace, name.clone());
+        return (name, Some(nav));
+    }
+    if let Some(name) = v
+        .secret
+        .as_ref()
+        .and_then(|s| s.secret_name.clone())
+        .filter(|n| !n.is_empty())
+    {
+        let nav = NavTarget::namespaced("secrets", namespace, name.clone());
+        return (name, Some(nav));
+    }
+    (DASH.to_string(), None)
+}
+
 /// Classify a volume by its source.
 fn volume_kind(v: &k8s_openapi::api::core::v1::Volume) -> &'static str {
     if v.persistent_volume_claim.is_some() {
@@ -621,8 +914,13 @@ async fn gather_services(
             {
                 return None;
             }
+            let name = s.metadata.name.clone().unwrap_or_default();
             Some(vec![
-                name_cell(s.metadata.name.clone().unwrap_or_default()),
+                Cell::link(
+                    name.clone(),
+                    Tone::Primary,
+                    Some(NavTarget::namespaced("services", namespace, name)),
+                ),
                 c(spec.type_.clone().unwrap_or_else(|| "ClusterIP".into())),
                 c(or_dash(spec.cluster_ip.clone())),
                 c(service_ports_text(spec)),
@@ -727,7 +1025,13 @@ async fn gather_deployment(client: Client, namespace: &str, name: &str) -> AppRe
                     let want = rs.spec.as_ref().and_then(|sp| sp.replicas).unwrap_or(0);
                     let rs_ready = s.ready_replicas.unwrap_or(0);
                     vec![
-                        name_cell(rs.name_any()),
+                        // ReplicaSets are a listed kind now (B40), so a revision
+                        // row opens the generation it names.
+                        Cell::link(
+                            rs.name_any(),
+                            Tone::Primary,
+                            Some(NavTarget::namespaced("replicasets", namespace, rs.name_any())),
+                        ),
                         c(revision_of(rs).map(|r| r.to_string()).unwrap_or_else(|| DASH.into())),
                         c(want.to_string()),
                         c(s.replicas.to_string()),
@@ -911,7 +1215,16 @@ async fn gather_statefulset(client: Client, namespace: &str, name: &str) -> AppR
             field_toned("replicas", format!("{ready}/{desired} ready"), ready_tone(ready, desired)),
             field("current", status.current_replicas.unwrap_or(0).to_string()),
             field("updated", status.updated_replicas.unwrap_or(0).to_string()),
-            field("service name", or_dash(Some(spec.service_name.clone()))),
+            // The governing headless Service. `serviceName` is a required string
+            // but not a guarantee the Service exists, so this can link somewhere
+            // empty — still better than making you search for it by hand.
+            nav_field(
+                "service name",
+                or_dash(Some(spec.service_name.clone())),
+                Some(spec.service_name.clone())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| NavTarget::namespaced("services", namespace, s)),
+            ),
             field(
                 "update strategy",
                 spec.update_strategy
@@ -1159,6 +1472,85 @@ mod tests {
     fn unknown_condition_is_a_warning() {
         assert_eq!(condition_tone("Ready", "Unknown"), Tone::Warn);
         assert_eq!(condition_tone("MemoryPressure", "Unknown"), Tone::Warn);
+    }
+
+    /// Helm history (B35): revisions decoded in any order render newest-first,
+    /// the current revision's status leads the Overview, superseded rows read
+    /// muted and the current deployed row reads ok, and values are redacted.
+    #[test]
+    fn helm_history_orders_and_tones() {
+        let rel = |revision: i64, status: &str| helm::Release {
+            name: "redis".into(),
+            namespace: "prod".into(),
+            chart: "redis-1.2.3".into(),
+            app_version: "7.2".into(),
+            revision,
+            status: status.into(),
+            updated: format!("2026-06-0{revision}T00:00:00Z"),
+            first_deployed: "2026-06-01T00:00:00Z".into(),
+            description: "Upgrade complete".into(),
+            config: serde_json::json!({ "auth": { "password": "hunter2" }, "replicas": 3 }),
+            manifest: String::new(),
+        };
+        // Deliberately unsorted input: v1, v3, v2.
+        let props = build_helm_properties(vec![
+            rel(1, "superseded"),
+            rel(3, "deployed"),
+            rel(2, "superseded"),
+        ]);
+
+        // Overview leads with the current (highest) revision.
+        let overview = match &props.sections[0].body {
+            Body::Fields { fields } => fields,
+            _ => panic!("first section is the Overview grid"),
+        };
+        let status = overview.iter().find(|f| f.label == "status").unwrap();
+        assert_eq!(status.value.text, "deployed");
+        assert_eq!(status.value.tone, Tone::Good, "current deployed reads ok");
+        let revision = overview.iter().find(|f| f.label == "revision").unwrap();
+        assert_eq!(revision.value.text, "3");
+
+        // History is newest-first, with the right per-row toning.
+        let history = props.sections.iter().find(|s| s.title == "History").unwrap();
+        let rows = match &history.body {
+            Body::Table { rows, .. } => rows,
+            _ => panic!("History is a table"),
+        };
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0][0].text, "3");
+        assert_eq!(rows[0][1].tone, Tone::Good, "current revision ok");
+        assert_eq!(rows[1][0].text, "2");
+        assert_eq!(rows[1][1].tone, Tone::Muted, "superseded reads muted");
+        assert_eq!(rows[2][0].text, "1");
+
+        // Values are redacted, and the password never reaches the cells.
+        let values = props.sections.iter().find(|s| s.title == "Values").unwrap();
+        let vrows = match &values.body {
+            Body::Table { rows, .. } => rows,
+            _ => panic!("Values is a table"),
+        };
+        let dumped = format!("{vrows:?}");
+        assert!(!dumped.contains("hunter2"), "the password must never reach the payload");
+        assert!(vrows.iter().any(|r| r[0].text == "auth.password" && r[1].text == "<redacted>"));
+        assert!(vrows.iter().any(|r| r[0].text == "replicas" && r[1].text == "3"));
+    }
+
+    /// Owner-kind → nav id: kinds we list resolve; kinds we don't return None so
+    /// the reference stays plain text rather than becoming a dead link (B33).
+    #[test]
+    fn builtin_nav_id_only_maps_listed_kinds() {
+        assert_eq!(builtin_nav_id("Deployment"), Some("deployments"));
+        assert_eq!(builtin_nav_id("StatefulSet"), Some("statefulsets"));
+        assert_eq!(builtin_nav_id("DaemonSet"), Some("daemonsets"));
+        assert_eq!(builtin_nav_id("Node"), Some("nodes"));
+        // Listed as of B40 — these used to be the canonical dead ends.
+        assert_eq!(builtin_nav_id("ReplicaSet"), Some("replicasets"));
+        assert_eq!(builtin_nav_id("StorageClass"), Some("storageclasses"));
+        assert_eq!(builtin_nav_id("PersistentVolumeClaim"), Some("persistentvolumeclaims"));
+        // Still unlisted, so still correctly None.
+        assert_eq!(builtin_nav_id("Endpoints"), None);
+        assert_eq!(builtin_nav_id("ServiceAccount"), None);
+        assert_eq!(builtin_nav_id("FooBar"), None);
     }
 
     /// Replica readiness: all → green, some → amber, none → red.

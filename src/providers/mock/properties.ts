@@ -7,7 +7,7 @@
  */
 
 import type { Cell, Field, Properties, ResourceRef, Section, Tone } from "../types";
-import { MOCK_PODS } from "./data";
+import { MOCK_HELM, MOCK_PODS } from "./data";
 
 /** A plain secondary cell. */
 const c = (text: string, tone: Tone = "secondary"): Cell => ({ text, tone });
@@ -56,9 +56,78 @@ export function mockProperties(ref: ResourceRef): Properties | null {
       return statefulSetProperties(ref);
     case "nodes":
       return nodeProperties(ref);
+    case "helm":
+      return helmProperties(ref);
     default:
       return null;
   }
+}
+
+/** Tone for a Helm release status, matching the backend's status_tone. */
+function helmTone(status: string): Tone {
+  if (status === "deployed") return "ok";
+  if (status === "failed") return "err";
+  if (status === "superseded" || status === "uninstalled") return "muted";
+  return "warn";
+}
+
+/**
+ * Mock Helm release detail (B35): Overview, a synthetic revision History counting
+ * down from the current revision, and Values. Releases matching valkyrie/heimdall
+ * carry overrides — including a redacted `dbPassword` to show the redaction — the
+ * rest run on chart defaults.
+ */
+function helmProperties(ref: ResourceRef): Properties {
+  const rel = MOCK_HELM.find(([name, ns]) => name === ref.name && ns === ref.namespace);
+  const [name, , chart, appVersion, revision, status] =
+    rel ?? [ref.name, ref.namespace ?? "", "unknown-0.0.0", "—", 1, "deployed"];
+
+  const desc = status === "failed" ? "Upgrade \"redis\" failed" : "Upgrade complete";
+
+  // History: the current revision, then superseded predecessors down to v1
+  // (capped at the last 5, as Helm keeps ten but shows recent ones first).
+  const history: Cell[][] = [];
+  for (let rev = revision; rev >= 1 && revision - rev < 5; rev--) {
+    const st = rev === revision ? status : "superseded";
+    history.push([
+      n(String(rev)),
+      { text: st, tone: helmTone(st), dot: true },
+      c(chart),
+      c(rev === revision ? desc : "Upgrade complete"),
+      age(daysAgo((revision - rev) * 3 + 1)),
+    ]);
+  }
+
+  const overridden = /valkyrie|heimdall/.test(name);
+  const values: Cell[][] = overridden
+    ? [
+        [n("dbPassword"), c("<redacted>")],
+        [n("image.tag"), c(appVersion)],
+        [n("replicaCount"), c("2")],
+        [n("resources.limits.cpu"), c("500m")],
+      ]
+    : [];
+
+  return {
+    sections: [
+      fields("Overview", [
+        f("chart", chart),
+        f("app version", appVersion),
+        f("status", status, helmTone(status)),
+        f("revision", String(revision)),
+        { label: "first deployed", value: age(daysAgo(31)) },
+        { label: "last deployed", value: age(daysAgo(revision > 1 ? 1 : 31)) },
+        f("description", desc),
+      ]),
+      table(
+        "History",
+        ["REVISION", "STATUS", "CHART", "DESCRIPTION", "UPDATED"],
+        history,
+        "no revisions",
+      ),
+      table("Values", ["KEY", "VALUE"], values, "chart defaults (no overrides)"),
+    ],
+  };
 }
 
 function podProperties(ref: ResourceRef): Properties {
@@ -90,7 +159,9 @@ function podProperties(ref: ResourceRef): Properties {
         f("pod IP", "10.244.2.37"),
         f("host IP", "192.168.1.153"),
         f("QoS", "Burstable"),
-        f("owner", `ReplicaSet/${app}-7d9f8b64d`),
+        // Owner resolves through the ReplicaSet to its Deployment, with a nav
+        // target that makes it a click-through link (B33).
+        { label: "owner", value: c(`Deployment/${app}`), nav: { kind: "deployments", namespace: ref.namespace, name: app } },
         f("service account", `${ref.namespace}-runtime`),
         f("restart policy", "Always"),
         f("priority class", "—"),

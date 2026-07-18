@@ -13,13 +13,21 @@ import type { CustomKind, KindId, ResourceKind } from "../providers/types";
 export type { CustomKind, KindId, ResourceKind } from "../providers/types";
 
 /** Nav groups, in sidebar order. "custom" holds discovered CRD kinds (B15). */
-export type NavGroup = "workloads" | "network" | "config" | "cluster" | "helm" | "custom";
+export type NavGroup =
+  | "workloads"
+  | "network"
+  | "config"
+  | "storage"
+  | "cluster"
+  | "helm"
+  | "custom";
 
 /** Human-readable group headers (mono uppercase in the sidebar). */
 export const GROUP_LABELS: Record<NavGroup, string> = {
   workloads: "Workloads",
   network: "Network",
   config: "Config",
+  storage: "Storage",
   cluster: "Cluster",
   helm: "Helm",
   custom: "Custom",
@@ -52,6 +60,14 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     label: "Deployments",
     icon: "▲",
     columns: ["NAME", "NAMESPACE", "READY", "UP-TO-DATE", "AVAILABLE", "AGE"],
+  },
+  // A Deployment's actual generation, and a pod's immediate owner — the object
+  // the owner chain used to have to route around (B33).
+  replicasets: {
+    group: "workloads",
+    label: "ReplicaSets",
+    icon: "❐",
+    columns: ["NAME", "NAMESPACE", "DESIRED", "CURRENT", "READY", "AGE"],
   },
   statefulsets: {
     group: "workloads",
@@ -103,6 +119,29 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     icon: "⚿",
     columns: ["NAME", "NAMESPACE", "TYPE", "DATA", "AGE"],
   },
+  // ---- Storage ----
+  // Claims first: a claim is what a workload actually references, and the volume
+  // behind it is the follow-up question.
+  persistentvolumeclaims: {
+    group: "storage",
+    label: "PersistentVolumeClaims",
+    icon: "⛁",
+    columns: ["NAME", "NAMESPACE", "STATUS", "VOLUME", "CAPACITY", "ACCESS", "CLASS", "AGE"],
+  },
+  // Cluster-scoped, so no NAMESPACE column — CLAIM carries "namespace/name".
+  persistentvolumes: {
+    group: "storage",
+    label: "PersistentVolumes",
+    icon: "⛃",
+    columns: ["NAME", "CAPACITY", "ACCESS", "RECLAIM", "STATUS", "CLAIM", "CLASS", "AGE"],
+  },
+  // Cluster-scoped. The default class is marked in the NAME, as kubectl does.
+  storageclasses: {
+    group: "storage",
+    label: "StorageClasses",
+    icon: "▧",
+    columns: ["NAME", "PROVISIONER", "RECLAIM", "BINDING", "EXPANSION", "AGE"],
+  },
   // ---- Cluster (cluster-scoped: no NAMESPACE column) ----
   nodes: {
     group: "cluster",
@@ -141,13 +180,19 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
 export const KIND_ORDER = Object.keys(KIND_META) as ResourceKind[];
 
 /** Built-in kinds that are cluster-scoped and therefore ignore the namespace filter. */
-const CLUSTER_SCOPED: ReadonlySet<string> = new Set<string>(["nodes", "namespaces"]);
+const CLUSTER_SCOPED: ReadonlySet<string> = new Set<string>([
+  "nodes",
+  "namespaces",
+  "persistentvolumes",
+  "storageclasses",
+]);
 
 /** Groups in sidebar order. */
 export const GROUP_ORDER: NavGroup[] = [
   "workloads",
   "network",
   "config",
+  "storage",
   "cluster",
   "helm",
   "custom",
@@ -165,6 +210,7 @@ export const KINDS_WITH_PROPERTIES: ReadonlySet<string> = new Set<string>([
   "services",
   "statefulsets",
   "nodes",
+  "helm",
 ]);
 
 /** Detail-panel tabs, in strip order. Mirrors DetailTab in the store. */
@@ -224,6 +270,51 @@ export function tabsFor(kind: KindId, isPod: boolean): DetailTabId[] {
  */
 export function isCustomKind(id: KindId): boolean {
   return id.includes("/");
+}
+
+/**
+ * Kubernetes Kind (PascalCase) → built-in nav id, for the kinds we list. Used to
+ * resolve an event's involvedObject to a navigable table (B33).
+ */
+const BUILTIN_KIND_TO_NAV: Record<string, ResourceKind> = {
+  Pod: "pods",
+  Deployment: "deployments",
+  ReplicaSet: "replicasets",
+  StatefulSet: "statefulsets",
+  DaemonSet: "daemonsets",
+  Job: "jobs",
+  CronJob: "cronjobs",
+  Service: "services",
+  Ingress: "ingresses",
+  ConfigMap: "configmaps",
+  Secret: "secrets",
+  PersistentVolumeClaim: "persistentvolumeclaims",
+  PersistentVolume: "persistentvolumes",
+  StorageClass: "storageclasses",
+  Node: "nodes",
+  Namespace: "namespaces",
+};
+
+/**
+ * Resolve an object's Kubernetes Kind (plus its apiVersion, needed to
+ * disambiguate CRDs) to the nav id of a table we show, or null when we don't list
+ * that kind (B33). A null result is why an event row stays inert rather than
+ * dead-clicking.
+ *
+ * Built-ins match by Kind alone. A CRD matches a discovered `CustomKind` by both
+ * Kind and group (the group is the part of `apiVersion` before the slash) — Kind
+ * alone can collide across groups (two CRDs both named `Application`).
+ */
+export function navIdForKind(
+  kind: string,
+  apiVersion: string | undefined,
+  customKinds: CustomKind[],
+): KindId | null {
+  const builtin = BUILTIN_KIND_TO_NAV[kind];
+  if (builtin) return builtin;
+  const group = apiVersion && apiVersion.includes("/") ? apiVersion.split("/")[0] : "";
+  const ck = customKinds.find((c) => c.kind === kind && c.group === group);
+  return ck ? ck.id : null;
 }
 
 /** Icon for every custom kind (they have no per-kind glyph of their own). */

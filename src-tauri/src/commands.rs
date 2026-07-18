@@ -8,7 +8,7 @@ use crate::kube::client::{self, ClusterInfo, ContextInfo};
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
 use crate::kube::{
     discovery, drain, exec, helm, logs, mappers, metrics, nodestats, portforward, properties,
-    watchers, ClientManager, ResourceKind,
+    restart, watchers, ClientManager, ResourceKind,
 };
 use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::core::v1::Event;
@@ -266,6 +266,7 @@ async fn resource_for(kind: &str, mgr: &ClientManager) -> AppResult<(ApiResource
     let (group, version, k, namespaced) = match kind {
         "pods" => ("", "v1", "Pod", true),
         "deployments" => ("apps", "v1", "Deployment", true),
+        "replicasets" => ("apps", "v1", "ReplicaSet", true),
         "statefulsets" => ("apps", "v1", "StatefulSet", true),
         "daemonsets" => ("apps", "v1", "DaemonSet", true),
         "jobs" => ("batch", "v1", "Job", true),
@@ -274,6 +275,9 @@ async fn resource_for(kind: &str, mgr: &ClientManager) -> AppResult<(ApiResource
         "ingresses" => ("networking.k8s.io", "v1", "Ingress", true),
         "configmaps" => ("", "v1", "ConfigMap", true),
         "secrets" => ("", "v1", "Secret", true),
+        "persistentvolumeclaims" => ("", "v1", "PersistentVolumeClaim", true),
+        "persistentvolumes" => ("", "v1", "PersistentVolume", false),
+        "storageclasses" => ("storage.k8s.io", "v1", "StorageClass", false),
         "nodes" => ("", "v1", "Node", false),
         "namespaces" => ("", "v1", "Namespace", false),
         other => return Err(AppError::Other(format!("unknown kind: {other}"))),
@@ -435,6 +439,50 @@ pub async fn set_cordon(
     let client = require_client(&mgr).await?;
     let api = dynamic_api(client, "nodes", "", &mgr).await?;
     let patch = Patch::Merge(serde_json::json!({ "spec": { "unschedulable": unschedulable } }));
+    api.patch(&name, &PatchParams::default(), &patch).await?;
+    Ok(())
+}
+
+/// Restart a pod (B34) by deleting it so its controller recreates a fresh one.
+///
+/// Refuses a pod with no controlling owner: deleting *that* would just remove it,
+/// which is a delete, not a restart. The check happens here, where we have the
+/// full object, rather than trusting the frontend to have hidden the action.
+#[tauri::command]
+pub async fn restart_pod(
+    namespace: String,
+    name: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<()> {
+    let client = require_client(&mgr).await?;
+    let api: Api<k8s_openapi::api::core::v1::Pod> = Api::namespaced(client, &namespace);
+    let pod = api.get(&name).await?;
+    if !restart::has_controller(&pod) {
+        return Err(AppError::Other(format!(
+            "{name} has no controller — deleting it would not recreate it. Use Delete instead."
+        )));
+    }
+    api.delete(&name, &DeleteParams::default()).await?;
+    Ok(())
+}
+
+/// Rollout-restart a Deployment/StatefulSet/DaemonSet (B34) the way `kubectl
+/// rollout restart` does: patch the pod template's `restartedAt` annotation to
+/// now, which the controller rolls through its normal update strategy.
+#[tauri::command]
+pub async fn restart_rollout(
+    kind: String,
+    namespace: String,
+    name: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<()> {
+    if !restart::is_rollout_kind(&kind) {
+        return Err(AppError::Other(format!("{kind} cannot be rollout-restarted")));
+    }
+    let client = require_client(&mgr).await?;
+    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let patch = Patch::Merge(restart::restart_patch(&now));
     api.patch(&name, &PatchParams::default(), &patch).await?;
     Ok(())
 }

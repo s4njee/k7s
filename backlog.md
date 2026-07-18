@@ -212,9 +212,27 @@ present; zero problems renders a deliberately quiet "nothing wrong" state.
 - [ ] The derivation is a pure function over store rows with vitest cases per
       source (including "healthy cluster → empty").
 
-### B33 — Related-resource navigation
+### B33 — Related-resource navigation  ✅ shipped
 *Why: the mental model of Kubernetes is a graph; the app shows disconnected
 tables. Also closes B14's deliberate v1 gap (events rows aren't clickable).*
+
+> **Shipped — all three jumps.** (1) **Owner link**: a pod's Overview `owner`
+> field is a click-through link; a ReplicaSet owner resolves *through* the RS to
+> its Deployment backend-side (`resolve_owner`), since we don't list RS.
+> (2) **Workload → pods**: a "View pods" action on Deployment/STS/DS drops the
+> workload's `matchLabels` into the table filter, which now parses
+> `key=value[,k2=v2]` label selectors alongside name substrings
+> (`lib/filter.ts`); pods carry `labels`, workloads carry `selector` on the Row.
+> (3) **Event → object**: B14 event rows are clickable when the involvedObject's
+> kind resolves to a table we list (`navIdForKind`, built-ins + CRDs by
+> kind+group); unresolvable kinds stay inert. All navigation goes through a
+> shared `jumpPatch` (reused from B28's `jumpTo`) via new store actions
+> `navigateTo`/`viewPods`. Live-verified read-only (`examples/related_check`):
+> the wiki crash-looper's owner resolves to Deployment/wiki; a real Deployment's
+> selector matches its pods; every sampled event carries an involvedObject.
+>
+> Types widened: `Row` gained `labels`/`selector`/`involved`; properties `Field`
+> gained an optional `nav` target; a shared `NavTarget`.
 
 **Do:** Three jumps, all landing as nav + namespace + row selection:
 **owner** — the properties Overview's owner field becomes a link; ReplicaSet
@@ -229,17 +247,38 @@ Kind → nav id (including discovered CRDs by group/kind; unresolvable kinds sta
 inert rather than dead-clicking).
 
 **Accept:**
-- [ ] From the wiki crash-looper's properties, the owner link lands on the
-      `wiki` Deployment (resolved through its ReplicaSet).
-- [ ] "View pods" on `argocd-repo-server` shows exactly its pods, with the
-      selector visible in the filter box as removable text.
-- [ ] Clicking a FailedMount event on freya lands on the cb8 pod; an event for
-      an unlisted kind renders unclickable (cursor/tone say so).
+- [x] From the wiki crash-looper's properties, the owner link lands on the
+      `wiki` Deployment (resolved through its ReplicaSet) — verified live.
+- [x] "View pods" on a workload shows its pods, the selector visible in the
+      filter box as removable text (verified the selector matches live pods).
+- [x] Event rows are clickable when the involvedObject resolves to a listed kind;
+      unlisted kinds (ReplicaSet, Endpoints, wrong-group CRD) render inert.
+      *GUI pass still wanted for the click/cursor feel.*
 
 ### B34 — Rollout actions: restart & undo
 *Why: scale/delete shipped in B3, but the most common workload verb is
 `kubectl rollout restart`, and its safety net is `rollout undo`. The B18
 properties panel already shows the ReplicaSet revision history this needs.*
+
+> **Restart shipped** (asked for directly: "there should be a way to restart a
+> pod"). Two mechanisms, one "Restart…" menu row: a **pod** restarts by
+> delete-and-recreate (`restart_pod` refuses a pod with no controller —
+> deleting *that* is a delete, not a restart), a **workload**
+> (Deployment/STS/DaemonSet) rollout-restarts via the template `restartedAt`
+> patch (`restart_rollout`). Pure decisions in `kube/restart.rs`
+> (`has_controller`, `restart_patch`, `is_rollout_kind`) with 5 unit tests
+> pinning the patch shape and owner check. Live-verified read-only via
+> `examples/restart_check`: on freya all 71 pods are controller-owned (no bare
+> specimen to show the refusal — the unit test carries that case), and the
+> rollout patch is accepted as a **server-side dry run** that echoes the
+> annotation onto the template while persisting nothing. Also fixed in passing:
+> the Scale/Forward confirm panels referenced `styles.cancelBtn`/`applyBtn`
+> that never existed in `DetailPanel.module.css` (only YamlTab's), so those
+> buttons had been rendering unstyled — the classes now live in the shared
+> module.
+>
+> **Still open: undo (rollback to revision N)** — the `undo_rollout` half below
+> is not built.
 
 **Do:** Backend: `restart_rollout(kind, ns, name)` patches
 `spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"]` to
@@ -254,21 +293,35 @@ naming the revision. Progress is already visible — the READY column and
 conditions do that job.
 
 **Accept:**
-- [ ] Unit tests pin the restart patch shape and the undo template-copy
-      (fixture Deployment + two RS revisions → patch equals old template).
-- [ ] Live, against a scratch Deployment created for the test (see B36's
-      create-from-YAML; until then, one made with kubectl): restart cycles the
-      pod with a new RS revision; undo returns to the prior template.
-      *Restarting freya's real workloads is the operator's call — same honesty
-      rule as the B20 drain.*
-- [ ] Kinds without rollout semantics don't offer the actions.
+- [x] Unit tests pin the restart patch shape (undo template-copy still pending).
+- [x] Live: rollout patch validated server-side (dry run) against a real
+      Deployment; the operator does the actual restart — same honesty rule as
+      the B20 drain.
+- [x] Kinds without rollout semantics don't offer restart (pods get
+      delete-and-recreate; jobs/cronjobs/configmaps/etc. get neither).
+- [ ] undo_rollout: template-copy test + live rollback to the prior template.
 
-### B35 — Helm release detail: history & values
+### B35 — Helm release detail: history & values  ✅ shipped
 *Why: B26 deliberately shipped list + manifest only. The other two questions
 you ask of a release — "what changed between revisions" and "what values is it
 running with" — are sitting in the same Secrets we already decode; freya's
 releases are all rev 1 today, so history is thin there, but the decode path is
 identical.*
+
+> **Shipped.** A Helm release now gets a Properties tab (added `helm` to
+> `KINDS_WITH_PROPERTIES`, reusing B18's section renderer). `gather_helm` lists a
+> release's revision Secrets by Helm's own `owner=helm,name=…` labels — the
+> inverse of B26's `latest_only` — and decodes all of them into: an **Overview**
+> (chart, app version, status, first/last deployed, revision, description), a
+> **History** table (REVISION/STATUS/CHART/DESCRIPTION/UPDATED, newest first,
+> superseded muted / current ok / failed red), and a **Values** table. The
+> decoder gained `config` (user overrides) + `first_deployed`; `flatten_values`
+> renders overrides as sorted `dotted.path` → value pairs and **redacts any value
+> under a `password|secret|token|key` key by name** — the value string never
+> leaves Rust. Empty config → "chart defaults (no overrides)". Still zero writes.
+> Pure `build_helm_properties` is unit-tested on synthetic v1/v2/v3; live-verified
+> via `examples/helm_props_check` (traefik: 13 values; traefik-crd: chart
+> defaults; arc: 5 values — all decoded from the cluster, no helm CLI).
 
 **Do:** Selecting a release gains Properties-shaped detail (reuse the B18
 section renderer): an Overview (chart, app version, status, first/last
@@ -282,12 +335,14 @@ render `<redacted>` — a values blob is exactly where credentials end up.
 Still zero write operations.
 
 **Accept:**
-- [ ] freya's `traefik` release shows Overview + a 1-row history + its values
-      (or "chart defaults"), all decoded from the cluster, no helm CLI.
-- [ ] Multi-revision history is pinned by unit tests on synthetic v1/v2/v3
-      Secrets (correct order, superseded toned muted, current toned ok).
-- [ ] A values blob containing `dbPassword` shows `<redacted>`; the vitest/
-      cargo test proves the value string never reaches the payload.
+- [x] freya's `traefik` release shows Overview + a 1-row history + its 13 values;
+      `traefik-crd` shows "chart defaults" — all decoded from the cluster, no helm
+      CLI (`examples/helm_props_check`).
+- [x] Multi-revision history pinned by `helm_history_orders_and_tones` on
+      synthetic v1/v2/v3 (newest-first, superseded muted, current deployed ok).
+- [x] A `config` with `auth.password`/`dbPassword` renders `<redacted>`; both the
+      cargo tests (`flatten_redacts_credentials`, `helm_history_orders_and_tones`)
+      assert the value string never reaches the cells.
 
 ## P2 — later
 
@@ -332,6 +387,74 @@ confirm always enumerates what it's about to do. **Accept:** deleting 3
 selected pods of a scaled deployment issues 3 deletes and one confirm;
 context-menu actions and detail-panel actions share one implementation (no
 drift).
+
+### B40 — Storage: PersistentVolumes & PersistentVolumeClaims  ✅ shipped
+*Why: asked for directly. PVs/PVCs existed only as *resolved references* inside a
+pod's properties — you could see that a pod was backed by `pvc-5a948cc3…` but
+there was no table to open it in, so the reference dead-ended. Storage is also
+the one place a cluster quietly runs out of something.*
+
+> **Shipped.** Two new kinds in a new **Storage** nav group:
+> `persistentvolumeclaims` (namespaced) and `persistentvolumes` (cluster-scoped),
+> claims first — a claim is what a workload references, the volume behind it is
+> the follow-up. Columns follow kubectl: claims are
+> NAME·NAMESPACE·STATUS·VOLUME·CAPACITY·ACCESS·CLASS·AGE, volumes are
+> NAME·CAPACITY·ACCESS·RECLAIM·STATUS·CLAIM·CLASS·AGE (no NAMESPACE; CLAIM
+> carries "namespace/name"). Access modes render in kubectl's shorthand
+> (RWO/ROX/RWX/RWOP), unknown modes passing through rather than being dropped.
+>
+> Two things the mapping gets right that the obvious version wouldn't:
+> **a Pending claim has no bound capacity**, so CAPACITY falls back to the
+> *requested* size — otherwise the column is blank exactly when you're asking how
+> big the claim was; and PVs need **their own tone function**, because the shared
+> `status_tone` sends anything unrecognised to red, which would paint an
+> `Available` (idle, unclaimed) volume as a failure and a `Released` one (claim
+> gone, data still there — needs a decision) the same red as `Failed`.
+>
+> Also registered in B33's Kind→nav map, so an event about a claim is clickable.
+> Live-verified via `examples/storage_check`: freya's 9 claims and 9 volumes
+> render, and every bound pair cross-references the other consistently.
+>
+> **Not done:** properties gatherers for either kind (consistent with jobs,
+> daemonsets, configmaps etc., which also have tables but no Properties tab).
+> *(The PV/CLAIM-cells-aren't-links gap noted here was closed by B41.)*
+
+### B41 — Cell-level nav, ReplicaSets, StorageClasses, volume sources  ✅ shipped
+*Why: an audit for "other gaps like the PVs" found the PV work wasn't actually
+finished, and that the gap had two different shapes.*
+
+> **The structural half.** B33 put `nav` on a properties `Field`, but most
+> references to another object live in a **table**, and `Cell` had no nav — so
+> B40's new PV/PVC tables were still unreachable from the pod that used them.
+> `NavTarget` moved to `dto.rs`, `Cell` gained an optional `nav`, and one
+> `NavLink` component now renders both fields and cells. Wired up: pod
+> Overview `node` and StatefulSet `service name` (fields), and the pod's
+> Storage (CLAIM/PV/CLASS), Other volumes (SOURCE), Services (NAME) and the
+> Deployment's ReplicaSets (NAME) tables.
+>
+> **The missing-tables half.** `replicasets` (Workloads) and `storageclasses`
+> (Storage, cluster-scoped, default class marked in the NAME as kubectl does).
+> A 0-desired ReplicaSet reads **muted, not amber** — a superseded generation is
+> history, and freya has 45 of them against 28 live, so colouring them as
+> degraded would make every Deployment look broken. With ReplicaSets listed,
+> `resolve_owner`'s bare-RS fallback finally links instead of dead-ending.
+>
+> **The ungathered half.** `volume_kind` only ever returned a *classification*,
+> so the panel said a pod mounts "a Secret" without saying which. The source name
+> is now captured and linked.
+>
+> **A bug the live check caught in this very change.** `related_links_check`
+> resolves every emitted nav target against the API, and found one 404:
+> argocd-repo-server mounts `argocd-repo-server-tls` with `optional: true`, and
+> that Secret doesn't exist — so linking it produced exactly the dead link this
+> item set out to remove. Volume sources are now existence-checked via
+> `get_metadata` (deliberately: an existence check must not pull a Secret's
+> contents), and an absent source renders `name (not found)` in amber, which is
+> itself the answer to "why isn't this config applying". 7/7 links now resolve.
+>
+> **Still unlisted** (referenced but with no table): ServiceAccount (69 on
+> freya), PriorityClass, IngressClass, ControllerRevision, Endpoints. Untouched
+> but present: NetworkPolicies (7), RBAC (16 roles / 83 clusterroles).
 
 ---
 

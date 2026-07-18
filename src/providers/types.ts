@@ -17,6 +17,7 @@
 export type ResourceKind =
   | "pods"
   | "deployments"
+  | "replicasets"
   | "statefulsets"
   | "daemonsets"
   | "jobs"
@@ -25,6 +26,9 @@ export type ResourceKind =
   | "ingresses"
   | "configmaps"
   | "secrets"
+  | "persistentvolumeclaims"
+  | "persistentvolumes"
+  | "storageclasses"
   | "nodes"
   | "namespaces"
   | "events"
@@ -90,6 +94,12 @@ export interface Cell {
    * overrides it when set.
    */
   sort?: number;
+  /**
+   * When set, this cell names another object and renders as a click-through link
+   * in the Properties tables (B40). List tables ignore it — clicking the row is
+   * already the navigation there.
+   */
+  nav?: NavTarget;
 }
 
 /** Extra fields carried only by pod rows, used to drive the detail panel. */
@@ -105,6 +115,16 @@ export interface PodMeta {
   statusTone: Tone;
 }
 
+/** The object an Event is about, for click-through navigation (B33). */
+export interface InvolvedRef {
+  /** Kubernetes Kind, e.g. "Pod", "Deployment", "Application". */
+  kind: string;
+  name: string;
+  namespace?: string;
+  /** apiVersion, e.g. "argoproj.io/v1alpha1"; its group disambiguates CRDs. */
+  apiVersion?: string;
+}
+
 /** One row in a resource table. */
 export interface Row {
   /** Stable identity for React keys and selection (k8s uid, or a synthetic id). */
@@ -116,6 +136,12 @@ export interface Row {
   cells: Cell[];
   /** Present only for pods. */
   pod?: PodMeta;
+  /** Labels, for label-selector filtering (B33). Present on pods. */
+  labels?: Record<string, string>;
+  /** A workload's pod selector (matchLabels), for the "view pods" jump (B33). */
+  selector?: Record<string, string>;
+  /** Present only on Event rows: the object the event is about (B33). */
+  involved?: InvolvedRef;
 }
 
 /** A Kubernetes Event as shown in the detail panel's Events tab. */
@@ -197,10 +223,23 @@ export interface KeyValue {
   value: string;
 }
 
-/** One row of a properties field grid: a label and a toned value. */
+/**
+ * A navigable target: a nav id plus the object's namespace/name (B33). Carried by
+ * a properties {@link Field} and by any {@link Cell} that names another object.
+ */
+export interface NavTarget {
+  /** Nav id — a built-in plural ("deployments") or a CRD "group/plural". */
+  kind: KindId;
+  namespace?: string;
+  name: string;
+}
+
+/** One row of a properties field grid: a label, a toned value, and an optional
+ * nav target that makes the value a click-through link (B33). */
 export interface Field {
   label: string;
   value: Cell;
+  nav?: NavTarget;
 }
 
 /**
@@ -410,6 +449,16 @@ export interface DataProvider {
   deleteResource(ref: ResourceRef): Promise<void>;
   /** Scale a Deployment/StatefulSet to `replicas`. */
   scaleResource(ref: ResourceRef, replicas: number): Promise<void>;
+  /**
+   * Restart a pod (B34) by deleting it; its controller recreates a fresh one.
+   * Rejects for a pod with no controller — that would just delete it.
+   */
+  restartPod(ref: ResourceRef): Promise<void>;
+  /**
+   * Rollout-restart a Deployment/StatefulSet/DaemonSet (B34) — the `kubectl
+   * rollout restart` template-annotation patch, rolled through the update strategy.
+   */
+  restartRollout(ref: ResourceRef): Promise<void>;
   /** Cordon or uncordon a node. */
   setCordon(node: string, unschedulable: boolean): Promise<void>;
   /**

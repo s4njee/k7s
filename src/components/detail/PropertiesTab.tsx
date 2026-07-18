@@ -17,7 +17,7 @@ import { getProvider } from "../../providers";
 import { useNow } from "../../hooks/useNow";
 import { formatAge } from "../../lib/format";
 import { toneColor } from "../../lib/tone";
-import type { Cell, Properties, Section } from "../../providers/types";
+import type { Cell, Field, NavTarget, Properties, Section } from "../../providers/types";
 
 export function PropertiesTab() {
   const row = useStore((s) => s.selectedRow);
@@ -70,7 +70,7 @@ function SectionView({ section, now }: { section: Section; now: number }) {
       {body.type === "fields" && (
         <div className={styles.grid}>
           {body.fields.map((f) => (
-            <FieldRow key={f.label} label={f.label} value={f.value} now={now} />
+            <FieldRow key={f.label} field={f} now={now} />
           ))}
         </div>
       )}
@@ -79,36 +79,42 @@ function SectionView({ section, now }: { section: Section; now: number }) {
         (body.rows.length === 0 ? (
           <div className={styles.empty}>{section.emptyNote}</div>
         ) : (
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                {body.columns.map((h) => (
-                  <th key={h} className={styles.th}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {body.rows.map((cells, i) => (
-                <tr key={i}>
-                  {cells.map((cell, j) => (
-                    <td
-                      className={[
-                        styles.td,
-                        j === 0 ? styles.tdName : "",
-                        wraps(cell) ? styles.tdWrap : "",
-                      ].join(" ")}
-                      key={j}
-                      style={{ color: toneColor(cell.tone) }}
-                    >
-                      {cellText(cell, now)}
-                    </td>
+          <div className={styles.tableScroll}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  {body.columns.map((h) => (
+                    <th key={h} className={styles.th}>
+                      {h}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {body.rows.map((cells, i) => (
+                  <tr key={i}>
+                    {cells.map((cell, j) => (
+                      <td
+                        className={[
+                          styles.td,
+                          j === 0 ? styles.tdName : "",
+                          wraps(cell) ? styles.tdWrap : "",
+                        ].join(" ")}
+                        key={j}
+                        style={{ color: toneColor(cell.tone) }}
+                      >
+                        {cell.nav ? (
+                          <NavLink target={cell.nav}>{cellText(cell, now)}</NavLink>
+                        ) : (
+                          cellText(cell, now)
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ))}
 
       {body.type === "chips" && (
@@ -125,13 +131,35 @@ function SectionView({ section, now }: { section: Section; now: number }) {
   );
 }
 
-/** One key/value row in a field grid. */
-function FieldRow({ label, value, now }: { label: string; value: Cell; now: number }) {
+/**
+ * A reference to another object, rendered as a click-through link (B33, B40).
+ * Inherits the surrounding colour so a linked status keeps its tone; the
+ * underline is what marks it navigable.
+ */
+function NavLink({ target, children }: { target: NavTarget; children: React.ReactNode }) {
+  const navigateTo = useStore((s) => s.navigateTo);
+  return (
+    <button
+      type="button"
+      className={styles.navLink}
+      title={`Go to ${target.kind} ${target.name}`}
+      onClick={() => navigateTo(target)}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** One key/value row in a field grid. A field with a nav target (B33) renders as
+ * a click-through link (e.g. a pod's owner → its Deployment). */
+function FieldRow({ field, now }: { field: Field; now: number }) {
+  const { label, value, nav } = field;
+  const color = toneColor(value.tone);
   return (
     <>
       <span className={styles.gridKey}>{label}</span>
-      <span className={styles.gridVal} style={{ color: toneColor(value.tone) }}>
-        {cellText(value, now)}
+      <span className={styles.gridVal} style={{ color }}>
+        {nav ? <NavLink target={nav}>{cellText(value, now)}</NavLink> : cellText(value, now)}
       </span>
     </>
   );

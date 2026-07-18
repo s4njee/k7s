@@ -16,10 +16,11 @@ import { useNow } from "../../hooks/useNow";
 import { useTableKeys } from "../../hooks/useTableKeys";
 import { toneColor } from "../../lib/tone";
 import { formatAge, formatCpu, formatMem } from "../../lib/format";
-import { isClusterScoped, kindMeta, type KindId } from "../../lib/kinds";
+import { isClusterScoped, kindMeta, navIdForKind, type KindId } from "../../lib/kinds";
 import { sortRows } from "../../lib/sort";
+import { parseFilter, matchesFilter } from "../../lib/filter";
 import { rowWindow, scrollToShow, type RowWindow } from "../../lib/virtual";
-import type { Cell, NodeMetricsMap, PodMetricsMap, Row } from "../../providers/types";
+import type { Cell, NavTarget, NodeMetricsMap, PodMetricsMap, Row } from "../../providers/types";
 
 export function ResourceTable() {
   const nav = useStore((s) => s.nav);
@@ -36,6 +37,7 @@ export function ResourceTable() {
   const podRows = useStore((s) => s.rows.pods);
   const selectedUid = useStore((s) => s.selectedRow?.uid ?? null);
   const selectRow = useStore((s) => s.selectRow);
+  const navigateTo = useStore((s) => s.navigateTo);
   const customKinds = useStore((s) => s.customKinds);
 
   // Age columns re-render on a 30s tick.
@@ -46,29 +48,52 @@ export function ResourceTable() {
   const meta = kindMeta(nav, customKinds);
   const columns = meta?.columns ?? [];
 
-  // The Events feed is a read-only view (B14): rows have no detail panel, so they
-  // neither select on click nor on Enter.
-  const clickable = nav !== "events";
-  const onSelect = clickable ? selectRow : () => {};
+  // An event row navigates to the object it's about, but only when that object's
+  // kind is one we list (B33). Other kinds resolve to null so the row stays inert
+  // — the same read-only feel as B14, now the exception rather than the rule.
+  const eventTarget = useCallback(
+    (row: Row): NavTarget | null => {
+      const inv = row.involved;
+      if (!inv) return null;
+      const kind = navIdForKind(inv.kind, inv.apiVersion, customKinds);
+      return kind ? { kind, namespace: inv.namespace, name: inv.name } : null;
+    },
+    [customKinds],
+  );
+
+  // Whether a row responds to a click: every kind but events (always), and an
+  // event only when its target resolves.
+  const rowClickable = useCallback(
+    (row: Row): boolean => (nav === "events" ? eventTarget(row) !== null : true),
+    [nav, eventTarget],
+  );
+
+  const onSelect = useCallback(
+    (row: Row) => {
+      if (nav === "events") {
+        const target = eventTarget(row);
+        if (target) navigateTo(target);
+        return;
+      }
+      selectRow(row);
+    },
+    [nav, eventTarget, navigateTo, selectRow],
+  );
 
   // Namespace filter (cluster-scoped kinds ignore it), text filter, metrics overlay,
   // then optional column sort. When no column is chosen, server order is preserved
   // (which is what orders the Events feed — Warnings first, then newest).
+  // Parse the filter once per keystroke; it splits into label selectors and free
+  // text (B33). With no `key=value` term this is the pre-B33 substring filter.
+  const parsed = useMemo(() => parseFilter(tableFilter), [tableFilter]);
   const rows = useMemo(() => {
-    const q = tableFilter.trim().toLowerCase();
     const filtered = allRows.filter((r) => {
       // Namespace filter — cluster-scoped kinds ignore it. Events are namespaced
       // (despite living in the Cluster nav group), so the filter narrows them.
       if (!isClusterScoped(nav, customKinds) && namespace !== "all" && r.namespace !== namespace) {
         return false;
       }
-      if (!q) return true;
-      // Text filter: name substring for real resources. An event's name is an
-      // opaque id ("my-pod.17c3f…"), so match its cells instead — that's what
-      // makes filtering by reason/object/message work.
-      return nav === "events"
-        ? r.cells.some((c) => c.text.toLowerCase().includes(q))
-        : r.name.toLowerCase().includes(q);
+      return matchesFilter(r, parsed, nav);
     });
     const overlaid = overlayMetrics(nav, filtered, podMetrics, nodeMetrics, podRows);
     return sortCol === null ? overlaid : sortRows(overlaid, sortCol, sortDir, now);
@@ -76,7 +101,7 @@ export function ResourceTable() {
     nav,
     allRows,
     namespace,
-    tableFilter,
+    parsed,
     podMetrics,
     nodeMetrics,
     podRows,
@@ -184,7 +209,7 @@ export function ResourceTable() {
                 className={[
                   styles.row,
                   virtual ? styles.rowFixed : "",
-                  clickable ? styles.rowClickable : "",
+                  rowClickable(row) ? styles.rowClickable : "",
                   selected ? styles.rowSelected : "",
                   index === highlight ? styles.rowHighlight : "",
                 ].join(" ")}

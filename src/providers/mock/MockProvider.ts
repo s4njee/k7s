@@ -155,6 +155,8 @@ export class MockProvider implements DataProvider {
   // UI flow can be exercised without a cluster.
   async deleteResource(_ref: ResourceRef): Promise<void> {}
   async scaleResource(_ref: ResourceRef, _replicas: number): Promise<void> {}
+  async restartPod(_ref: ResourceRef): Promise<void> {}
+  async restartRollout(_ref: ResourceRef): Promise<void> {}
   async setCordon(_node: string, _unschedulable: boolean): Promise<void> {}
 
   /**

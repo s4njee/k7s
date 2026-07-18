@@ -148,6 +148,21 @@ export class TauriProvider implements DataProvider {
     });
   }
 
+  restartPod(ref: ResourceRef): Promise<void> {
+    return invoke<void>("restart_pod", {
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+    });
+  }
+
+  restartRollout(ref: ResourceRef): Promise<void> {
+    return invoke<void>("restart_rollout", {
+      kind: ref.kind,
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+    });
+  }
+
   setCordon(node: string, unschedulable: boolean): Promise<void> {
     return invoke<void>("set_cordon", { name: node, unschedulable });
   }

@@ -18,6 +18,7 @@ pub mod metrics;
 pub mod nodestats;
 pub mod portforward;
 pub mod properties;
+pub mod restart;
 pub mod watchers;
 
 use serde::{Deserialize, Serialize};
@@ -32,6 +33,8 @@ pub use manager::ClientManager;
 pub enum ResourceKind {
     Pods,
     Deployments,
+    /// The generation a Deployment actually runs; also a pod's immediate owner.
+    Replicasets,
     Statefulsets,
     Daemonsets,
     Jobs,
@@ -40,6 +43,11 @@ pub enum ResourceKind {
     Ingresses,
     Configmaps,
     Secrets,
+    /// Storage claims (namespaced) and the volumes that back them (cluster-scoped).
+    Persistentvolumeclaims,
+    Persistentvolumes,
+    /// The classes claims are provisioned from (cluster-scoped).
+    Storageclasses,
     Nodes,
     Namespaces,
     /// Cluster-wide event feed (B14) — a read-only view, not a managed resource.
@@ -54,6 +62,7 @@ impl ResourceKind {
         match self {
             ResourceKind::Pods => "pods",
             ResourceKind::Deployments => "deployments",
+            ResourceKind::Replicasets => "replicasets",
             ResourceKind::Statefulsets => "statefulsets",
             ResourceKind::Daemonsets => "daemonsets",
             ResourceKind::Jobs => "jobs",
@@ -62,6 +71,9 @@ impl ResourceKind {
             ResourceKind::Ingresses => "ingresses",
             ResourceKind::Configmaps => "configmaps",
             ResourceKind::Secrets => "secrets",
+            ResourceKind::Persistentvolumeclaims => "persistentvolumeclaims",
+            ResourceKind::Persistentvolumes => "persistentvolumes",
+            ResourceKind::Storageclasses => "storageclasses",
             ResourceKind::Nodes => "nodes",
             ResourceKind::Namespaces => "namespaces",
             ResourceKind::Events => "events",

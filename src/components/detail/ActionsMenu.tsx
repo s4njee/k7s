@@ -1,8 +1,9 @@
 /**
- * Actions menu (B3) for the detail header: a "⋯" button opening a dropdown of
- * kind-appropriate mutations — Delete (with inline confirm), Scale (Deployments/
- * StatefulSets), and Cordon/Uncordon (Nodes). API errors are reported to the
- * parent for inline display. Renders nothing for kinds with no actions.
+ * Actions menu (B3, B34) for the detail header: a "⋯" button opening a dropdown
+ * of kind-appropriate mutations — Delete (with inline confirm), Scale
+ * (Deployments/StatefulSets), Restart (pods, and rollout-restart for workloads),
+ * and Cordon/Uncordon/Drain (Nodes). API errors are reported to the parent for
+ * inline display. Renders nothing for kinds with no actions.
  */
 
 import { useRef, useState } from "react";
@@ -10,6 +11,7 @@ import styles from "./DetailPanel.module.css";
 import { getProvider } from "../../providers";
 import { useStore } from "../../store";
 import { useClickOutside } from "../../hooks/useClickOutside";
+import { selectorFilter } from "../../lib/filter";
 import type { KindId, Row } from "../../providers/types";
 
 interface ActionsMenuProps {
@@ -21,7 +23,7 @@ interface ActionsMenuProps {
   onDeleted: () => void;
 }
 
-type Mode = "menu" | "confirmDelete" | "scale" | "forward" | "confirmDrain";
+type Mode = "menu" | "confirmDelete" | "confirmRestart" | "scale" | "forward" | "confirmDrain";
 
 export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps) {
   const [open, setOpen] = useState(false);
@@ -30,6 +32,7 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
   const [port, setPort] = useState(() => defaultPort(row, kind));
   const [busy, setBusy] = useState(false);
   const setPortForwards = useStore((s) => s.setPortForwards);
+  const viewPods = useStore((s) => s.viewPods);
 
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, () => close(), open);
@@ -41,10 +44,20 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
   const canDelete = kind !== "nodes" && kind !== "namespaces" && kind !== "helm";
   const canScale = kind === "deployments" || kind === "statefulsets";
   const canCordon = kind === "nodes";
+  // Restart (B34) has two mechanisms: a pod restarts by delete-and-recreate; a
+  // workload rollout-restarts via a template annotation. The menu offers one
+  // "Restart…" row either way and picks the call by kind.
+  const canRestartPod = kind === "pods";
+  const canRestartRollout =
+    kind === "deployments" || kind === "statefulsets" || kind === "daemonsets";
+  const canRestart = canRestartPod || canRestartRollout;
+  // A workload with a selector can jump to its pods (B33).
+  const canViewPods = canRestartRollout && !!row.selector && Object.keys(row.selector).length > 0;
   // Services forward via a resolved backing pod (B16).
   const isService = kind === "services";
   const canForward = kind === "pods" || isService;
-  if (!canDelete && !canScale && !canCordon && !canForward) return null;
+  if (!canDelete && !canScale && !canRestart && !canViewPods && !canCordon && !canForward)
+    return null;
 
   function close() {
     setOpen(false);
@@ -90,6 +103,17 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
         <div className={styles.actionsMenu}>
           {mode === "menu" && (
             <>
+              {canViewPods && (
+                <div
+                  className={styles.actionsRow}
+                  onClick={() => {
+                    viewPods(row.namespace, selectorFilter(row.selector ?? {}));
+                    close();
+                  }}
+                >
+                  View pods
+                </div>
+              )}
               {canForward && (
                 <div className={styles.actionsRow} onClick={() => setMode("forward")}>
                   Forward…
@@ -98,6 +122,11 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
               {canScale && (
                 <div className={styles.actionsRow} onClick={() => setMode("scale")}>
                   Scale…
+                </div>
+              )}
+              {canRestart && (
+                <div className={styles.actionsRow} onClick={() => setMode("confirmRestart")}>
+                  Restart…
                 </div>
               )}
               {canCordon && (
@@ -152,6 +181,44 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
                   }
                 >
                   Delete
+                </div>
+              </div>
+            </div>
+          )}
+
+          {mode === "confirmRestart" && (
+            <div className={styles.actionsConfirm}>
+              <div className={styles.actionsConfirmText}>
+                {canRestartPod
+                  ? `Restart ${row.name}? Deletes the pod; its controller recreates it.`
+                  : `Restart ${row.name}? Rolls every pod (kubectl rollout restart).`}
+              </div>
+              <div className={styles.actionsConfirmRow}>
+                <div className={styles.cancelBtn} onClick={() => setMode("menu")}>
+                  Cancel
+                </div>
+                <div
+                  className={styles.applyBtn}
+                  aria-disabled={busy}
+                  onClick={() =>
+                    run(
+                      () =>
+                        canRestartPod
+                          ? getProvider().restartPod(ref3)
+                          : getProvider().restartRollout(ref3),
+                      // A restarted pod is deleted and replaced under a new name, so
+                      // the selection is gone — close the panel. A rolled workload
+                      // still exists, so just close the menu.
+                      canRestartPod
+                        ? () => {
+                            close();
+                            onDeleted();
+                          }
+                        : close,
+                    )
+                  }
+                >
+                  Restart
                 </div>
               </div>
             </div>

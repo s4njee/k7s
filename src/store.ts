@@ -15,6 +15,7 @@ import type {
   NodeSample,
   KindId,
   LogLine,
+  NavTarget,
   NodeMetricsMap,
   PodMetricsMap,
   Row,
@@ -95,6 +96,34 @@ function selectionPatch(row: Row) {
     logPrevious: false,
     logSince: "all" as SinceOption,
   };
+}
+
+/**
+ * The patch for going to a kind, optionally selecting a row (B28, B33). Shared by
+ * `jumpTo` and `navigateTo` so palette jumps, owner links, and event click-through
+ * all behave identically. Resets filter/sort/menus and closes the palette; with a
+ * row, moves the namespace filter only when it would otherwise hide the row.
+ */
+function jumpPatch(current: { namespace: string }, kind: KindId, row?: Row) {
+  const base = {
+    nav: kind,
+    openMenu: null,
+    tableFilter: "",
+    sortCol: null,
+    sortDir: "asc" as const,
+    paletteOpen: false,
+  };
+  if (!row) return { ...base, selectedRow: null };
+
+  // A namespace filter that would hide the row moves to the row's own namespace.
+  // Jumping somewhere and landing on an empty table because of a filter set ten
+  // minutes ago is worse than the filter changing under you.
+  const namespace =
+    row.namespace && current.namespace !== "all" && current.namespace !== row.namespace
+      ? row.namespace
+      : current.namespace;
+
+  return { ...base, namespace, ...selectionPatch(row) };
 }
 
 /** A copy of `obj` without `key`. */
@@ -225,6 +254,16 @@ export interface AppState {
    * the kind of trap this avoids.
    */
   jumpTo: (kind: KindId, row?: Row) => void;
+  /**
+   * Navigate to an object by (kind, namespace, name) — the owner link and event
+   * click-through (B33). Resolves the live row when loaded, else a synthetic one.
+   */
+  navigateTo: (target: NavTarget) => void;
+  /**
+   * Go to the Pods table filtered by a workload's selector, scoped to its
+   * namespace (B33's workload→pods jump).
+   */
+  viewPods: (namespace: string | undefined, selector: string) => void;
   resetData: () => void;
 
   // detail panel
@@ -358,30 +397,38 @@ export const useStore = create<AppState>((set) => ({
     }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
-  jumpTo: (kind, row) =>
+  jumpTo: (kind, row) => set((s) => jumpPatch(s, kind, row)),
+  navigateTo: (target) =>
     set((s) => {
-      // Same resets as setNav: filter and sort are scoped to the kind you were
-      // looking at, and the palette closes behind you.
-      const base = {
-        nav: kind,
-        openMenu: null,
-        tableFilter: "",
-        sortCol: null,
-        sortDir: "asc" as const,
-        paletteOpen: false,
-      };
-      if (!row) return { ...base, selectedRow: null };
-
-      // A namespace filter that would hide the row moves to the row's own
-      // namespace. Jumping somewhere and landing on an empty table because of a
-      // filter set ten minutes ago is worse than the filter changing under you.
-      const namespace =
-        row.namespace && s.namespace !== "all" && s.namespace !== row.namespace
-          ? row.namespace
-          : s.namespace;
-
-      return { ...base, namespace, ...selectionPatch(row) };
+      // Prefer the live row so the table highlights and the panel shows real
+      // cells; fall back to a synthetic row when the target's kind isn't loaded
+      // (e.g. a not-yet-watched CRD). The detail panel fetches YAML/properties by
+      // ref either way, so a synthetic row still opens a working panel.
+      const found = rowsFor(s.rows, target.kind).find(
+        (r) => r.name === target.name && (!target.namespace || r.namespace === target.namespace),
+      );
+      const row =
+        found ?? {
+          uid: `${target.namespace ?? ""}/${target.name}`,
+          name: target.name,
+          namespace: target.namespace,
+          cells: [],
+        };
+      return jumpPatch(s, target.kind, row);
     }),
+  viewPods: (namespace, selector) =>
+    set((s) => ({
+      nav: "pods",
+      openMenu: null,
+      sortCol: null,
+      sortDir: "asc",
+      paletteOpen: false,
+      selectedRow: null,
+      // Scope to the workload's namespace so only its pods show, and drop the
+      // selector into the filter box as editable, removable text.
+      namespace: namespace || s.namespace,
+      tableFilter: selector,
+    })),
   // Wipe all live data on disconnect/context-switch (Story 6.1). The backend also
   // aborts every forward/shell on reset, so we clear the local list here too.
   resetData: () =>

@@ -229,3 +229,57 @@ describe("selection & nav reset", () => {
     expect(s.logBuffer).toEqual([]);
   });
 });
+
+describe("navigateTo (B33: owner link / event click-through)", () => {
+  const dep = (name: string, namespace: string): Row => ({
+    uid: `deployments:${namespace}/${name}`,
+    name,
+    namespace,
+    cells: [{ text: name, tone: "primary" }],
+  });
+
+  it("selects the live row when the target kind is loaded", () => {
+    const row = dep("wiki", "wiki");
+    useStore.setState({ rows: { deployments: [row] }, nav: "pods" });
+    useStore.getState().navigateTo({ kind: "deployments", namespace: "wiki", name: "wiki" });
+    const s = useStore.getState();
+    expect(s.nav).toBe("deployments");
+    // The real row — so the table highlights and the panel shows real cells.
+    expect(s.selectedRow).toBe(row);
+  });
+
+  it("falls back to a synthetic row when the kind isn't loaded", () => {
+    useStore.setState({ rows: { deployments: [] } });
+    useStore
+      .getState()
+      .navigateTo({ kind: "deployments", namespace: "argocd", name: "argocd-repo-server" });
+    const s = useStore.getState();
+    expect(s.nav).toBe("deployments");
+    expect(s.selectedRow?.name).toBe("argocd-repo-server");
+    expect(s.selectedRow?.namespace).toBe("argocd");
+    // Empty cells: the detail panel fetches by ref, so a stub row still works.
+    expect(s.selectedRow?.cells).toEqual([]);
+  });
+
+  it("moves the namespace filter if it would hide the target", () => {
+    useStore.setState({ rows: { deployments: [] }, namespace: "prod" });
+    useStore.getState().navigateTo({ kind: "deployments", namespace: "wiki", name: "wiki" });
+    expect(useStore.getState().namespace).toBe("wiki");
+  });
+});
+
+describe("viewPods (B33: workload → pods)", () => {
+  it("lands on pods, scoped to the workload namespace, selector in the filter", () => {
+    useStore.setState({
+      nav: "deployments",
+      namespace: "all",
+      selectedRow: { uid: "d", name: "wiki", cells: [] },
+    });
+    useStore.getState().viewPods("wiki", "app=wiki");
+    const s = useStore.getState();
+    expect(s.nav).toBe("pods");
+    expect(s.namespace).toBe("wiki");
+    expect(s.tableFilter).toBe("app=wiki");
+    expect(s.selectedRow).toBeNull();
+  });
+});

@@ -14,10 +14,14 @@ use super::discovery::CustomKind;
 use super::{dto::Row, events, helm, mappers, ClientManager, ResourceKind, ResourceUpdate};
 use futures::stream::BoxStream;
 use futures::StreamExt;
-use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
+use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
-use k8s_openapi::api::core::v1::{ConfigMap, Event, Namespace, Node, Pod, Secret, Service};
+use k8s_openapi::api::core::v1::{
+    ConfigMap, Event, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Secret,
+    Service,
+};
 use k8s_openapi::api::networking::v1::Ingress;
+use k8s_openapi::api::storage::v1::StorageClass;
 use kube::core::{ApiResource, DynamicObject};
 use kube::runtime::reflector::Lookup;
 use kube::runtime::{reflector, watcher, WatchStreamExt};
@@ -51,6 +55,7 @@ pub async fn spawn_all(mgr: &ClientManager, client: Client) -> usize {
     // a snapshot post-processor (ordering/capping; identity for most kinds).
     spawn::<Pod>(mgr, &client, ResourceKind::Pods, mappers::map_pod, identity).await;
     spawn::<Deployment>(mgr, &client, ResourceKind::Deployments, mappers::map_deployment, identity).await;
+    spawn::<ReplicaSet>(mgr, &client, ResourceKind::Replicasets, mappers::map_replicaset, identity).await;
     spawn::<StatefulSet>(mgr, &client, ResourceKind::Statefulsets, mappers::map_statefulset, identity).await;
     spawn::<DaemonSet>(mgr, &client, ResourceKind::Daemonsets, mappers::map_daemonset, identity).await;
     spawn::<Job>(mgr, &client, ResourceKind::Jobs, mappers::map_job, identity).await;
@@ -59,6 +64,9 @@ pub async fn spawn_all(mgr: &ClientManager, client: Client) -> usize {
     spawn::<Ingress>(mgr, &client, ResourceKind::Ingresses, mappers::map_ingress, identity).await;
     spawn::<ConfigMap>(mgr, &client, ResourceKind::Configmaps, mappers::map_configmap, identity).await;
     spawn::<Secret>(mgr, &client, ResourceKind::Secrets, mappers::map_secret, identity).await;
+    spawn::<PersistentVolumeClaim>(mgr, &client, ResourceKind::Persistentvolumeclaims, mappers::map_pvc, identity).await;
+    spawn::<PersistentVolume>(mgr, &client, ResourceKind::Persistentvolumes, mappers::map_pv, identity).await;
+    spawn::<StorageClass>(mgr, &client, ResourceKind::Storageclasses, mappers::map_storageclass, identity).await;
     spawn::<Node>(mgr, &client, ResourceKind::Nodes, mappers::map_node, identity).await;
     spawn::<Namespace>(mgr, &client, ResourceKind::Namespaces, mappers::map_namespace, identity).await;
     // Cluster-wide events feed: ordered Warnings-first/newest and capped (B14).
@@ -68,7 +76,7 @@ pub async fn spawn_all(mgr: &ClientManager, client: Client) -> usize {
     let helm_client = client.clone();
     let handle = tokio::spawn(async move { run_helm_watcher(helm_client, app).await });
     mgr.push_task(handle).await;
-    14
+    19
 }
 
 /// Spawn one watcher task and register it with the manager.

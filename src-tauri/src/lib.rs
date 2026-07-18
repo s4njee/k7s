@@ -63,6 +63,8 @@ pub fn run() {
             commands::delete_resource,
             commands::scale_resource,
             commands::set_cordon,
+            commands::restart_pod,
+            commands::restart_rollout,
             commands::drain_node,
             commands::get_events,
             commands::get_properties,

@@ -38,6 +38,31 @@
   color: var(--text-secondary);
   word-break: break-all;
 }
+/* A reference that navigates (B33, B40): reads as a link, no button chrome.
+   Inherits font and colour from whatever contains it, so the same element works
+   in the overview grid and inside a table cell — only the underline marks it. */
+.navLink {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  word-break: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--border-hover);
+  text-underline-offset: 2px;
+}
+.navLink:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Wrapper so a wide table (the 8-column volumes grid) scrolls on its own rather
+   than clipping — the panel itself never scrolls sideways. */
+.tableScroll {
+  overflow-x: auto;
+}
 
 /* Compact table used for containers / volumes / services. */
 .table {
@@ -74,6 +99,10 @@
 .tdWrap {
   white-space: normal;
   overflow-wrap: anywhere;
+  /* Floor the column width so a breakable token (a PV name, an image ref) can't
+     be squeezed to a one-character sliver by wider neighbours — `anywhere` makes
+     its min-content width ~0, which the auto table would otherwise collapse. */
+  min-width: 14ch;
 }
 
 /* Label / annotation chips. */

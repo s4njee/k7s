@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { isClusterScoped, isCustomKind, kindMeta, KINDS_WITH_PROPERTIES } from "./kinds";
+import { isClusterScoped, isCustomKind, kindMeta, navIdForKind, KINDS_WITH_PROPERTIES } from "./kinds";
 import { mockProperties } from "../providers/mock/properties";
 import type { CustomKind } from "../providers/types";
 
@@ -99,5 +99,102 @@ describe("isClusterScoped", () => {
   it("follows the CRD's scope", () => {
     expect(isClusterScoped("cert-manager.io/clusterissuers", CUSTOM)).toBe(true);
     expect(isClusterScoped("argoproj.io/applications", CUSTOM)).toBe(false);
+  });
+});
+
+describe("navIdForKind (B33: event → object)", () => {
+  it("maps a built-in Kind to its nav id, apiVersion irrelevant", () => {
+    expect(navIdForKind("Pod", "v1", CUSTOM)).toBe("pods");
+    expect(navIdForKind("Deployment", "apps/v1", CUSTOM)).toBe("deployments");
+    expect(navIdForKind("Node", "v1", CUSTOM)).toBe("nodes");
+  });
+
+  it("resolves a CRD by Kind AND group", () => {
+    expect(navIdForKind("Application", "argoproj.io/v1alpha1", CUSTOM)).toBe(
+      "argoproj.io/applications",
+    );
+  });
+
+  it("returns null for the right Kind in the wrong group", () => {
+    // A different vendor's CRD that happens to also be named Application.
+    expect(navIdForKind("Application", "example.com/v1", CUSTOM)).toBeNull();
+  });
+
+  it("returns null for a kind we don't list, so the row stays inert", () => {
+    // Endpoints and ServiceAccounts still have no table. (ReplicaSet used to be
+    // the example here; B40 gave it one.)
+    expect(navIdForKind("Endpoints", "v1", CUSTOM)).toBeNull();
+    expect(navIdForKind("ServiceAccount", "v1", CUSTOM)).toBeNull();
+  });
+
+  it("built-ins win even when a CRD isn't loaded", () => {
+    expect(navIdForKind("Pod", "v1", [])).toBe("pods");
+    expect(navIdForKind("Application", "argoproj.io/v1alpha1", [])).toBeNull();
+  });
+});
+
+describe("storage kinds (PVs / PVCs)", () => {
+  it("puts claims and volumes in the Storage group", () => {
+    expect(kindMeta("persistentvolumeclaims", CUSTOM)?.group).toBe("storage");
+    expect(kindMeta("persistentvolumes", CUSTOM)?.group).toBe("storage");
+  });
+
+  // The column contract: these arrays must match the Rust mappers' cell order
+  // (map_pvc / map_pv in src-tauri/src/kube/mappers.rs).
+  it("declares the claim columns, with NAMESPACE second", () => {
+    expect(kindMeta("persistentvolumeclaims", CUSTOM)?.columns).toEqual([
+      "NAME", "NAMESPACE", "STATUS", "VOLUME", "CAPACITY", "ACCESS", "CLASS", "AGE",
+    ]);
+  });
+
+  it("declares the volume columns with no NAMESPACE — PVs are cluster-scoped", () => {
+    const cols = kindMeta("persistentvolumes", CUSTOM)?.columns ?? [];
+    expect(cols).toEqual([
+      "NAME", "CAPACITY", "ACCESS", "RECLAIM", "STATUS", "CLAIM", "CLASS", "AGE",
+    ]);
+    expect(cols).not.toContain("NAMESPACE");
+  });
+
+  it("scopes PVs cluster-wide but keeps PVCs namespaced", () => {
+    expect(isClusterScoped("persistentvolumes", CUSTOM)).toBe(true);
+    expect(isClusterScoped("persistentvolumeclaims", CUSTOM)).toBe(false);
+  });
+
+  // So a FailedBinding event on a claim is clickable (B33).
+  it("resolves the Kinds for event click-through", () => {
+    expect(navIdForKind("PersistentVolumeClaim", "v1", CUSTOM)).toBe("persistentvolumeclaims");
+    expect(navIdForKind("PersistentVolume", "v1", CUSTOM)).toBe("persistentvolumes");
+  });
+});
+
+describe("ReplicaSets and StorageClasses (B40)", () => {
+  it("files ReplicaSets under Workloads and StorageClasses under Storage", () => {
+    expect(kindMeta("replicasets", CUSTOM)?.group).toBe("workloads");
+    expect(kindMeta("storageclasses", CUSTOM)?.group).toBe("storage");
+  });
+
+  // Column contract — must match map_replicaset / map_storageclass in mappers.rs.
+  it("declares the ReplicaSet columns", () => {
+    expect(kindMeta("replicasets", CUSTOM)?.columns).toEqual([
+      "NAME", "NAMESPACE", "DESIRED", "CURRENT", "READY", "AGE",
+    ]);
+  });
+
+  it("declares the StorageClass columns, with no NAMESPACE", () => {
+    const cols = kindMeta("storageclasses", CUSTOM)?.columns ?? [];
+    expect(cols).toEqual(["NAME", "PROVISIONER", "RECLAIM", "BINDING", "EXPANSION", "AGE"]);
+    expect(cols).not.toContain("NAMESPACE");
+  });
+
+  it("scopes StorageClasses cluster-wide, ReplicaSets namespaced", () => {
+    expect(isClusterScoped("storageclasses", CUSTOM)).toBe(true);
+    expect(isClusterScoped("replicasets", CUSTOM)).toBe(false);
+  });
+
+  // The gap that motivated this: these Kinds are referenced all over the
+  // properties panel and used to resolve to nothing.
+  it("resolves the Kinds that used to be dead ends", () => {
+    expect(navIdForKind("ReplicaSet", "apps/v1", CUSTOM)).toBe("replicasets");
+    expect(navIdForKind("StorageClass", "storage.k8s.io/v1", CUSTOM)).toBe("storageclasses");
   });
 });

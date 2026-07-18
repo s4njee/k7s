@@ -42,6 +42,12 @@ pub struct Release {
     pub updated: String,
     /// e.g. "Install complete", "Upgrade complete".
     pub description: String,
+    /// RFC3339 first-deployed time (the release's creation), or empty.
+    pub first_deployed: String,
+    /// The user-supplied values overrides (Helm's `config`); an object, possibly
+    /// empty. Chart defaults live under `chart.values` and are deliberately not
+    /// surfaced — "what did *I* set" is the question this answers (B35).
+    pub config: serde_json::Value,
     /// The rendered manifest, with any Secret values redacted.
     pub manifest: String,
 }
@@ -63,6 +69,9 @@ struct ReleaseJson {
     info: InfoJson,
     #[serde(default)]
     chart: ChartJson,
+    /// User-supplied values overrides.
+    #[serde(default)]
+    config: serde_json::Value,
     #[serde(default)]
     manifest: String,
 }
@@ -71,6 +80,8 @@ struct ReleaseJson {
 struct InfoJson {
     #[serde(default)]
     status: String,
+    #[serde(default)]
+    first_deployed: String,
     #[serde(default)]
     last_deployed: String,
     #[serde(default)]
@@ -151,7 +162,9 @@ pub fn decode_release(secret: &Secret) -> Option<Release> {
         revision: r.version,
         status: or_dash(r.info.status),
         updated: r.info.last_deployed,
+        first_deployed: r.info.first_deployed,
         description: or_dash(r.info.description),
+        config: r.config,
         manifest: redact_secret_manifests(&r.manifest),
     })
 }
@@ -159,7 +172,7 @@ pub fn decode_release(secret: &Secret) -> Option<Release> {
 /// Tone for a release status, matching how the statuses actually read:
 /// `deployed` is the healthy resting state, `superseded` is normal history, and
 /// anything failed or stuck mid-operation wants attention.
-fn status_tone(status: &str) -> Tone {
+pub fn status_tone(status: &str) -> Tone {
     match status {
         "deployed" => Tone::Good,
         "superseded" | "uninstalled" => Tone::Muted,
@@ -167,6 +180,57 @@ fn status_tone(status: &str) -> Tone {
         // pending-install / pending-upgrade / pending-rollback / uninstalling:
         // an operation is in flight, or died holding the lock.
         _ => Tone::Warn,
+    }
+}
+
+/// Whether a values key names a credential, and so must be redacted (B35). Matches
+/// the substrings the manifest/secret stance already treats as sensitive; a values
+/// blob is exactly where a `dbPassword` or `apiToken` ends up.
+fn is_sensitive_key(key: &str) -> bool {
+    let k = key.to_lowercase();
+    ["password", "secret", "token", "key"].iter().any(|p| k.contains(p))
+}
+
+/// Flatten a release's values into sorted `dotted.path` → value pairs, redacting
+/// any value under a sensitive key (B35). A sensitive key's whole subtree is
+/// replaced by `<redacted>` — the value string never reaches the caller, so it
+/// can't reach the frontend payload.
+///
+/// Nested objects dot together (`resources.limits.cpu`); arrays index
+/// (`hosts.0`). Scalars render as their JSON text without quotes.
+pub fn flatten_values(config: &serde_json::Value) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    // Values is an object (or absent/null); a top-level scalar isn't a real Helm
+    // config, so it yields nothing rather than a nameless row.
+    if config.is_object() || config.is_array() {
+        flatten_into("", config, &mut out);
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn flatten_into(prefix: &str, value: &serde_json::Value, out: &mut Vec<(String, String)>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                let path = if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") };
+                if is_sensitive_key(k) {
+                    // Redact the whole subtree — never descend into a credential.
+                    out.push((path, "<redacted>".to_string()));
+                } else {
+                    flatten_into(&path, v, out);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (i, v) in items.iter().enumerate() {
+                let path = if prefix.is_empty() { i.to_string() } else { format!("{prefix}.{i}") };
+                flatten_into(&path, v, out);
+            }
+        }
+        serde_json::Value::String(s) => out.push((prefix.to_string(), s.clone())),
+        serde_json::Value::Null => out.push((prefix.to_string(), DASH.to_string())),
+        other => out.push((prefix.to_string(), other.to_string())),
     }
 }
 
@@ -192,7 +256,7 @@ pub fn map_release(secret: &Secret) -> Option<Row> {
         name: r.name,
         namespace: Some(r.namespace),
         cells,
-        pod: None,
+        ..Default::default()
     })
 }
 
@@ -380,6 +444,61 @@ mod tests {
         .unwrap();
         assert!(decode_release(&s).is_none());
         assert!(map_release(&s).is_none());
+    }
+
+    // ---- values flattening & redaction (B35) ----
+
+    /// A credential value is redacted by key name, and the value string never
+    /// appears in the output at all — not just hidden behind a placeholder.
+    #[test]
+    fn flatten_redacts_credentials() {
+        let cfg = json!({
+            "dbPassword": "hunter2",
+            "api": { "token": "t0psecret", "url": "https://x" },
+            "tls": { "key": "PRIVATE", "crt": "public-cert" },
+            "clientSecret": "shh",
+        });
+        let flat = flatten_values(&cfg);
+        let dumped = format!("{flat:?}");
+        for leaked in ["hunter2", "t0psecret", "PRIVATE", "shh"] {
+            assert!(!dumped.contains(leaked), "credential '{leaked}' must not survive flattening");
+        }
+        // The keys are still listed, as <redacted>, so the shape stays visible.
+        let redacted: Vec<_> = flat.iter().filter(|(_, v)| v == "<redacted>").map(|(k, _)| k.as_str()).collect();
+        assert!(redacted.contains(&"dbPassword"));
+        assert!(redacted.contains(&"api.token"));
+        assert!(redacted.contains(&"tls.key"));
+        assert!(redacted.contains(&"clientSecret"));
+        // A non-sensitive sibling under the same parent is untouched.
+        assert!(flat.iter().any(|(k, v)| k == "api.url" && v == "https://x"));
+        assert!(flat.iter().any(|(k, v)| k == "tls.crt" && v == "public-cert"));
+    }
+
+    /// Nested objects dot together, arrays index, and the output is sorted.
+    #[test]
+    fn flatten_paths_and_order() {
+        let cfg = json!({
+            "replicaCount": 2,
+            "resources": { "limits": { "cpu": "500m" } },
+            "hosts": ["a.example", "b.example"],
+        });
+        let flat = flatten_values(&cfg);
+        assert_eq!(
+            flat,
+            vec![
+                ("hosts.0".to_string(), "a.example".to_string()),
+                ("hosts.1".to_string(), "b.example".to_string()),
+                ("replicaCount".to_string(), "2".to_string()),
+                ("resources.limits.cpu".to_string(), "500m".to_string()),
+            ]
+        );
+    }
+
+    /// No overrides → no rows; the caller renders "chart defaults" instead.
+    #[test]
+    fn flatten_empty_config_is_empty() {
+        assert!(flatten_values(&json!({})).is_empty());
+        assert!(flatten_values(&serde_json::Value::Null).is_empty());
     }
 
     /// Status colouring: deployed is healthy, superseded is just history, failed
