@@ -275,6 +275,7 @@ async fn resource_for(kind: &str, mgr: &ClientManager) -> AppResult<(ApiResource
         "ingresses" => ("networking.k8s.io", "v1", "Ingress", true),
         "configmaps" => ("", "v1", "ConfigMap", true),
         "secrets" => ("", "v1", "Secret", true),
+        "serviceaccounts" => ("", "v1", "ServiceAccount", true),
         "persistentvolumeclaims" => ("", "v1", "PersistentVolumeClaim", true),
         "persistentvolumes" => ("", "v1", "PersistentVolume", false),
         "storageclasses" => ("storage.k8s.io", "v1", "StorageClass", false),

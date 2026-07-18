@@ -452,9 +452,45 @@ finished, and that the gap had two different shapes.*
 > contents), and an absent source renders `name (not found)` in amber, which is
 > itself the answer to "why isn't this config applying". 7/7 links now resolve.
 >
-> **Still unlisted** (referenced but with no table): ServiceAccount (69 on
-> freya), PriorityClass, IngressClass, ControllerRevision, Endpoints. Untouched
-> but present: NetworkPolicies (7), RBAC (16 roles / 83 clusterroles).
+> *(The unlisted-kinds list here was worked down by B42.)*
+
+### B42 — The links B41 missed, and ServiceAccounts  ✅ shipped
+*Why: re-running the "any other gaps like the PVs?" audit against the post-B41
+code found three tables B41 had simply skipped — the same gap, in sites I'd
+missed rather than in a new shape.*
+
+> **Three missed tables**, all referencing kinds already listed, all previously
+> plain text: Service → **Endpoints** (POD, NODE), StatefulSet → **Persistent
+> volume claims** (NAME, CLASS, PV), and StatefulSet → **Volume claim
+> templates** (CLASS). A StatefulSet's storage panel had been *entirely*
+> dead-ended — the original complaint, one kind over.
+>
+> **ServiceAccounts** as a kind (Config group, namespaced). Its SECRETS column
+> keeps kubectl parity even though it reads 0 on every modern cluster (all 69 of
+> freya's): it earns its place by the exception, so a non-zero count — a
+> long-lived token attached by hand — is toned amber rather than blending in.
+> The pod's `service account` field links there now.
+>
+> **A second 404, in B41's own code.** The harness caught
+> `statefulsets/argocd-application-controller` → a Service that doesn't exist:
+> Argo declares a `serviceName` for a headless Service it never creates. B41 had
+> *rationalised* this in a comment ("can link somewhere empty — still better
+> than making you search by hand"), which contradicts the rule the volume
+> sources follow. Now consistent: existence-checked, and a missing one renders
+> `name (not found)` in amber — a StatefulSet whose governing Service is absent
+> has no stable pod DNS, so that's worth surfacing, not hiding.
+>
+> The harness also grew a gap of its own: it only walked the *pod* panel, so the
+> Service and StatefulSet links it was meant to guard went unchecked, and it
+> picked a StatefulSet with no volume claim templates. It now walks every
+> gatherer that emits links and prefers a StatefulSet that actually declares
+> storage. 15/15 links resolve.
+>
+> **Still unlisted** (referenced, no table): PriorityClass, IngressClass,
+> ControllerRevision, Endpoints. **Never gathered**: imagePullSecrets,
+> `env.valueFrom`, Ingress backends (no `gather_ingress` at all), a Helm
+> release's installed objects. **Absent entirely**: NetworkPolicies (7 on
+> freya), RBAC (16 roles / 83 clusterroles), Leases, APIServices.
 
 ---
 

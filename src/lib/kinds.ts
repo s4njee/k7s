@@ -119,6 +119,16 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     icon: "⚿",
     columns: ["NAME", "NAMESPACE", "TYPE", "DATA", "AGE"],
   },
+  // The identity a pod runs as. Filed under Config rather than a group of its
+  // own: it's a namespaced thing you configure a workload with, and it sits
+  // naturally beside the Secrets it used to mint. (If RBAC lands later, an
+  // Access group holding both would be the better home.)
+  serviceaccounts: {
+    group: "config",
+    label: "ServiceAccounts",
+    icon: "☺",
+    columns: ["NAME", "NAMESPACE", "SECRETS", "AGE"],
+  },
   // ---- Storage ----
   // Claims first: a claim is what a workload actually references, and the volume
   // behind it is the follow-up question.
@@ -288,6 +298,7 @@ const BUILTIN_KIND_TO_NAV: Record<string, ResourceKind> = {
   Ingress: "ingresses",
   ConfigMap: "configmaps",
   Secret: "secrets",
+  ServiceAccount: "serviceaccounts",
   PersistentVolumeClaim: "persistentvolumeclaims",
   PersistentVolume: "persistentvolumes",
   StorageClass: "storageclasses",

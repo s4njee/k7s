@@ -43,6 +43,8 @@ pub enum ResourceKind {
     Ingresses,
     Configmaps,
     Secrets,
+    /// The identity a pod runs as.
+    Serviceaccounts,
     /// Storage claims (namespaced) and the volumes that back them (cluster-scoped).
     Persistentvolumeclaims,
     Persistentvolumes,
@@ -71,6 +73,7 @@ impl ResourceKind {
             ResourceKind::Ingresses => "ingresses",
             ResourceKind::Configmaps => "configmaps",
             ResourceKind::Secrets => "secrets",
+            ResourceKind::Serviceaccounts => "serviceaccounts",
             ResourceKind::Persistentvolumeclaims => "persistentvolumeclaims",
             ResourceKind::Persistentvolumes => "persistentvolumes",
             ResourceKind::Storageclasses => "storageclasses",

@@ -121,10 +121,10 @@ describe("navIdForKind (B33: event → object)", () => {
   });
 
   it("returns null for a kind we don't list, so the row stays inert", () => {
-    // Endpoints and ServiceAccounts still have no table. (ReplicaSet used to be
-    // the example here; B40 gave it one.)
+    // Endpoints and PriorityClass still have no table. (ReplicaSet and
+    // ServiceAccount used to be the examples here; both since got one.)
     expect(navIdForKind("Endpoints", "v1", CUSTOM)).toBeNull();
-    expect(navIdForKind("ServiceAccount", "v1", CUSTOM)).toBeNull();
+    expect(navIdForKind("PriorityClass", "scheduling.k8s.io/v1", CUSTOM)).toBeNull();
   });
 
   it("built-ins win even when a CRD isn't loaded", () => {
@@ -196,5 +196,20 @@ describe("ReplicaSets and StorageClasses (B40)", () => {
   it("resolves the Kinds that used to be dead ends", () => {
     expect(navIdForKind("ReplicaSet", "apps/v1", CUSTOM)).toBe("replicasets");
     expect(navIdForKind("StorageClass", "storage.k8s.io/v1", CUSTOM)).toBe("storageclasses");
+  });
+});
+
+describe("ServiceAccounts", () => {
+  it("sits in Config, namespaced, with kubectl's columns", () => {
+    expect(kindMeta("serviceaccounts", CUSTOM)?.group).toBe("config");
+    expect(kindMeta("serviceaccounts", CUSTOM)?.columns).toEqual([
+      "NAME", "NAMESPACE", "SECRETS", "AGE",
+    ]);
+    expect(isClusterScoped("serviceaccounts", CUSTOM)).toBe(false);
+  });
+
+  // So a pod's "service account" field links, instead of dead-ending.
+  it("resolves the Kind", () => {
+    expect(navIdForKind("ServiceAccount", "v1", CUSTOM)).toBe("serviceaccounts");
   });
 });

@@ -26,6 +26,7 @@ export type ResourceKind =
   | "ingresses"
   | "configmaps"
   | "secrets"
+  | "serviceaccounts"
   | "persistentvolumeclaims"
   | "persistentvolumes"
   | "storageclasses"

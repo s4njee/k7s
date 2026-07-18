@@ -408,6 +408,32 @@ const MOCK_PVS: [string, string, string, string, string, string, string, string]
   ["pv-archive-2025", "500Gi", "RWX", "Retain", "Released", "prod/old-archive", "nfs-slow", "180d"],
 ];
 
+/** [name, ns, secrets, age] — one with a hand-attached token, the case worth
+ * seeing, since modern clusters mint none automatically. */
+const MOCK_SERVICEACCOUNTS: [string, string, number, string][] = [
+  ["default", "prod", 0, "62d"],
+  ["prod-runtime", "prod", 0, "31d"],
+  ["legacy-ci", "prod", 1, "410d"],
+  ["default", "staging", 0, "62d"],
+  ["default", "monitoring", 0, "62d"],
+  ["prometheus", "monitoring", 0, "31d"],
+];
+
+function buildServiceAccountRows(): Row[] {
+  return MOCK_SERVICEACCOUNTS.map(([name, ns, secrets, age]) => ({
+    uid: `sa:${ns}/${name}`,
+    name,
+    namespace: ns,
+    cells: [
+      { text: name, tone: "primary" },
+      { text: ns, tone: "muted" },
+      // Non-zero means a long-lived token was attached by hand.
+      { text: String(secrets), tone: secrets > 0 ? "warn" : "secondary" },
+      { text: age, tone: "muted" },
+    ],
+  }));
+}
+
 /** [name, provisioner, reclaim, binding, expansion, age] */
 const MOCK_STORAGECLASSES: [string, string, string, string, string, string][] = [
   ["local-path (default)", "rancher.io/local-path", "Delete", "WaitForFirstConsumer", "false", "62d"],
@@ -505,6 +531,7 @@ export function buildKindRows(kind: ResourceKind): Row[] {
   if (kind === "persistentvolumeclaims") return buildPvcRows();
   if (kind === "persistentvolumes") return buildPvRows();
   if (kind === "storageclasses") return buildStorageClassRows();
+  if (kind === "serviceaccounts") return buildServiceAccountRows();
   if (kind === "replicasets") return buildReplicaSetRows();
   const raw = MOCK_RESOURCES[kind] ?? [];
   const hasNamespaceCol = KIND_META[kind].columns[1] === "NAMESPACE";

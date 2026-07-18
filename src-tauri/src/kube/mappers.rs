@@ -12,6 +12,7 @@ use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet}
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
     ConfigMap, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Secret, Service,
+    ServiceAccount,
 };
 use k8s_openapi::api::networking::v1::Ingress;
 use k8s_openapi::api::storage::v1::StorageClass;
@@ -434,6 +435,27 @@ pub fn map_secret(sec: &Secret) -> Row {
         age_cell(sec),
     ];
     simple_row(sec, cells)
+}
+
+/// ServiceAccounts: NAME, NAMESPACE, SECRETS, AGE.
+///
+/// SECRETS keeps kubectl's column even though Kubernetes stopped auto-creating
+/// token Secrets in 1.24, so it reads 0 on any modern cluster (all 69 of freya's
+/// do). It earns its place by the exception: a non-zero count means someone
+/// attached a long-lived token by hand, which is exactly the thing worth
+/// noticing — so it's toned rather than left as flat data.
+pub fn map_serviceaccount(sa: &ServiceAccount) -> Row {
+    let secrets = sa.secrets.as_ref().map(|s| s.len()).unwrap_or(0);
+    let cells = vec![
+        name_cell(sa),
+        ns_cell(sa),
+        Cell::new(
+            secrets.to_string(),
+            if secrets > 0 { Tone::Warn } else { Tone::Secondary },
+        ),
+        age_cell(sa),
+    ];
+    simple_row(sa, cells)
 }
 
 // ---------------------------------------------------------------------------
@@ -986,6 +1008,28 @@ mod tests {
         assert_eq!(row.cells[4].text, "false", "expansion absent → false");
 
         assert_eq!(map_storageclass(&sc(false)).cells[0].text, "local-path");
+    }
+
+    /// A ServiceAccount's SECRETS column is 0 on any cluster since 1.24 — the
+    /// column earns its place by the exception, so a hand-attached token reads
+    /// amber rather than blending in as ordinary data.
+    #[test]
+    fn serviceaccount_flags_a_hand_attached_token() {
+        let sa = |secrets: serde_json::Value| -> ServiceAccount {
+            serde_json::from_value(json!({
+                "metadata": { "name": "ci", "namespace": "prod", "uid": "a1" },
+                "secrets": secrets,
+            }))
+            .unwrap()
+        };
+        // Columns: NAME,NAMESPACE,SECRETS,AGE
+        let modern = map_serviceaccount(&sa(json!([])));
+        assert_eq!(modern.cells[2].text, "0");
+        assert_eq!(modern.cells[2].tone, Tone::Secondary);
+
+        let legacy = map_serviceaccount(&sa(json!([{ "name": "ci-token-abc" }])));
+        assert_eq!(legacy.cells[2].text, "1");
+        assert_eq!(legacy.cells[2].tone, Tone::Warn, "a long-lived token is worth noticing");
     }
 
     // ---- Storage: PVCs and PVs ----

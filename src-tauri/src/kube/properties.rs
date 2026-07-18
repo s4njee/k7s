@@ -183,6 +183,7 @@ pub fn builtin_nav_id(kind: &str) -> Option<&'static str> {
         "Ingress" => "ingresses",
         "ConfigMap" => "configmaps",
         "Secret" => "secrets",
+        "ServiceAccount" => "serviceaccounts",
         "PersistentVolumeClaim" => "persistentvolumeclaims",
         "PersistentVolume" => "persistentvolumes",
         "StorageClass" => "storageclasses",
@@ -489,7 +490,14 @@ async fn gather_pod(client: Client, namespace: &str, name: &str) -> AppResult<Pr
             field("host IP", or_dash(status.host_ip.clone())),
             field("QoS", or_dash(status.qos_class.clone())),
             nav_field("owner", owner_text, owner_nav),
-            field("service account", or_dash(spec.service_account_name.clone())),
+            nav_field(
+                "service account",
+                or_dash(spec.service_account_name.clone()),
+                spec.service_account_name
+                    .clone()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| NavTarget::namespaced("serviceaccounts", namespace, s)),
+            ),
             field("restart policy", or_dash(spec.restart_policy.clone())),
             field("priority class", or_dash(spec.priority_class_name.clone())),
             Field {
@@ -1170,6 +1178,7 @@ async fn gather_service(client: Client, namespace: &str, name: &str) -> AppResul
                     .as_ref()
                     .and_then(|t| t.name.clone())
                     .unwrap_or_else(|| DASH.into());
+                let node = ep.node_name.clone().unwrap_or_else(|| DASH.into());
                 for addr in &ep.addresses {
                     ep_rows.push(vec![
                         name_cell(addr.clone()),
@@ -1177,8 +1186,18 @@ async fn gather_service(client: Client, namespace: &str, name: &str) -> AppResul
                             if ready { "ready" } else { "not ready" },
                             if ready { Tone::Good } else { Tone::Warn },
                         ),
-                        c(target.clone()),
-                        c(ep.node_name.clone().unwrap_or_else(|| DASH.into())),
+                        // "which pod is actually serving this, and where" is the
+                        // question this table answers, so both open (B41).
+                        Cell::link(
+                            target.clone(),
+                            Tone::Secondary,
+                            Some(NavTarget::namespaced("pods", namespace, target.clone())),
+                        ),
+                        Cell::link(
+                            node.clone(),
+                            Tone::Secondary,
+                            Some(NavTarget::cluster("nodes", node.clone())),
+                        ),
                     ]);
                 }
             }
@@ -1206,6 +1225,30 @@ async fn gather_statefulset(client: Client, namespace: &str, name: &str) -> AppR
     let status = sts.status.clone().unwrap_or_default();
     let mut props = Properties::default();
 
+    // The governing headless Service is what gives the pods stable DNS.
+    // `serviceName` is a required field but *not* a guarantee the Service exists
+    // — Argo's application-controller names one that was never created — so
+    // verify before linking, the same rule the volume sources follow. A missing
+    // one is worth flagging rather than quietly linking nowhere: without it the
+    // pods' DNS names don't resolve.
+    let svc_name = spec.service_name.clone();
+    let svc_exists = !svc_name.is_empty()
+        && Api::<Service>::namespaced(client.clone(), namespace)
+            .get_metadata(&svc_name)
+            .await
+            .is_ok();
+    let service_field = match (svc_name.is_empty(), svc_exists) {
+        (true, _) => field("service name", DASH),
+        (false, true) => nav_field(
+            "service name",
+            svc_name.clone(),
+            Some(NavTarget::namespaced("services", namespace, svc_name.clone())),
+        ),
+        (false, false) => {
+            field_toned("service name", format!("{svc_name} (not found)"), Tone::Warn)
+        }
+    };
+
     let desired = spec.replicas.unwrap_or(1);
     let ready = status.ready_replicas.unwrap_or(0);
 
@@ -1215,16 +1258,7 @@ async fn gather_statefulset(client: Client, namespace: &str, name: &str) -> AppR
             field_toned("replicas", format!("{ready}/{desired} ready"), ready_tone(ready, desired)),
             field("current", status.current_replicas.unwrap_or(0).to_string()),
             field("updated", status.updated_replicas.unwrap_or(0).to_string()),
-            // The governing headless Service. `serviceName` is a required string
-            // but not a guarantee the Service exists, so this can link somewhere
-            // empty — still better than making you search for it by hand.
-            nav_field(
-                "service name",
-                or_dash(Some(spec.service_name.clone())),
-                Some(spec.service_name.clone())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| NavTarget::namespaced("services", namespace, s)),
-            ),
+            service_field,
             field(
                 "update strategy",
                 spec.update_strategy
@@ -1248,9 +1282,16 @@ async fn gather_statefulset(client: Client, namespace: &str, name: &str) -> AppR
             .iter()
             .map(|t| {
                 let ts = t.spec.clone().unwrap_or_default();
+                let class = or_dash(ts.storage_class_name.clone());
                 vec![
+                    // The template itself isn't an object you can open — only the
+                    // class it provisions from is.
                     name_cell(t.metadata.name.clone().unwrap_or_default()),
-                    c(or_dash(ts.storage_class_name.clone())),
+                    Cell::link(
+                        class.clone(),
+                        Tone::Secondary,
+                        Some(NavTarget::cluster("storageclasses", class)),
+                    ),
                     c(ts
                         .access_modes
                         .as_ref()
@@ -1297,15 +1338,35 @@ async fn gather_statefulset(client: Client, namespace: &str, name: &str) -> AppR
                         let ps = p.spec.clone().unwrap_or_default();
                         let pst = p.status.clone().unwrap_or_default();
                         let phase = or_dash(pst.phase.clone());
+                        let class = or_dash(ps.storage_class_name.clone());
+                        let volume = or_dash(ps.volume_name.clone());
                         vec![
-                            name_cell(p.name_any()),
+                            // A StatefulSet's storage is the one panel where every
+                            // reference used to dead-end (B41).
+                            Cell::link(
+                                p.name_any(),
+                                Tone::Primary,
+                                Some(NavTarget::namespaced(
+                                    "persistentvolumeclaims",
+                                    namespace,
+                                    p.name_any(),
+                                )),
+                            ),
                             Cell::new(
                                 phase.clone(),
                                 if phase == "Bound" { Tone::Good } else { Tone::Warn },
                             ),
                             c(qty(pst.capacity.as_ref().and_then(|cap| cap.get("storage")))),
-                            c(or_dash(ps.storage_class_name.clone())),
-                            c(or_dash(ps.volume_name.clone())),
+                            Cell::link(
+                                class.clone(),
+                                Tone::Secondary,
+                                Some(NavTarget::cluster("storageclasses", class)),
+                            ),
+                            Cell::link(
+                                volume.clone(),
+                                Tone::Secondary,
+                                Some(NavTarget::cluster("persistentvolumes", volume)),
+                            ),
                             Cell::age(p.creation_timestamp().map(|t| t.0.to_rfc3339())),
                         ]
                     })
@@ -1547,9 +1608,10 @@ mod tests {
         assert_eq!(builtin_nav_id("ReplicaSet"), Some("replicasets"));
         assert_eq!(builtin_nav_id("StorageClass"), Some("storageclasses"));
         assert_eq!(builtin_nav_id("PersistentVolumeClaim"), Some("persistentvolumeclaims"));
+        assert_eq!(builtin_nav_id("ServiceAccount"), Some("serviceaccounts"));
         // Still unlisted, so still correctly None.
         assert_eq!(builtin_nav_id("Endpoints"), None);
-        assert_eq!(builtin_nav_id("ServiceAccount"), None);
+        assert_eq!(builtin_nav_id("PriorityClass"), None);
         assert_eq!(builtin_nav_id("FooBar"), None);
     }
 

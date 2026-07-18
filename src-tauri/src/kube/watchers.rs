@@ -18,7 +18,7 @@ use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet}
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
     ConfigMap, Event, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Secret,
-    Service,
+    Service, ServiceAccount,
 };
 use k8s_openapi::api::networking::v1::Ingress;
 use k8s_openapi::api::storage::v1::StorageClass;
@@ -64,6 +64,7 @@ pub async fn spawn_all(mgr: &ClientManager, client: Client) -> usize {
     spawn::<Ingress>(mgr, &client, ResourceKind::Ingresses, mappers::map_ingress, identity).await;
     spawn::<ConfigMap>(mgr, &client, ResourceKind::Configmaps, mappers::map_configmap, identity).await;
     spawn::<Secret>(mgr, &client, ResourceKind::Secrets, mappers::map_secret, identity).await;
+    spawn::<ServiceAccount>(mgr, &client, ResourceKind::Serviceaccounts, mappers::map_serviceaccount, identity).await;
     spawn::<PersistentVolumeClaim>(mgr, &client, ResourceKind::Persistentvolumeclaims, mappers::map_pvc, identity).await;
     spawn::<PersistentVolume>(mgr, &client, ResourceKind::Persistentvolumes, mappers::map_pv, identity).await;
     spawn::<StorageClass>(mgr, &client, ResourceKind::Storageclasses, mappers::map_storageclass, identity).await;
@@ -76,7 +77,7 @@ pub async fn spawn_all(mgr: &ClientManager, client: Client) -> usize {
     let helm_client = client.clone();
     let handle = tokio::spawn(async move { run_helm_watcher(helm_client, app).await });
     mgr.push_task(handle).await;
-    19
+    20
 }
 
 /// Spawn one watcher task and register it with the manager.

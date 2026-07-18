@@ -24,6 +24,7 @@ fn gvk_for(kind: &str) -> Option<(&'static str, &'static str, &'static str)> {
     Some(match kind {
         "pods" => ("", "v1", "Pod"),
         "services" => ("", "v1", "Service"),
+        "serviceaccounts" => ("", "v1", "ServiceAccount"),
         "configmaps" => ("", "v1", "ConfigMap"),
         "secrets" => ("", "v1", "Secret"),
         "persistentvolumeclaims" => ("", "v1", "PersistentVolumeClaim"),
@@ -87,11 +88,44 @@ async fn main() -> anyhow::Result<()> {
         .max_by_key(|p| p.spec.as_ref().map(|s| s.volumes.as_ref().map(|v| v.len()).unwrap_or(0)).unwrap_or(0))
         .expect("the cluster has pods");
     let ns = target.namespace().unwrap_or_default();
-    println!("\nchecking links from pod {ns}/{}:", target.name_any());
+    println!("\nchecking every link the properties panels emit:");
 
-    let props = gather(client.clone(), "pods", &ns, &target.name_any()).await?;
     let mut checked = 0usize;
     let mut broken = Vec::new();
+
+    // Every gatherer that emits links, not just the pod panel: the Service and
+    // StatefulSet tables were wired later and are easy to leave behind.
+    let mut panels: Vec<(&str, String, String)> =
+        vec![("pods", ns.clone(), target.name_any())];
+    if let Some(s) = Api::<k8s_openapi::api::core::v1::Service>::all(client.clone())
+        .list(&ListParams::default())
+        .await?
+        .items
+        .into_iter()
+        .find(|s| s.spec.as_ref().and_then(|sp| sp.selector.as_ref()).is_some())
+    {
+        panels.push(("services", s.namespace().unwrap_or_default(), s.name_any()));
+    }
+    // Prefer a StatefulSet that actually declares storage — its claim/volume/class
+    // links are the ones worth checking, and a StatefulSet without templates
+    // exercises none of them.
+    let stss = Api::<k8s_openapi::api::apps::v1::StatefulSet>::all(client.clone())
+        .list(&ListParams::default())
+        .await?
+        .items;
+    let with_storage = stss.iter().find(|s| {
+        s.spec
+            .as_ref()
+            .and_then(|sp| sp.volume_claim_templates.as_ref())
+            .is_some_and(|t| !t.is_empty())
+    });
+    if let Some(s) = with_storage.or_else(|| stss.first()) {
+        panels.push(("statefulsets", s.namespace().unwrap_or_default(), s.name_any()));
+    }
+
+    for (kind, pns, pname) in &panels {
+    let props = gather(client.clone(), kind, pns, pname).await?;
+    println!("  -- {kind} {pns}/{pname}");
     for section in &props.sections {
         match &section.body {
             Body::Fields { fields } => {
@@ -118,6 +152,7 @@ async fn main() -> anyhow::Result<()> {
             }
             Body::Chips { .. } => {}
         }
+    }
     }
 
     println!("\n{checked} link(s) checked, {} broken", broken.len());
