@@ -100,9 +100,13 @@
   white-space: normal;
   overflow-wrap: anywhere;
   /* Floor the column width so a breakable token (a PV name, an image ref) can't
-     be squeezed to a one-character sliver by wider neighbours — `anywhere` makes
-     its min-content width ~0, which the auto table would otherwise collapse. */
-  min-width: 14ch;
+     be squeezed to a sliver by wider neighbours — `anywhere` makes its
+     min-content width ~0, which the auto table would otherwise collapse.
+     Sized so a 40-char identifier (`pvc-` + a uuid, the longest thing that lands
+     here) wraps to two lines rather than four. It can afford to be generous
+     because the table scrolls in its own container: the width no longer has to
+     be stolen from a neighbouring column. */
+  min-width: 20ch;
 }
 
 /* Label / annotation chips. */

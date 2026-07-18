@@ -386,6 +386,9 @@ const MOCK_PVCS: [string, string, string, string, string, string, string, string
   ["valkyrie-data", "prod", "Bound", "pvc-0bc73481-5d44-439d", "20Gi", "RWO", "local-path", "31d"],
   ["heimdall-data", "prod", "Bound", "pvc-1063061a-160c-401b", "5Gi", "RWO", "local-path", "31d"],
   ["prometheus-data", "monitoring", "Bound", "pvc-a3269fdf-6ec2-4a07", "50Gi", "RWO", "local-path", "18d"],
+  // The claim a StatefulSet pod mounts, so the pod → CLAIM → PV chain in the
+  // Properties panel lands on rows that actually exist in demo mode.
+  ["data-yggdrasil-db-0", "prod", "Bound", "pvc-8f2c1a3e-4b7d-11ef-9c21", "20Gi", "RWO", "local-path", "31d"],
   ["grafana-data", "monitoring", "Bound", "pvc-c23b8f6e-6b7e-4707", "1Gi", "RWO", "local-path", "18d"],
   // The case worth seeing: a claim that never bound, so it has no volume and
   // shows what it *asked* for rather than an empty capacity.
@@ -397,6 +400,7 @@ const MOCK_PVS: [string, string, string, string, string, string, string, string]
   ["pvc-0bc73481-5d44-439d", "20Gi", "RWO", "Delete", "Bound", "prod/valkyrie-data", "local-path", "31d"],
   ["pvc-1063061a-160c-401b", "5Gi", "RWO", "Delete", "Bound", "prod/heimdall-data", "local-path", "31d"],
   ["pvc-a3269fdf-6ec2-4a07", "50Gi", "RWO", "Delete", "Bound", "monitoring/prometheus-data", "local-path", "18d"],
+  ["pvc-8f2c1a3e-4b7d-11ef-9c21", "20Gi", "RWO", "Delete", "Bound", "prod/data-yggdrasil-db-0", "local-path", "31d"],
   ["pvc-c23b8f6e-6b7e-4707", "1Gi", "RWO", "Delete", "Bound", "monitoring/grafana-data", "local-path", "18d"],
   // An unclaimed volume sitting idle, and one whose claim was deleted but whose
   // data is still on disk — the two non-Bound states that matter.

@@ -6,7 +6,7 @@
  * every supported kind without a cluster.
  */
 
-import type { Cell, Field, Properties, ResourceRef, Section, Tone } from "../types";
+import type { Cell, Field, KindId, Properties, ResourceRef, Section, Tone } from "../types";
 import { MOCK_HELM, MOCK_PODS } from "./data";
 
 /** A plain secondary cell. */
@@ -20,6 +20,14 @@ const f = (label: string, value: string, tone: Tone = "secondary"): Field => ({
   label,
   value: c(value, tone),
 });
+/** A cell that links to another object (B41), mirroring the Rust gatherers. */
+const link = (
+  text: string,
+  kind: KindId,
+  name: string,
+  namespace?: string,
+  tone: Tone = "secondary",
+): Cell => ({ text, tone, nav: { kind, namespace, name } });
 
 const table = (title: string, columns: string[], rows: Cell[][], emptyNote?: string): Section => ({
   title,
@@ -155,13 +163,23 @@ function podProperties(ref: ResourceRef): Properties {
   return {
     sections: [
       fields("Overview", [
-        f("node", pod?.node ?? "—"),
+        { label: "node", value: c(pod?.node ?? "—"), nav: { kind: "nodes", name: pod?.node ?? "" } },
         f("pod IP", "10.244.2.37"),
         f("host IP", "192.168.1.153"),
         f("QoS", "Burstable"),
-        // Owner resolves through the ReplicaSet to its Deployment, with a nav
-        // target that makes it a click-through link (B33).
-        { label: "owner", value: c(`Deployment/${app}`), nav: { kind: "deployments", namespace: ref.namespace, name: app } },
+        // Owner resolves through the ReplicaSet to its workload, with a nav target
+        // that makes it a click-through link (B33). Which workload depends on the
+        // pod: a `-<ordinal>` pod belongs to a StatefulSet, and pointing every pod
+        // at a Deployment would link to one the demo data doesn't have.
+        {
+          label: "owner",
+          value: c(stateful ? `StatefulSet/${app}` : `Deployment/${app}`),
+          nav: {
+            kind: stateful ? "statefulsets" : "deployments",
+            namespace: ref.namespace,
+            name: app,
+          },
+        },
         f("service account", `${ref.namespace}-runtime`),
         f("restart policy", "Always"),
         f("priority class", "—"),
@@ -180,10 +198,11 @@ function podProperties(ref: ResourceRef): Properties {
           ? [
               [
                 n("data"),
-                c(`data-${ref.name}`),
-                c("pvc-8f2c1a3e-4b7d-11ef-9c21"),
+                // Claim, volume and class all link through (B41).
+                link(`data-${ref.name}`, "persistentvolumeclaims", `data-${ref.name}`, ref.namespace),
+                link("pvc-8f2c1a3e-4b7d-11ef-9c21", "persistentvolumes", "pvc-8f2c1a3e-4b7d-11ef-9c21"),
                 c("20Gi"),
-                c("local-path"),
+                link("local-path", "storageclasses", "local-path"),
                 c("ReadWriteOnce"),
                 c("Bound", "ok"),
                 c("/var/lib/data"),
@@ -195,17 +214,26 @@ function podProperties(ref: ResourceRef): Properties {
       table(
         "Services",
         ["NAME", "TYPE", "CLUSTER-IP", "PORTS"],
-        [[n(app), c("ClusterIP"), c("10.96.14.22"), c("8080/TCP")]],
+        [[link(app, "services", app, ref.namespace, "primary"), c("ClusterIP"), c("10.96.14.22"), c("8080/TCP")]],
         "no services select this pod",
       ),
       table(
         "Other volumes",
-        ["VOLUME", "KIND", "MOUNTED AT"],
+        ["VOLUME", "KIND", "SOURCE", "MOUNTED AT"],
         [
-          [n("config"), c("ConfigMap"), c("/etc/config (ro)")],
+          [
+            n("config"),
+            c("ConfigMap"),
+            link(`${app}-config`, "configmaps", `${app}-config`, ref.namespace),
+            c("/etc/config (ro)"),
+          ],
+          // An optional source that doesn't exist: the mount is empty, which is
+          // worth saying rather than linking to a 404 (B41).
+          [n("tls"), c("Secret"), c(`${app}-tls (not found)`, "warn"), c("/etc/tls (ro)")],
           [
             n("kube-api-access"),
             c("Projected"),
+            c("—"),
             c("/var/run/secrets/kubernetes.io/serviceaccount (ro)"),
           ],
         ],
