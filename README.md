@@ -9,9 +9,15 @@ Left navigation over all common resource kinds, live resource tables with namesp
 ## Features
 
 - **Cluster switcher** fed by your kubeconfig contexts; switching tears down and rebuilds all live streams. **Import kubeconfig** adds contexts from any kubeconfig file via a native file picker (defaulted to kubectl's `~/.kube/config`), and they connect via their source file.
-- **12 resource kinds** watched live — Pods, Deployments, StatefulSets, DaemonSets, Jobs, CronJobs, Services, Ingresses, ConfigMaps, Secrets, Nodes, Namespaces — with sidebar counts and a "watch: N streams active" footer.
-- **Resource tables** with per-kind columns, namespace filtering, and status coloring driven by the backend.
-- **Pod detail panel**: follow/pause **log streaming** (container cycler, timestamp toggle, client-side search, 200-line ring buffer), **YAML** view with a CodeMirror editor and apply-to-cluster, and **Events**.
+- **22 resource kinds** watched live across Workloads, Network, Config, Storage and Cluster — plus any **CRDs** the cluster defines, discovered on connect and watched *lazily*, so a cluster with hundreds of CRDs doesn't open hundreds of streams. Sidebar counts and a "watch: N streams active" footer.
+- **Resource tables** with per-kind columns, namespace filtering, label-selector filtering (`app=web,tier=api`), sorting, and status coloring driven by the backend. Large tables are windowed.
+- **Detail panels** for every kind: follow/pause **log streaming** (container cycler, interleaved multi-container, `previous`-container reads for crash loops, since-windows, save-to-file), **YAML** view/edit/apply, **Events**, and a **Properties** view answering "what is this actually wired to".
+- **Related-resource navigation** — references are links. A pod's owner resolves *through* its ReplicaSet to the Deployment; a claim opens its volume; an event opens the object it's about. A reference that doesn't resolve says so instead of linking to a 404.
+- **Interactive shell** into a container (xterm.js), and **port-forwarding** for pods and Services.
+- **Actions**: scale, restart (pod delete-and-recreate, or a workload rollout restart), cordon/uncordon, drain (eviction-based, so PodDisruptionBudgets are honoured), delete — each with the confirmation its blast radius deserves.
+- **Helm releases** decoded straight from their storage Secrets — overview, full revision history, and values with credential keys redacted in Rust.
+- **Node metrics** plotted from node-exporter, backfilled from **Prometheus** when the cluster runs one.
+- **Command palette** (⌘K) with fzy-style fuzzy ranking over kinds, objects and actions.
 - **Status bar** with API latency, nodes ready, and cluster CPU/MEM % (via `metrics.k8s.io`, degrading to `—` when metrics-server is absent).
 
 ## Prerequisites
@@ -145,3 +151,21 @@ context switch. The frontend subscribes to Tauri events (`resource-update`,
 commands for one-shot operations. Status/coloring semantics live in the backend
 (each cell carries a `tone`); the frontend maps tone → a design token. See
 [`plan.md`](plan.md) for the full picture.
+
+## Verification against a real cluster
+
+Unit tests cover the pure logic, but a Kubernetes client is mostly about what a
+real API server actually does. So `src-tauri/examples/*_check.rs` are **read-only
+harnesses that run against a live cluster** and assert on it:
+
+```bash
+KUBECONFIG=/path/to/kubeconfig cargo run --example related_links_check
+```
+
+They're how several bugs were caught that no unit test would have found: a link
+pointing at an `optional: true` Secret that didn't exist, a `previous`-container
+log read that returns *identical* bytes to the live one while a container sits in
+backoff, and an Ingress backend port that's a *name* rather than a number.
+
+> Cluster identifiers in this repo (hostnames, namespaces, addresses) are
+> placeholders, not a real environment.
