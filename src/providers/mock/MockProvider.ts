@@ -31,6 +31,7 @@ import type {
   Row,
   SavedLog,
   Unsub,
+  YamlDiff,
 } from "../types";
 import { KIND_ORDER } from "../../lib/kinds";
 import { MOCK_CLUSTERS, MOCK_CUSTOM_KINDS, MOCK_PODS, buildCustomRows, buildKindRows } from "./data";
@@ -137,6 +138,30 @@ export class MockProvider implements DataProvider {
   async applyYaml(ref: ResourceRef, text: string): Promise<void> {
     // Persist to the in-memory cache; no validation in demo mode.
     this.yamlCache.set(`${ref.kind}:${ref.namespace}/${ref.name}`, text);
+  }
+
+  /**
+   * Simulate a server-side dry run (B36). The interesting case isn't "your text
+   * comes back unchanged" — it's the server rewriting it, so the mock stamps the
+   * kind of defaulting and webhook mutation a real cluster applies, which is
+   * what makes the preview worth having.
+   */
+  async dryRunYaml(ref: ResourceRef, text: string): Promise<YamlDiff> {
+    const current = await this.getYaml(ref);
+    let proposed = text;
+    // Defaulting: the server fills fields you didn't write.
+    if (!/terminationGracePeriodSeconds:/.test(proposed)) {
+      proposed = proposed.replace(/^spec:$/m, "spec:\n  terminationGracePeriodSeconds: 30");
+    }
+    // A mutating webhook stamping its own annotation — invisible in the text you
+    // typed, which is exactly the point of previewing.
+    if (!/k7s\.demo\/mutated:/.test(proposed)) {
+      proposed = proposed.replace(
+        /^ {2}annotations:$/m,
+        "  annotations:\n    k7s.demo/mutated: \"true\"",
+      );
+    }
+    return { current, proposed };
   }
 
   async getEvents(ref: ResourceRef): Promise<EventItem[]> {

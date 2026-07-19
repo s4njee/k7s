@@ -60,6 +60,7 @@ pub fn run() {
             commands::connect,
             commands::get_yaml,
             commands::apply_yaml,
+            commands::dry_run_yaml,
             commands::delete_resource,
             commands::scale_resource,
             commands::set_cordon,

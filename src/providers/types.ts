@@ -268,6 +268,16 @@ export interface Section {
  * grid/table/chips document, so a new kind is a backend gatherer and no frontend
  * change. See src-tauri/src/kube/properties.rs.
  */
+/**
+ * What a proposed YAML edit would actually do, as the server sees it (B36).
+ * `proposed` is the object that *would* be stored — after defaulting and any
+ * mutating webhooks — so it can differ from the text that was typed.
+ */
+export interface YamlDiff {
+  current: string;
+  proposed: string;
+}
+
 export interface Properties {
   sections: Section[];
 }
@@ -438,6 +448,12 @@ export interface DataProvider {
   getYaml(ref: ResourceRef): Promise<string>;
   /** Rejects with the API error message (shown inline) on failure. */
   applyYaml(ref: ResourceRef, text: string): Promise<void>;
+  /**
+   * Send an edit as a server-side dry run and return both sides for a diff
+   * (B36). Rejects with the server's message when admission refuses it —
+   * nothing is written either way.
+   */
+  dryRunYaml(ref: ResourceRef, text: string): Promise<YamlDiff>;
   getEvents(ref: ResourceRef): Promise<EventItem[]>;
   /**
    * Properties for an object: what it's wired to, as a generic section document.

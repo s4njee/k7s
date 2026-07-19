@@ -379,6 +379,21 @@ pub async fn apply_yaml(
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<()> {
     let client = require_client(&mgr).await?;
+    ensure_writable(&kind)?;
+    let obj: DynamicObject = serde_yaml::from_str(&yaml)?;
+    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
+    // replace() requires the resourceVersion present in the fetched/edited object;
+    // a stale value yields a 409 whose message we pass straight through.
+    api.replace(&name, &PostParams::default(), &obj).await?;
+    Ok(())
+}
+
+/// Refuse the two kinds whose YAML must never be written back.
+///
+/// Shared by `apply_yaml` and `dry_run_yaml` so the two can't drift — a dry run
+/// that succeeded on a kind the real apply then refuses would be worse than no
+/// preview at all.
+fn ensure_writable(kind: &str) -> AppResult<()> {
     // A Helm release's YAML is a *rendered* manifest, not an API object: applying
     // it would bypass Helm and desync the release from what Helm believes it
     // deployed. B26 is read-only by design.
@@ -392,12 +407,56 @@ pub async fn apply_yaml(
     if kind == "secrets" {
         return Err(AppError::Other("editing Secrets is disabled".into()));
     }
+    Ok(())
+}
+
+/// What a proposed edit would actually do, as the *server* sees it (B36).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YamlDiff {
+    /// The live object now.
+    pub current: String,
+    /// What would be stored if this were applied — after defaulting and any
+    /// mutating webhooks.
+    pub proposed: String,
+}
+
+/// Send an edit as a server-side dry run and return both sides for a diff (B36).
+///
+/// `dryRun=All` runs the whole admission chain — validation, defaulting, mutating
+/// webhooks — and returns the object that *would* be persisted, without
+/// persisting it. That's the only way to show what an apply will really do:
+/// defaulted fields and webhook rewrites are invisible in the text you typed.
+///
+/// Both sides are serialized through the same path as `get_yaml` (managedFields
+/// dropped, same serializer) so the diff shows real changes rather than
+/// formatting noise.
+#[tauri::command]
+pub async fn dry_run_yaml(
+    kind: String,
+    namespace: String,
+    name: String,
+    yaml: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<YamlDiff> {
+    let client = require_client(&mgr).await?;
+    ensure_writable(&kind)?;
     let obj: DynamicObject = serde_yaml::from_str(&yaml)?;
     let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
-    // replace() requires the resourceVersion present in the fetched/edited object;
-    // a stale value yields a 409 whose message we pass straight through.
-    api.replace(&name, &PostParams::default(), &obj).await?;
-    Ok(())
+
+    let mut current = api.get(&name).await?;
+    current.metadata.managed_fields = None;
+
+    // A rejected dry run is the point, not a failure of this command: the caller
+    // shows the server's message instead of a diff, and nothing was written.
+    let pp = PostParams { dry_run: true, ..Default::default() };
+    let mut proposed = api.replace(&name, &pp, &obj).await?;
+    proposed.metadata.managed_fields = None;
+
+    Ok(YamlDiff {
+        current: serde_yaml::to_string(&current)?,
+        proposed: serde_yaml::to_string(&proposed)?,
+    })
 }
 
 /// Delete a resource of any kind. The frontend confirms first; API errors are

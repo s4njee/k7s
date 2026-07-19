@@ -192,16 +192,12 @@ pods and owner Deployment.
 
 ## P2 — later
 
-### B36 — Create from YAML, and dry-run diff before apply
+### B36 — Create from YAML  *(the dry-run diff half shipped — see below)*
 **Do:** A "+ Create" affordance (topbar or ⌘K action): paste/edit a manifest
 in the CodeMirror editor, `create` it via the dynamic API (kind/ns parsed from
-the manifest). For *edits*: Apply first sends the replace with `dryRun=All`,
-shows a unified diff (current ↔ server-normalized result), and only then
-offers the real apply — mistakes surface before the cluster changes, and
-webhook mutations are visible in the diff. **Accept:** creating a scratch
-ConfigMap and a Deployment works (and gives B34b its live fixture); an edit a
-webhook would mutate shows the mutation in the diff before apply; invalid
-manifests fail the dry-run with the server's message, cluster untouched.
+the manifest). **Accept:** creating a scratch ConfigMap and a Deployment works,
+which also gives B34b its live fixture; the dry-run preview shipped below
+applies to the create path too.
 
 ### B37 — Secret values: copy without display
 **Do:** The app's stance is that Secret values never render — but *using* a
@@ -326,6 +322,15 @@ B28–B43, in the commit messages of `feat/backlog-qol`.
 
 ### Backlog v3 (B28–B43)
 
+- **B36a — Dry-run diff before apply.** Editing YAML in place existed since E5
+  but applied blind. Apply is now two steps: `dryRun=All` through the whole
+  admission chain, then a diff of the live object against the object that
+  *would* be stored, so defaulting and mutating webhooks are visible before
+  anything is written. LCS line diff with context hunks (`lib/diff.ts`, 13
+  tests); read-only guards factored to `ensure_writable` so the preview and the
+  real apply can't disagree about Helm/Secrets. Live: dry run echoes the
+  proposed annotation, the live object is untouched, and a stale
+  resourceVersion is rejected at preview time rather than at apply.
 - **B43 — Ingress detail + IngressClasses.** Rules/TLS tables with
   existence-checked backend links; named backend ports handled; `ref_cell`
   born here.

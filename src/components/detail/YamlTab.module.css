@@ -84,3 +84,71 @@
 .editing {
   border-left: 3px solid var(--accent);
 }
+
+/* ---- dry-run diff (B36) --------------------------------------------------
+   Shown in place of the editor while reviewing. Colours come from the status
+   tokens so add/remove read the same as ok/err everywhere else. */
+.diffWrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 8px 0 12px;
+}
+.diffStat {
+  padding: 0 12px 8px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border-default);
+  margin-bottom: 8px;
+}
+.diffAdded {
+  color: var(--status-ok);
+  font-weight: 600;
+}
+.diffRemoved {
+  color: var(--status-err);
+  font-weight: 600;
+}
+.diffNote {
+  color: var(--text-muted);
+}
+.diffEmpty {
+  padding: 16px 12px;
+  color: var(--text-muted);
+}
+/* A gap between hunks stands for the unchanged lines that were dropped. */
+.diffHunk + .diffHunk {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-default);
+}
+.diffLine {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+}
+.diffLineAdd {
+  background: color-mix(in srgb, var(--status-ok) 12%, transparent);
+  color: var(--text-primary);
+}
+.diffLineDel {
+  background: color-mix(in srgb, var(--status-err) 12%, transparent);
+  color: var(--text-primary);
+}
+.diffGutter {
+  flex: 0 0 3ch;
+  text-align: right;
+  color: var(--text-faint);
+  user-select: none;
+}
+.diffSign {
+  flex: 0 0 1ch;
+  user-select: none;
+}
+.diffText {
+  flex: 1;
+}

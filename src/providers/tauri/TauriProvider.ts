@@ -35,6 +35,7 @@ import type {
   Row,
   SavedLog,
   Unsub,
+  YamlDiff,
 } from "../types";
 
 /** Wire payload for the `resource-update` event. */
@@ -109,6 +110,15 @@ export class TauriProvider implements DataProvider {
 
   applyYaml(ref: ResourceRef, text: string): Promise<void> {
     return invoke<void>("apply_yaml", {
+      kind: ref.kind,
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+      yaml: text,
+    });
+  }
+
+  dryRunYaml(ref: ResourceRef, text: string): Promise<YamlDiff> {
+    return invoke<YamlDiff>("dry_run_yaml", {
       kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
