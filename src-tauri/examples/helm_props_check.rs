@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     println!("found {} Helm release(s)\n", releases.len());
-    assert!(!releases.is_empty(), "freya has Helm releases (traefik, arc, …)");
+    assert!(!releases.is_empty(), "orion has Helm releases (traefik, arc, …)");
 
     for (ns, name) in &releases {
         let props = gather(client.clone(), "helm", ns, name).await?;

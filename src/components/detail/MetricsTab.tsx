@@ -169,7 +169,7 @@ function Filesystems({ sample }: { sample: NodeSample }) {
   return (
     <Plot
       title={`Filesystems (${fs.length})`}
-      // Enough room per bar to stay legible; freya has 21 mounts.
+      // Enough room per bar to stay legible; orion has 21 mounts.
       height={Math.max(120, 26 * fs.length + 40)}
       data={[
         {

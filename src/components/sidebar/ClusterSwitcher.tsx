@@ -11,7 +11,7 @@ import { useClickOutside } from "../../hooks/useClickOutside";
 import { connectTo } from "../../lib/connect";
 import { getProvider } from "../../providers";
 
-/** First two letters of the cluster name, uppercased ("FR" for "freya"). */
+/** First two letters of the cluster name, uppercased ("FR" for "orion"). */
 function initials(name: string): string {
   return name.slice(0, 2).toUpperCase() || "K7";
 }

@@ -21,10 +21,10 @@ async fn main() -> anyhow::Result<()> {
     // Pick a real object of each kind rather than hard-coding names.
     let pod = first_named::<Pod>(&client).await;
     let dep = first_named::<Deployment>(&client).await;
-    let svc = Api::<Service>::namespaced(client.clone(), "argocd")
-        .get_opt("argocd-server")
+    let svc = Api::<Service>::namespaced(client.clone(), "gitops")
+        .get_opt("gitops-server")
         .await?
-        .map(|s| ("argocd".to_string(), s.name_any()));
+        .map(|s| ("gitops".to_string(), s.name_any()));
     let sts = first_named::<StatefulSet>(&client).await;
     let node = Api::<Node>::all(client.clone())
         .list(&ListParams::default().limit(1))

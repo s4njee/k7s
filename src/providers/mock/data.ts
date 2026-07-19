@@ -28,19 +28,19 @@ export interface MockPod {
 
 /** The 13 pods from the prototype, verbatim (order preserved). */
 export const MOCK_PODS: MockPod[] = [
-  { name: "valkyrie-api-7d9f8b64d-x2k4n", ns: "prod", ready: "3/3", restarts: 0, cpu: "212m", mem: "486Mi", age: "4d2h", status: "Running", node: "freya-node-02", containers: ["valkyrie-api", "istio-proxy", "log-shipper"] },
-  { name: "valkyrie-api-7d9f8b64d-p9w7z", ns: "prod", ready: "3/3", restarts: 0, cpu: "198m", mem: "471Mi", age: "4d2h", status: "Running", node: "freya-node-04", containers: ["valkyrie-api", "istio-proxy", "log-shipper"] },
-  { name: "bifrost-gateway-5c7dd4f6b-jl2mn", ns: "prod", ready: "2/2", restarts: 1, cpu: "341m", mem: "812Mi", age: "11d", status: "Running", node: "freya-node-01", containers: ["bifrost-gateway", "istio-proxy"] },
-  { name: "yggdrasil-db-0", ns: "prod", ready: "1/1", restarts: 0, cpu: "890m", mem: "3.2Gi", age: "31d", status: "Running", node: "freya-node-03", containers: ["postgres"] },
-  { name: "yggdrasil-db-1", ns: "prod", ready: "1/1", restarts: 0, cpu: "124m", mem: "2.9Gi", age: "31d", status: "Running", node: "freya-node-05", containers: ["postgres"] },
-  { name: "heimdall-auth-6b8c9d5f7-qq3rt", ns: "prod", ready: "1/2", restarts: 14, cpu: "45m", mem: "203Mi", age: "2h14m", status: "CrashLoopBackOff", node: "freya-node-02", containers: ["heimdall-auth", "istio-proxy"] },
-  { name: "mimir-cache-7f4b8c6d9-ab8cd", ns: "prod", ready: "1/1", restarts: 0, cpu: "67m", mem: "1.1Gi", age: "11d", status: "Running", node: "freya-node-04", containers: ["redis"] },
+  { name: "valkyrie-api-7d9f8b64d-x2k4n", ns: "prod", ready: "3/3", restarts: 0, cpu: "212m", mem: "486Mi", age: "4d2h", status: "Running", node: "orion-node-02", containers: ["valkyrie-api", "istio-proxy", "log-shipper"] },
+  { name: "valkyrie-api-7d9f8b64d-p9w7z", ns: "prod", ready: "3/3", restarts: 0, cpu: "198m", mem: "471Mi", age: "4d2h", status: "Running", node: "orion-node-04", containers: ["valkyrie-api", "istio-proxy", "log-shipper"] },
+  { name: "bifrost-gateway-5c7dd4f6b-jl2mn", ns: "prod", ready: "2/2", restarts: 1, cpu: "341m", mem: "812Mi", age: "11d", status: "Running", node: "orion-node-01", containers: ["bifrost-gateway", "istio-proxy"] },
+  { name: "yggdrasil-db-0", ns: "prod", ready: "1/1", restarts: 0, cpu: "890m", mem: "3.2Gi", age: "31d", status: "Running", node: "orion-node-03", containers: ["postgres"] },
+  { name: "yggdrasil-db-1", ns: "prod", ready: "1/1", restarts: 0, cpu: "124m", mem: "2.9Gi", age: "31d", status: "Running", node: "orion-node-05", containers: ["postgres"] },
+  { name: "heimdall-auth-6b8c9d5f7-qq3rt", ns: "prod", ready: "1/2", restarts: 14, cpu: "45m", mem: "203Mi", age: "2h14m", status: "CrashLoopBackOff", node: "orion-node-02", containers: ["heimdall-auth", "istio-proxy"] },
+  { name: "mimir-cache-7f4b8c6d9-ab8cd", ns: "prod", ready: "1/1", restarts: 0, cpu: "67m", mem: "1.1Gi", age: "11d", status: "Running", node: "orion-node-04", containers: ["redis"] },
   { name: "valkyrie-api-canary-89f7c5d4b-nn2kp", ns: "staging", ready: "0/3", restarts: 0, cpu: "—", mem: "—", age: "38s", status: "Pending", node: "—", containers: ["valkyrie-api", "istio-proxy", "log-shipper"] },
-  { name: "loki-runner-6d9f7b8c5-tt4vw", ns: "staging", ready: "1/1", restarts: 2, cpu: "88m", mem: "340Mi", age: "3d", status: "Running", node: "freya-node-06", containers: ["loki-runner"] },
-  { name: "prometheus-server-0", ns: "monitoring", ready: "2/2", restarts: 0, cpu: "512m", mem: "2.4Gi", age: "31d", status: "Running", node: "freya-node-01", containers: ["prometheus", "config-reloader"] },
-  { name: "grafana-5f8d7c6b9-mm1xz", ns: "monitoring", ready: "1/1", restarts: 0, cpu: "34m", mem: "187Mi", age: "31d", status: "Running", node: "freya-node-06", containers: ["grafana"] },
-  { name: "coredns-76f75df574-8rk2j", ns: "kube-system", ready: "1/1", restarts: 0, cpu: "12m", mem: "31Mi", age: "31d", status: "Running", node: "freya-node-01", containers: ["coredns"] },
-  { name: "kube-proxy-x9d4m", ns: "kube-system", ready: "1/1", restarts: 0, cpu: "8m", mem: "24Mi", age: "31d", status: "Running", node: "freya-node-02", containers: ["kube-proxy"] },
+  { name: "loki-runner-6d9f7b8c5-tt4vw", ns: "staging", ready: "1/1", restarts: 2, cpu: "88m", mem: "340Mi", age: "3d", status: "Running", node: "orion-node-06", containers: ["loki-runner"] },
+  { name: "prometheus-server-0", ns: "monitoring", ready: "2/2", restarts: 0, cpu: "512m", mem: "2.4Gi", age: "31d", status: "Running", node: "orion-node-01", containers: ["prometheus", "config-reloader"] },
+  { name: "grafana-5f8d7c6b9-mm1xz", ns: "monitoring", ready: "1/1", restarts: 0, cpu: "34m", mem: "187Mi", age: "31d", status: "Running", node: "orion-node-06", containers: ["grafana"] },
+  { name: "coredns-76f75df574-8rk2j", ns: "kube-system", ready: "1/1", restarts: 0, cpu: "12m", mem: "31Mi", age: "31d", status: "Running", node: "orion-node-01", containers: ["coredns"] },
+  { name: "kube-proxy-x9d4m", ns: "kube-system", ready: "1/1", restarts: 0, cpu: "8m", mem: "24Mi", age: "31d", status: "Running", node: "orion-node-02", containers: ["kube-proxy"] },
 ];
 
 /** Namespaces offered in the namespace dropdown (prototype order). */
@@ -48,7 +48,7 @@ export const MOCK_NAMESPACES = ["all", "prod", "staging", "monitoring", "kube-sy
 
 /** Cluster switcher entries (prototype's `clusterDefs`). */
 export const MOCK_CLUSTERS = [
-  { name: "freya", env: "prod", active: true },
+  { name: "orion", env: "prod", active: true },
   { name: "odin-staging", env: "staging", active: false },
   { name: "loki-dev", env: "dev", active: false },
 ];
@@ -103,8 +103,8 @@ export const MOCK_RESOURCES: Partial<Record<ResourceKind, RawRow[]>> = {
     R("grafana", "monitoring", ["ClusterIP", "10.96.31.7", "3000/TCP", "31d"]),
   ],
   ingresses: [
-    R("api-public", "prod", ["api.freya.io", "nginx", "31d"]),
-    R("grafana", "monitoring", ["grafana.freya.internal", "nginx", "31d"]),
+    R("api-public", "prod", ["api.orion.io", "nginx", "31d"]),
+    R("grafana", "monitoring", ["grafana.orion.internal", "nginx", "31d"]),
   ],
   configmaps: [
     R("valkyrie-api-config", "prod", ["9", "4d2h"]),
@@ -113,16 +113,16 @@ export const MOCK_RESOURCES: Partial<Record<ResourceKind, RawRow[]>> = {
   ],
   secrets: [
     R("yggdrasil-db-creds", "prod", ["Opaque", "3", "31d"]),
-    R("tls-api-freya-io", "prod", ["kubernetes.io/tls", "2", "12d"]),
+    R("tls-api-orion-io", "prod", ["kubernetes.io/tls", "2", "12d"]),
     R("registry-pull", "prod", ["dockerconfigjson", "1", "31d"]),
   ],
   nodes: [
-    R("freya-node-01", "", ["Ready", "control-plane", "38%", "61%", "v1.31.2"], { ok: true }),
-    R("freya-node-02", "", ["Ready", "worker", "52%", "74%", "v1.31.2"], { ok: true }),
-    R("freya-node-03", "", ["Ready", "worker", "71%", "82%", "v1.31.2"], { ok: true }),
-    R("freya-node-04", "", ["Ready", "worker", "44%", "58%", "v1.31.2"], { ok: true }),
-    R("freya-node-05", "", ["Ready", "worker", "29%", "66%", "v1.31.2"], { ok: true }),
-    R("freya-node-06", "", ["Ready", "worker", "12%", "39%", "v1.31.2"], { ok: true }),
+    R("orion-node-01", "", ["Ready", "control-plane", "38%", "61%", "v1.31.2"], { ok: true }),
+    R("orion-node-02", "", ["Ready", "worker", "52%", "74%", "v1.31.2"], { ok: true }),
+    R("orion-node-03", "", ["Ready", "worker", "71%", "82%", "v1.31.2"], { ok: true }),
+    R("orion-node-04", "", ["Ready", "worker", "44%", "58%", "v1.31.2"], { ok: true }),
+    R("orion-node-05", "", ["Ready", "worker", "29%", "66%", "v1.31.2"], { ok: true }),
+    R("orion-node-06", "", ["Ready", "worker", "12%", "39%", "v1.31.2"], { ok: true }),
   ],
   namespaces: [
     R("prod", "", ["Active", "7", "31d"], { ok: true }),
@@ -205,8 +205,8 @@ const MOCK_EVENTS: {
   { type: "Warning", reason: "FailedScheduling", object: "Pod/valkyrie-api-canary-5b8-qq7z", ns: "staging", age: "38s", count: 9, message: "0/6 nodes are available: 6 Insufficient memory. preemption: 0/6 nodes are available." },
   { type: "Warning", reason: "Unhealthy", object: "Pod/heimdall-auth-7d9f4-x2k1", ns: "prod", age: "1m", count: 23, message: "Readiness probe failed: HTTP probe failed with statuscode: 503" },
   { type: "Warning", reason: "FailedMount", object: "Pod/report-gen-28661-lx4d", ns: "prod", age: "6h", count: 2, message: "MountVolume.SetUp failed for volume \"reports\": timed out waiting for the condition" },
-  { type: "Normal", reason: "Scheduled", object: "Pod/valkyrie-api-6c8d9-mn4p", ns: "prod", age: "4m", count: 1, message: "Successfully assigned prod/valkyrie-api-6c8d9-mn4p to freya-node-02" },
-  { type: "Normal", reason: "Pulled", object: "Pod/valkyrie-api-6c8d9-mn4p", ns: "prod", age: "4m", count: 1, message: "Container image \"registry.freya.io/valkyrie-api:2.14.0\" already present on machine" },
+  { type: "Normal", reason: "Scheduled", object: "Pod/valkyrie-api-6c8d9-mn4p", ns: "prod", age: "4m", count: 1, message: "Successfully assigned prod/valkyrie-api-6c8d9-mn4p to orion-node-02" },
+  { type: "Normal", reason: "Pulled", object: "Pod/valkyrie-api-6c8d9-mn4p", ns: "prod", age: "4m", count: 1, message: "Container image \"registry.orion.io/valkyrie-api:2.14.0\" already present on machine" },
   { type: "Normal", reason: "Created", object: "Pod/valkyrie-api-6c8d9-mn4p", ns: "prod", age: "4m", count: 1, message: "Created container api" },
   { type: "Normal", reason: "Started", object: "Pod/valkyrie-api-6c8d9-mn4p", ns: "prod", age: "4m", count: 1, message: "Started container api" },
   { type: "Normal", reason: "SuccessfulCreate", object: "Job/report-gen-28661", ns: "prod", age: "6h", count: 1, message: "Created pod: report-gen-28661-lx4d" },
@@ -283,11 +283,11 @@ export const MOCK_CUSTOM_KINDS: CustomKind[] = [
 /** Demo objects per custom kind id: [name, namespace ("" = cluster-scoped), age]. */
 const MOCK_CUSTOM_ROWS: Record<string, [string, string, string][]> = {
   "argoproj.io/applications": [
-    ["valkyrie", "argocd", "31d"],
-    ["bifrost", "argocd", "31d"],
-    ["observability", "argocd", "18d"],
+    ["valkyrie", "gitops", "31d"],
+    ["bifrost", "gitops", "31d"],
+    ["observability", "gitops", "18d"],
   ],
-  "argoproj.io/appprojects": [["default", "argocd", "31d"]],
+  "argoproj.io/appprojects": [["default", "gitops", "31d"]],
   "traefik.io/ingressroutes": [
     ["api-public", "prod", "12d"],
     ["grafana", "monitoring", "31d"],

@@ -386,7 +386,7 @@ pub async fn gather(
 // ---------------------------------------------------------------------------
 
 /// An Ingress backend port, which is *either* a number or a named port on the
-/// Service — freya's only Ingress uses a name, which is the case a
+/// Service — orion's only Ingress uses a name, which is the case a
 /// number-only reading would silently drop.
 fn backend_port(p: Option<&k8s_openapi::api::networking::v1::ServiceBackendPort>) -> String {
     match p {
@@ -1774,7 +1774,7 @@ mod tests {
         assert!(vrows.iter().any(|r| r[0].text == "replicas" && r[1].text == "3"));
     }
 
-    /// An Ingress backend port is a number *or* a name; freya's only Ingress uses
+    /// An Ingress backend port is a number *or* a name; orion's only Ingress uses
     /// a name, so a number-only reading would silently show nothing.
     #[test]
     fn backend_port_takes_a_number_or_a_name() {

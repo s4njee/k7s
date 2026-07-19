@@ -9,7 +9,7 @@
 //! Everything here degrades to nothing rather than failing: no Prometheus, an
 //! unreachable one, or a cluster whose scrape targets have drifted all return an
 //! empty history and leave B27's behaviour exactly as it was. That is not
-//! hypothetical — freya's Prometheus held zero `node_*` series until its scrape
+//! hypothetical — orion's Prometheus held zero `node_*` series until its scrape
 //! config was fixed, because the targets named a node IP that had changed.
 //!
 //! Reached through the API server's service proxy, the same transport the
@@ -284,18 +284,18 @@ mod tests {
     #[test]
     fn scores_a_conventional_prometheus() {
         let s = svc(json!({
-            "metadata": { "name": "prometheus", "namespace": "panoptes" },
+            "metadata": { "name": "prometheus", "namespace": "monitoring" },
             "spec": { "ports": [{ "port": 9090 }, { "port": 9002 }] },
         }));
         let (_, p) = score(&s).expect("recognised");
-        assert_eq!(p, PromService { namespace: "panoptes".into(), name: "prometheus".into(), port: 9090 });
+        assert_eq!(p, PromService { namespace: "monitoring".into(), name: "prometheus".into(), port: 9090 });
     }
 
     /// A Service is not Prometheus just because it exists.
     #[test]
     fn ignores_unrelated_services() {
         let s = svc(json!({
-            "metadata": { "name": "grafana", "namespace": "panoptes" },
+            "metadata": { "name": "grafana", "namespace": "monitoring" },
             "spec": { "ports": [{ "port": 3000 }] },
         }));
         assert!(score(&s).is_none());
@@ -334,10 +334,10 @@ mod tests {
     /// `name:port` form that selects the service port.
     #[test]
     fn builds_the_service_proxy_path() {
-        let p = PromService { namespace: "panoptes".into(), name: "prometheus".into(), port: 9090 };
+        let p = PromService { namespace: "monitoring".into(), name: "prometheus".into(), port: 9090 };
         assert_eq!(
             p.path("query_range", "query=up&start=1&end=2&step=30"),
-            "/api/v1/namespaces/panoptes/services/prometheus:9090/proxy/api/v1/query_range?query=up&start=1&end=2&step=30"
+            "/api/v1/namespaces/monitoring/services/prometheus:9090/proxy/api/v1/query_range?query=up&start=1&end=2&step=30"
         );
     }
 
@@ -345,7 +345,7 @@ mod tests {
     /// string intact.
     #[test]
     fn encodes_promql_punctuation() {
-        assert_eq!(urlencode("node_load1{node=\"freya\"}"), "node_load1%7Bnode%3D%22freya%22%7D");
+        assert_eq!(urlencode("node_load1{node=\"orion\"}"), "node_load1%7Bnode%3D%22orion%22%7D");
         assert_eq!(urlencode("rate(x[2m]) * 100"), "rate%28x%5B2m%5D%29%20%2A%20100");
     }
 
@@ -375,11 +375,11 @@ mod tests {
     }
 
     /// The node label is what makes this work after B38's scrape fix — the
-    /// queries key on node name, which survives the IP churn that broke freya.
+    /// queries key on node name, which survives the IP churn that broke orion.
     #[test]
     fn queries_key_on_node_name() {
-        let qs = node_queries("freya");
-        assert!(qs.iter().all(|(_, q)| q.contains("node=\"freya\"")));
+        let qs = node_queries("orion");
+        assert!(qs.iter().all(|(_, q)| q.contains("node=\"orion\"")));
         assert!(qs.iter().any(|(k, _)| *k == "cpu"));
         // Virtual interfaces are excluded, or the network totals double-count.
         let rx = &qs.iter().find(|(k, _)| *k == "rx").unwrap().1;

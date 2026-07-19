@@ -4,11 +4,11 @@
 //! Why scrape node-exporter directly rather than ask Prometheus: Prometheus is
 //! the better source when it works — it has history and computes rates properly —
 //! but it only has node metrics if it's actually scraping the exporters, and a
-//! cluster whose scrape targets have drifted (freya's point at a node IP that no
+//! cluster whose scrape targets have drifted (orion's point at a node IP that no
 //! longer exists) has none at all. Reading the exporters ourselves works wherever
 //! the pods run, at the cost of only having data from when you started looking.
 //!
-//! Most of what an exporter returns is not wanted: freya's serves ~411KB, of
+//! Most of what an exporter returns is not wanted: orion's serves ~411KB, of
 //! which we keep six families. Parsing is therefore a single filtered pass rather
 //! than a general-purpose Prometheus text parser.
 //!
@@ -71,7 +71,7 @@ pub struct RawSample {
 
 /// Interface name prefixes that aren't a real NIC.
 ///
-/// freya reports 45 network devices, nearly all of them one veth per pod. Summing
+/// orion reports 45 network devices, nearly all of them one veth per pod. Summing
 /// those would double-count every packet — traffic to a pod crosses both its veth
 /// and the physical NIC — and the total would jump around as pods come and go.
 const VIRTUAL_IFACE_PREFIXES: &[&str] = &[
@@ -92,7 +92,7 @@ fn is_physical_iface(dev: &str) -> bool {
 
 /// Mount points that are kernel interfaces or churn, not storage.
 ///
-/// The fstype blocklist doesn't catch these: freya mounts nfsd under /proc and
+/// The fstype blocklist doesn't catch these: orion mounts nfsd under /proc and
 /// efivars under /sys, both of which report a real fstype and zero bytes, and
 /// kubelet remounts the same devices once per pod.
 const NON_STORAGE_MOUNT_PREFIXES: &[&str] =
@@ -347,7 +347,7 @@ node_filesystem_avail_bytes{{device="tmpfs",fstype="tmpfs",mountpoint="/dev/shm"
         assert_eq!(s.filesystems["/"], (1.0e12, 4.0e11));
     }
 
-    /// Kernel interfaces mounted with a real fstype still aren't storage. freya
+    /// Kernel interfaces mounted with a real fstype still aren't storage. orion
     /// has both of these, and they'd otherwise appear as empty bars.
     #[test]
     fn kernel_mounts_are_not_storage() {

@@ -46,14 +46,14 @@ describe("hasPrevious", () => {
 
 describe("exportFilename", () => {
   it("names the pod and container", () => {
-    expect(exportFilename("wiki-6b6d775f4-djpwx", "wiki", false)).toBe(
-      "wiki-6b6d775f4-djpwx.wiki.log",
+    expect(exportFilename("notes-6b6d775f4-djpwx", "notes", false)).toBe(
+      "notes-6b6d775f4-djpwx.notes.log",
     );
   });
 
   it("marks a previous export, so the two don't overwrite each other", () => {
-    expect(exportFilename("wiki-6b6d775f4-djpwx", "wiki", true)).toBe(
-      "wiki-6b6d775f4-djpwx.wiki.previous.log",
+    expect(exportFilename("notes-6b6d775f4-djpwx", "notes", true)).toBe(
+      "notes-6b6d775f4-djpwx.notes.previous.log",
     );
   });
 

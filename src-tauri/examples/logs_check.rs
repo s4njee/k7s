@@ -3,7 +3,7 @@
 //!
 //!   KUBECONFIG=/path/to/kubeconfig cargo run --example logs_check
 //!
-//! Reads freya's crash-looping wiki pod every way the UI can, and checks the two
+//! Reads orion's crash-looping notes pod every way the UI can, and checks the two
 //! claims that matter: that a `previous` read *terminates* (rather than hanging
 //! on a dead container), and that a `since` window actually bounds the output.
 
@@ -23,7 +23,7 @@ async fn read(api: &Api<Pod>, pod: &str, container: &str, opts: LogStreamOptions
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let client = Client::try_default().await?;
-    let api: Api<Pod> = Api::namespaced(client.clone(), "wiki");
+    let api: Api<Pod> = Api::namespaced(client.clone(), "notes");
 
     // Find the crash-looper by its restart count rather than a hardcoded name —
     // the pod is recreated when the Deployment rolls.
@@ -38,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
                 .map(|cs| cs.iter().map(|c| c.restart_count).sum::<i32>())
                 .unwrap_or(0)
         })
-        .expect("the wiki namespace has pods");
+        .expect("the notes namespace has pods");
 
     let name = target.name_any();
     let cs = target.status.as_ref().and_then(|s| s.container_statuses.as_ref());
@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
         .map(|c| c.state.as_ref().is_some_and(|s| s.running.is_some()))
         .unwrap_or(false);
 
-    println!("pod        : wiki/{name}");
+    println!("pod        : notes/{name}");
     println!("container  : {container}");
     println!("restarts   : {restarts}");
     println!("running now: {running}");
@@ -103,15 +103,15 @@ async fn main() -> anyhow::Result<()> {
 
     // ---- export (B29): the whole log, not the ring buffer ----
     //
-    // Against a *chatty* pod on purpose. The wiki crash-looper only prints ~38
+    // Against a *chatty* pod on purpose. The notes crash-looper only prints ~38
     // lines per generation, so exporting it can't demonstrate the point of the
     // feature — which is recovering the part that already scrolled out of the
-    // 200-line view. argocd's controller has tens of thousands.
+    // 200-line view. gitops's controller has tens of thousands.
     //
     // This exercises the same read + write `export_logs` performs; the command
     // itself needs a Tauri State that a harness can't construct.
-    let chatty_ns = "argocd";
-    let chatty_pod = "argocd-application-controller-0";
+    let chatty_ns = "gitops";
+    let chatty_pod = "gitops-application-controller-0";
     let chatty: Api<Pod> = Api::namespaced(client.clone(), chatty_ns);
     let chatty_container = chatty
         .get(chatty_pod)

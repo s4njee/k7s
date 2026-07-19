@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
     // The backlog's own acceptance target.
     assert!(
         table.iter().any(|r| r.name == "traefik"),
-        "freya runs traefik via helm; it should be listed"
+        "orion runs traefik via helm; it should be listed"
     );
 
     // Manifests: readable, and with nothing secret in them.

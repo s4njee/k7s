@@ -17,10 +17,10 @@ watch-status).
 
 ### What the test cluster can and can't verify
 
-Acceptance criteria below are written against freya's *actual* state
+Acceptance criteria below are written against orion's *actual* state
 (2026-07-17), which constrains what "verified live" can honestly mean:
 
-- **Only `freya` is Ready.** `leo` and `mars` are NotReady, so anything
+- **Only `orion` is Ready.** `lyra` and `draco` are NotReady, so anything
   per-node is verifiable on exactly one node.
 - **metrics-server is broken (503)** — `metrics.k8s.io` items degrade to demo
   verification, honestly noted.
@@ -28,10 +28,10 @@ Acceptance criteria below are written against freya's *actual* state
   node IP). B38 stays gated on that cluster-side fix.
 - Deployments are mostly single-replica; multi-pod acceptance uses the app's
   own Scale action to make a second pod, then scales back.
-- Standing defects that make *great* test fixtures: `wiki/wiki-6b6d775f4-djpwx`
-  in CrashLoopBackOff (3258 restarts), `wiki/wiki-6b6d775f4-h97vb` stuck
-  Terminating for 16 days, `wiki-postgres` Pending for 13 days, recurring
-  FailedMount warnings in `cb8`.
+- Standing defects that make *great* test fixtures: `notes/notes-6b6d775f4-djpwx`
+  in CrashLoopBackOff (3258 restarts), `notes/notes-6b6d775f4-h97vb` stuck
+  Terminating for 16 days, `notes-postgres` Pending for 13 days, recurring
+  FailedMount warnings in `media`.
 
 ---
 
@@ -58,7 +58,7 @@ visible in the virtualized table (B21's `scrollToShow`).
 - [x] `wik` ranks the crash-looper first; `releases` reaches the Helm view;
       `applications` reaches the Argo CRD kind (by its id — the plural doesn't
       match the Kind label "Application"). Pinned by vitest against
-      freya-shaped data.
+      orion-shaped data.
 - [x] Objects of unwatched CRD kinds are absent (their rows aren't loaded); the
       kind itself still matches, and jumping to it starts its watcher.
 - [x] Esc closes only the palette, leaving the filter and detail panel behind it
@@ -84,13 +84,13 @@ cycling landed on tabs that weren't rendered. Both now read one `tabsFor()`.*
 ### B29 — Crash-loop debugging: previous logs, since, save-to-file
 *Why: the single most common debugging motion the app can't do today. The
 current container of a crash-looper has seconds of logs; the answer is always
-in the **previous** container's output. freya has a live specimen with 3258
+in the **previous** container's output. orion has a live specimen with 3258
 restarts to prove it on.*
 
 > **Correction (found while building this).** The "always" above is wrong. While
 > a container sits in CrashLoopBackOff it *isn't running*, so the API already
 > serves the last terminated container for a plain read — `current` and
-> `previous` return identical bytes, which is exactly what freya's wiki pod shows.
+> `previous` return identical bytes, which is exactly what orion's notes pod shows.
 > They diverge only once the container has restarted and is running again: then
 > the live stream shows the new attempt's first seconds and `previous` is the only
 > way to see why the last one died. Still worth having — that's the moment you're
@@ -107,13 +107,13 @@ the file isn't capped at the on-screen 200 lines.
 
 **Accept:** *(shipped — needs a GUI pass)*
 - [x] `previous` reads the prior container generation and **terminates** rather
-      than hanging on a dead container — verified against the wiki crash-looper
+      than hanging on a dead container — verified against the notes crash-looper
       with `cargo run --example logs_check`: returns in 6ms. (See the correction
       above for what this fixture can and can't demonstrate.)
 - [x] Toggling previous/since empties the buffer rather than mixing generations;
       "previous" isn't offered on a 0-restart pod (`hasPrevious`), and the follow
       control is hidden for a previous read — there is nothing to follow.
-- [x] The export reaches past the ring buffer: `argocd-application-controller-0`
+- [x] The export reaches past the ring buffer: `gitops-application-controller-0`
       saves **13,553 lines / 4.8MB** where the view holds 200. A since window
       still bounds it (5m → 22 lines).
 - [ ] **Not verified:** the toolbar itself — the controls, the save dialog, and
@@ -133,7 +133,7 @@ be written straight back out.*
 *Why: custom kinds currently show NAME / NAMESPACE / AGE, which wastes the
 whole point of B15 on CRDs like Argo's. The CRD itself declares its columns —
 `additionalPrinterColumns` with JSONPath — and we already fetch the full CRD at
-discovery and throw that part away. Verified on freya: the Application CRD
+discovery and throw that part away. Verified on orion: the Application CRD
 declares Sync Status (`.status.sync.status`) and Health Status
 (`.status.health.status`), and the live apps read Synced/Progressing and
 Synced/Healthy.*
@@ -142,7 +142,7 @@ Synced/Healthy.*
 kind's printer columns (name, type, jsonPath; skip `priority > 0` columns —
 kubectl hides those without `-o wide` too). Implement a deliberately small
 JSONPath subset in a new `jsonpath.rs`: dotted field access plus `[n]` array
-index over `serde_json::Value` — that covers every column freya's 44 CRDs
+index over `serde_json::Value` — that covers every column orion's 44 CRDs
 declare; anything it can't evaluate renders "—" rather than guessing.
 `map_dynamic` appends the evaluated columns between NAMESPACE and AGE; columns
 of type `date` render through the existing age cell; tone stays `secondary`
@@ -151,13 +151,13 @@ no colour opinions). Frontend: `kindMeta` for a custom kind builds its column
 list from the discovered metadata instead of the fixed generic set.
 
 **Accept:**
-- [ ] Argo Applications on freya show SYNC STATUS and HEALTH STATUS live —
-      `cb8` reads Synced/Progressing, `csearch-v2` Synced/Healthy — matching
-      `kubectl get applications -n argocd` exactly.
+- [ ] Argo Applications on orion show SYNC STATUS and HEALTH STATUS live —
+      `media` reads Synced/Progressing, `search` Synced/Healthy — matching
+      `kubectl get applications -n gitops` exactly.
 - [ ] Kinds with no printer columns keep the generic set; a jsonPath the subset
       can't evaluate shows "—" and logs once (no crash, no wrong value).
 - [ ] The JSONPath subset is unit-tested against the exact expressions found on
-      freya's CRDs, plus array-index and missing-field cases.
+      orion's CRDs, plus array-index and missing-field cases.
 
 ### B31 — Workload logs (stern-style)
 *Why: "why is this Deployment misbehaving" means reading all its pods'
@@ -177,10 +177,10 @@ the line prefix shows a short pod suffix (`-x2k4n`) tinted with the same
 per-source palette the container prefix uses.
 
 **Accept:**
-- [ ] Scale a stateless freya Deployment to 2 via the app's own Scale action:
+- [ ] Scale a stateless orion Deployment to 2 via the app's own Scale action:
       both pods' lines interleave with distinct prefixes; scale back to 1 and
       the second prefix stops appearing within a tick. (Uses the app to build
-      its own multi-pod fixture — freya runs almost everything single-replica.)
+      its own multi-pod fixture — orion runs almost everything single-replica.)
 - [ ] Search/timestamps/follow/save (B29) work unchanged on workload streams.
 - [ ] Closing the tab or navigating away tears down every per-pod pump
       (watch-status returns to baseline — the same proof B15 uses).
@@ -189,7 +189,7 @@ per-source palette the container prefix uses.
 
 ### B32 — Problems view
 *Why: the data to answer "is anything wrong?" is already streaming into the
-store — it's just scattered across six kinds. freya demonstrates today: two
+store — it's just scattered across six kinds. orion demonstrates today: two
 NotReady nodes, a CrashLoopBackOff, a pod stuck Terminating for 16 days, a
 13-day Pending, recurring FailedMount warnings.*
 
@@ -204,8 +204,8 @@ B28/B33 jump). The sidebar item shows a count badge toned by the worst severity
 present; zero problems renders a deliberately quiet "nothing wrong" state.
 
 **Accept:**
-- [ ] freya today lists: leo + mars NotReady, the wiki crash-looper, the 16-day
-      Terminating pod, the 13-day Pending postgres, cb8's FailedMount warnings
+- [ ] orion today lists: lyra + draco NotReady, the notes crash-looper, the 16-day
+      Terminating pod, the 13-day Pending postgres, media's FailedMount warnings
       — each with a legible reason, worst first.
 - [ ] Clicking the crash-looper row lands on that pod with the detail panel
       open; clicking a node problem lands on the node.
@@ -228,7 +228,7 @@ tables. Also closes B14's deliberate v1 gap (events rows aren't clickable).*
 > kind+group); unresolvable kinds stay inert. All navigation goes through a
 > shared `jumpPatch` (reused from B28's `jumpTo`) via new store actions
 > `navigateTo`/`viewPods`. Live-verified read-only (`examples/related_check`):
-> the wiki crash-looper's owner resolves to Deployment/wiki; a real Deployment's
+> the notes crash-looper's owner resolves to Deployment/notes; a real Deployment's
 > selector matches its pods; every sampled event carries an involvedObject.
 >
 > Types widened: `Row` gained `labels`/`selector`/`involved`; properties `Field`
@@ -247,8 +247,8 @@ Kind → nav id (including discovered CRDs by group/kind; unresolvable kinds sta
 inert rather than dead-clicking).
 
 **Accept:**
-- [x] From the wiki crash-looper's properties, the owner link lands on the
-      `wiki` Deployment (resolved through its ReplicaSet) — verified live.
+- [x] From the notes crash-looper's properties, the owner link lands on the
+      `notes` Deployment (resolved through its ReplicaSet) — verified live.
 - [x] "View pods" on a workload shows its pods, the selector visible in the
       filter box as removable text (verified the selector matches live pods).
 - [x] Event rows are clickable when the involvedObject resolves to a listed kind;
@@ -268,7 +268,7 @@ properties panel already shows the ReplicaSet revision history this needs.*
 > patch (`restart_rollout`). Pure decisions in `kube/restart.rs`
 > (`has_controller`, `restart_patch`, `is_rollout_kind`) with 5 unit tests
 > pinning the patch shape and owner check. Live-verified read-only via
-> `examples/restart_check`: on freya all 71 pods are controller-owned (no bare
+> `examples/restart_check`: on orion all 71 pods are controller-owned (no bare
 > specimen to show the refusal — the unit test carries that case), and the
 > rollout patch is accepted as a **server-side dry run** that echoes the
 > annotation onto the template while persisting nothing. Also fixed in passing:
@@ -304,7 +304,7 @@ conditions do that job.
 ### B35 — Helm release detail: history & values  ✅ shipped
 *Why: B26 deliberately shipped list + manifest only. The other two questions
 you ask of a release — "what changed between revisions" and "what values is it
-running with" — are sitting in the same Secrets we already decode; freya's
+running with" — are sitting in the same Secrets we already decode; orion's
 releases are all rev 1 today, so history is thin there, but the decode path is
 identical.*
 
@@ -335,7 +335,7 @@ render `<redacted>` — a values blob is exactly where credentials end up.
 Still zero write operations.
 
 **Accept:**
-- [x] freya's `traefik` release shows Overview + a 1-row history + its 13 values;
+- [x] orion's `traefik` release shows Overview + a 1-row history + its 13 values;
       `traefik-crd` shows "chart defaults" — all decoded from the cluster, no helm
       CLI (`examples/helm_props_check`).
 - [x] Multi-revision history pinned by `helm_history_orders_and_tones` on
@@ -369,12 +369,12 @@ grep the emitted Tauri event traffic to prove the value isn't in it; YAML/table
 remain redacted.
 
 ### B38 — Prometheus-backed metrics history  ✅ node charts shipped
-> **Unblocked and built.** The gate was cluster-side and is now fixed: freya's
-> Prometheus scraped a decommissioned node IP (`.153` after freya moved to
+> **Unblocked and built.** The gate was cluster-side and is now fixed: orion's
+> Prometheus scraped a decommissioned node IP (`.153` after orion moved to
 > `.156`), so it held zero `node_*` series. Both jobs were converted from
 > hardcoded `static_configs` to `kubernetes_sd_configs: [{role: node}]` — node
 > names survive the DHCP churn that caused it — with cAdvisor going through the
-> API-server proxy. freya's targets are up; leo/mars remain down because those
+> API-server proxy. orion's targets are up; lyra/draco remain down because those
 > machines are genuinely offline.
 >
 > **Shipped:** `kube/promql.rs` discovers a Prometheus by convention (exact name
@@ -393,7 +393,7 @@ remain redacted.
 > Degrades to exactly B27 when there's no Prometheus: empty history, live scraper
 > unchanged, no error surfaced — no-history is a normal state.
 >
-> **Live:** discovers `panoptes/prometheus:9090`, backfills freya with real
+> **Live:** discovers `monitoring/prometheus:9090`, backfills orion with real
 > cpu/mem/net/load. Only ~15 points so far — Prometheus doesn't back-fill the
 > past, so history accumulates from the scrape fix onward, and `--storage.tsdb.
 > retention.time=24h` caps it at a day.
@@ -405,10 +405,10 @@ remain redacted.
 ### B38 (original entry) — Prometheus-backed metrics history
 **Do:** When a Prometheus service is reachable (detect by conventional
 names/labels, query through the API-server service proxy — the transport is
-already proven against freya), B27's node charts backfill with
+already proven against orion), B27's node charts backfill with
 `query_range` history and pods gain CPU/MEM sparklines; the live scraper stays
 as the fallback and freshest point. **Accept:** gated on the cluster-side
-scrape-target fix (freya's Prometheus currently holds zero `node_*` series —
+scrape-target fix (orion's Prometheus currently holds zero `node_*` series —
 targets point at a decommissioned IP); until then, query plumbing verifies
 against `up`, and the fallback path is what B27 already proves. *Blocked on
 operator action; do not start before the scrape config is fixed.*
@@ -446,7 +446,7 @@ the one place a cluster quietly runs out of something.*
 > gone, data still there — needs a decision) the same red as `Failed`.
 >
 > Also registered in B33's Kind→nav map, so an event about a claim is clickable.
-> Live-verified via `examples/storage_check`: freya's 9 claims and 9 volumes
+> Live-verified via `examples/storage_check`: orion's 9 claims and 9 volumes
 > render, and every bound pair cross-references the other consistently.
 >
 > **Not done:** properties gatherers for either kind (consistent with jobs,
@@ -469,7 +469,7 @@ finished, and that the gap had two different shapes.*
 > **The missing-tables half.** `replicasets` (Workloads) and `storageclasses`
 > (Storage, cluster-scoped, default class marked in the NAME as kubectl does).
 > A 0-desired ReplicaSet reads **muted, not amber** — a superseded generation is
-> history, and freya has 45 of them against 28 live, so colouring them as
+> history, and orion has 45 of them against 28 live, so colouring them as
 > degraded would make every Deployment look broken. With ReplicaSets listed,
 > `resolve_owner`'s bare-RS fallback finally links instead of dead-ending.
 >
@@ -479,7 +479,7 @@ finished, and that the gap had two different shapes.*
 >
 > **A bug the live check caught in this very change.** `related_links_check`
 > resolves every emitted nav target against the API, and found one 404:
-> argocd-repo-server mounts `argocd-repo-server-tls` with `optional: true`, and
+> gitops-repo-server mounts `gitops-repo-server-tls` with `optional: true`, and
 > that Secret doesn't exist — so linking it produced exactly the dead link this
 > item set out to remove. Volume sources are now existence-checked via
 > `get_metadata` (deliberately: an existence check must not pull a Secret's
@@ -501,12 +501,12 @@ missed rather than in a new shape.*
 >
 > **ServiceAccounts** as a kind (Config group, namespaced). Its SECRETS column
 > keeps kubectl parity even though it reads 0 on every modern cluster (all 69 of
-> freya's): it earns its place by the exception, so a non-zero count — a
+> orion's): it earns its place by the exception, so a non-zero count — a
 > long-lived token attached by hand — is toned amber rather than blending in.
 > The pod's `service account` field links there now.
 >
 > **A second 404, in B41's own code.** The harness caught
-> `statefulsets/argocd-application-controller` → a Service that doesn't exist:
+> `statefulsets/gitops-application-controller` → a Service that doesn't exist:
 > Argo declares a `serviceName` for a headless Service it never creates. B41 had
 > *rationalised* this in a comment ("can link somewhere empty — still better
 > than making you search by hand"), which contradicts the rule the volume
@@ -535,7 +535,7 @@ backends — the thing an Ingress exists to describe.*
 > paths at one backend.
 >
 > Two details the obvious version gets wrong, both pinned by tests: a backend
-> **port is a number *or* a name** (freya's only Ingress uses `http`, so a
+> **port is a number *or* a name** (orion's only Ingress uses `http`, so a
 > number-only reading would show nothing), and a **host-less rule is a
 > catch-all**, rendered `*` as kubectl does.
 >
@@ -548,14 +548,14 @@ backends — the thing an Ingress exists to describe.*
 > re-derived per gatherer. A missing backend renders `name (not found)` in
 > amber, which is what an Ingress 503 actually looks like.
 >
-> Live: `lakitu/lakitu` renders `* · / · Prefix · lakitu · http`, address
-> 192.168.1.156, TLS empty with its note; 17/17 links across all four panels
+> Live: `web/web` renders `* · / · Prefix · web · http`, address
+> 10.0.0.11, TLS empty with its note; 17/17 links across all four panels
 > resolve.
 >
 > **Still unlisted** (referenced, no table): PriorityClass, ControllerRevision,
 > Endpoints. **Never gathered**: imagePullSecrets, `env.valueFrom`, a Helm
 > release's installed objects. **Absent entirely**: NetworkPolicies (7 on
-> freya), RBAC (16 roles / 83 clusterroles), Leases, APIServices.
+> orion), RBAC (16 roles / 83 clusterroles), Leases, APIServices.
 
 ---
 

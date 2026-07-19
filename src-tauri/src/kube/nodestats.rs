@@ -2,16 +2,16 @@
 //! scrape it on a tick, and emit plottable samples.
 //!
 //! Runs only while a node's Metrics tab is open. That's deliberate: each poll
-//! transfers a few hundred KB (freya's exporter serves ~411KB), so this is not
+//! transfers a few hundred KB (orion's exporter serves ~411KB), so this is not
 //! something to leave running for every node in the background.
 //!
 //! Reaching the exporter goes through the same port-forward machinery as B6. Two
 //! more obvious routes don't work on a real cluster:
 //!   - Prometheus already has this data *if* it's scraping the exporters — but a
-//!     cluster whose scrape targets have drifted has none at all (freya's point at
+//!     cluster whose scrape targets have drifted has none at all (orion's point at
 //!     a node IP that no longer exists), and that isn't something the app can fix.
 //!   - The API server's pod proxy (`/api/v1/.../pods/x:9100/proxy/metrics`) is the
-//!     tidiest route on paper, and times out on freya even for a Ready node.
+//!     tidiest route on paper, and times out on orion even for a Ready node.
 //!
 //! Port-forwarding goes via the kubelet instead, and works.
 
@@ -27,7 +27,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 
 /// The port node-exporter listens on. Its well-known default; the DaemonSet on
-/// freya declares it explicitly too.
+/// orion declares it explicitly too.
 const EXPORTER_PORT: u16 = 9100;
 
 /// Payload for [`events::NODE_STATS`].

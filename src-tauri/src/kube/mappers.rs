@@ -485,7 +485,7 @@ pub fn map_secret(sec: &Secret) -> Row {
 /// ServiceAccounts: NAME, NAMESPACE, SECRETS, AGE.
 ///
 /// SECRETS keeps kubectl's column even though Kubernetes stopped auto-creating
-/// token Secrets in 1.24, so it reads 0 on any modern cluster (all 69 of freya's
+/// token Secrets in 1.24, so it reads 0 on any modern cluster (all 69 of orion's
 /// do). It earns its place by the exception: a non-zero count means someone
 /// attached a long-lived token by hand, which is exactly the thing worth
 /// noticing — so it's toned rather than left as flat data.
@@ -977,12 +977,12 @@ mod tests {
     #[test]
     fn deployment_carries_selector() {
         let dep: Deployment = serde_json::from_value(json!({
-            "metadata": { "name": "wiki", "namespace": "wiki", "uid": "d2" },
-            "spec": { "replicas": 1, "selector": { "matchLabels": { "app": "wiki", "tier": "web" } } },
+            "metadata": { "name": "notes", "namespace": "notes", "uid": "d2" },
+            "spec": { "replicas": 1, "selector": { "matchLabels": { "app": "notes", "tier": "web" } } },
         }))
         .unwrap();
         let sel = map_deployment(&dep).selector.expect("selector present");
-        assert_eq!(sel.get("app").map(String::as_str), Some("wiki"));
+        assert_eq!(sel.get("app").map(String::as_str), Some("notes"));
         assert_eq!(sel.get("tier").map(String::as_str), Some("web"));
     }
 
@@ -990,14 +990,14 @@ mod tests {
     #[test]
     fn pod_carries_labels() {
         let pod: Pod = serde_json::from_value(json!({
-            "metadata": { "name": "wiki-x", "namespace": "wiki", "uid": "p2",
-                          "labels": { "app": "wiki" } },
+            "metadata": { "name": "notes-x", "namespace": "notes", "uid": "p2",
+                          "labels": { "app": "notes" } },
             "spec": { "containers": [{ "name": "app" }] },
             "status": { "phase": "Running" },
         }))
         .unwrap();
         let labels = map_pod(&pod).labels.expect("labels present");
-        assert_eq!(labels.get("app").map(String::as_str), Some("wiki"));
+        assert_eq!(labels.get("app").map(String::as_str), Some("notes"));
     }
 
     /// A ReplicaSet at its desired size, and a superseded generation. The point of
@@ -1084,7 +1084,7 @@ mod tests {
     #[test]
     fn bound_pvc_columns() {
         let pvc: PersistentVolumeClaim = serde_json::from_value(json!({
-            "metadata": { "name": "wiki-postgres-data", "namespace": "wiki", "uid": "c1" },
+            "metadata": { "name": "notes-postgres-data", "namespace": "notes", "uid": "c1" },
             "spec": { "volumeName": "pvc-5a948cc3", "storageClassName": "local-path",
                       "accessModes": ["ReadWriteOnce"],
                       "resources": { "requests": { "storage": "5Gi" } } },
@@ -1128,7 +1128,7 @@ mod tests {
             "metadata": { "name": "pvc-5a948cc3", "uid": "v1" },
             "spec": { "capacity": { "storage": "5Gi" }, "accessModes": ["ReadWriteOnce"],
                       "persistentVolumeReclaimPolicy": "Delete", "storageClassName": "local-path",
-                      "claimRef": { "namespace": "wiki", "name": "wiki-postgres-data" } },
+                      "claimRef": { "namespace": "notes", "name": "notes-postgres-data" } },
             "status": { "phase": "Bound" },
         }))
         .unwrap();
@@ -1139,7 +1139,7 @@ mod tests {
         assert_eq!(row.cells[3].text, "Delete");
         assert_eq!(row.cells[4].text, "Bound");
         assert_eq!(row.cells[4].tone, Tone::Good);
-        assert_eq!(row.cells[5].text, "wiki/wiki-postgres-data");
+        assert_eq!(row.cells[5].text, "notes/notes-postgres-data");
     }
 
     /// PV phases the *shared* status_tone would get wrong: an Available volume is

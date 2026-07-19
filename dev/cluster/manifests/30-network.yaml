@@ -59,7 +59,7 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    - host: api.freya.io
+    - host: api.orion.io
       http:
         paths:
           - path: /
