@@ -21,7 +21,7 @@ const row = (name: string, pod = false): Row => ({
   ...(pod
     ? {
         pod: {
-          node: "orion",
+          node: "freya",
           containers: ["app"],
           status: "Running",
           ready: "1/1",
@@ -99,34 +99,34 @@ describe("Escape cascade", () => {
     // close the panel behind it.
     useStore.setState({
       paletteOpen: true,
-      tableFilter: "notes",
-      selectedRow: row("notes-x"),
+      tableFilter: "wiki",
+      selectedRow: row("wiki-x"),
     });
 
     press("Escape");
 
     const s = useStore.getState();
     expect(s.paletteOpen).toBe(false);
-    expect(s.tableFilter).toBe("notes");
+    expect(s.tableFilter).toBe("wiki");
     expect(s.selectedRow).not.toBeNull();
   });
 
   it("then closes an open menu", () => {
-    useStore.setState({ openMenu: "ns", tableFilter: "notes" });
+    useStore.setState({ openMenu: "ns", tableFilter: "wiki" });
     press("Escape");
     expect(useStore.getState().openMenu).toBeNull();
-    expect(useStore.getState().tableFilter).toBe("notes");
+    expect(useStore.getState().tableFilter).toBe("wiki");
   });
 
   it("then clears the filter", () => {
-    useStore.setState({ tableFilter: "notes", selectedRow: row("notes-x") });
+    useStore.setState({ tableFilter: "wiki", selectedRow: row("wiki-x") });
     press("Escape");
     expect(useStore.getState().tableFilter).toBe("");
     expect(useStore.getState().selectedRow).not.toBeNull();
   });
 
   it("then closes the detail panel", () => {
-    useStore.setState({ selectedRow: row("notes-x") });
+    useStore.setState({ selectedRow: row("wiki-x") });
     press("Escape");
     expect(useStore.getState().selectedRow).toBeNull();
   });
@@ -143,7 +143,7 @@ describe("[ / ] tab cycling", () => {
   // (B18) and Metrics (B27) long after the cycle keys were written, and the old
   // hardcoded list would have cycled onto tabs that weren't rendered.
   it("cycles a node's real tabs, including Metrics", () => {
-    useStore.setState({ nav: "nodes", selectedRow: row("orion"), activeTab: "properties" });
+    useStore.setState({ nav: "nodes", selectedRow: row("freya"), activeTab: "properties" });
     press("]");
     expect(useStore.getState().activeTab).toBe("metrics");
   });

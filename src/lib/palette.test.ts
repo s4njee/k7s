@@ -1,5 +1,5 @@
 /**
- * Tests for the palette's result building (B28), written against orion-shaped
+ * Tests for the palette's result building (B28), written against freya-shaped
  * data. These pin the acceptance criteria: two keystrokes find the crash-looper,
  * "releases" reaches the Helm view, "applications" reaches the Argo CRD kind, and
  * an unwatched CRD contributes no phantom objects.
@@ -39,16 +39,16 @@ const CUSTOM_KINDS: CustomKind[] = [
 const ctx = (over: Partial<PaletteContext> = {}): PaletteContext => ({
   rows: {
     pods: [
-      row("notes-6b6d775f4-djpwx", "notes"),
-      row("svclb-media-notes-nextra-ab930ae9", "kube-system"),
-      row("gitops-server-765575f778-np7rb", "gitops"),
-      row("search-redis-6bb8d4fb9-kcp4z", "default"),
+      row("wiki-6b6d775f4-djpwx", "wiki"),
+      row("svclb-cb8-wiki-nextra-ab930ae9", "kube-system"),
+      row("argocd-server-765575f778-np7rb", "argocd"),
+      row("csearch-redis-6bb8d4fb9-kcp4z", "default"),
     ],
-    services: [row("gitops-server", "gitops")],
-    nodes: [row("orion"), row("lyra"), row("draco")],
+    services: [row("argocd-server", "argocd")],
+    nodes: [row("freya"), row("leo"), row("mars")],
     helm: [row("traefik", "kube-system")],
     // Events carry opaque ids; they must never crowd the list.
-    events: [row("notes-6b6d775f4-djpwx.17c3f8a2b1", "notes")],
+    events: [row("wiki-6b6d775f4-djpwx.17c3f8a2b1", "wiki")],
     // A CRD kind whose watcher has never run contributes no rows at all — which
     // is the point of the "no phantom objects" case below.
     "argoproj.io/applications": [],
@@ -61,7 +61,7 @@ const ctx = (over: Partial<PaletteContext> = {}): PaletteContext => ({
 
 describe("parseQuery", () => {
   it("splits a leading ns: scope off the text", () => {
-    expect(parseQuery("ns:prod notes")).toEqual({ namespace: "prod", text: "notes" });
+    expect(parseQuery("ns:prod wiki")).toEqual({ namespace: "prod", text: "wiki" });
   });
 
   it("accepts a scope with no text yet", () => {
@@ -73,11 +73,11 @@ describe("parseQuery", () => {
   });
 
   it("only honours the scope at the start — mid-query it's just text", () => {
-    expect(parseQuery("notes ns:prod")).toEqual({ text: "notes ns:prod" });
+    expect(parseQuery("wiki ns:prod")).toEqual({ text: "wiki ns:prod" });
   });
 
   it("passes an ordinary query through", () => {
-    expect(parseQuery("  notes  ")).toEqual({ text: "notes" });
+    expect(parseQuery("  wiki  ")).toEqual({ text: "wiki" });
   });
 });
 
@@ -89,10 +89,10 @@ describe("buildPalette", () => {
   });
 
   // The backlog's headline case: two keystrokes and Enter reach the crash-looper.
-  it("finds the crash-looping pod from 'not', ahead of the name that merely contains it", () => {
-    const out = buildPalette("not", ctx());
+  it("finds the crash-looping pod from 'wik', ahead of the name that merely contains it", () => {
+    const out = buildPalette("wik", ctx());
     const objects = out.filter((i) => i.type === "object");
-    expect(objects[0].label).toBe("notes-6b6d775f4-djpwx");
+    expect(objects[0].label).toBe("wiki-6b6d775f4-djpwx");
   });
 
   it("reaches the Helm view by name", () => {
@@ -128,19 +128,19 @@ describe("buildPalette", () => {
   });
 
   it("finds an object by namespace/name", () => {
-    const out = buildPalette("gitops/server", ctx());
-    expect(out.some((i) => i.type === "object" && i.label.startsWith("gitops-server"))).toBe(true);
+    const out = buildPalette("argocd/server", ctx());
+    expect(out.some((i) => i.type === "object" && i.label.startsWith("argocd-server"))).toBe(true);
   });
 
   it("scopes objects with ns:, without hiding the kinds", () => {
-    const out = buildPalette("ns:gitops server", ctx());
+    const out = buildPalette("ns:argocd server", ctx());
     const objects = out.filter((i) => i.type === "object");
     expect(objects.length).toBeGreaterThan(0);
-    expect(objects.every((i) => i.type === "object" && i.row.namespace === "gitops")).toBe(true);
+    expect(objects.every((i) => i.type === "object" && i.row.namespace === "argocd")).toBe(true);
   });
 
   it("labels an object with its kind and namespace, so same-named objects are distinct", () => {
-    const out = buildPalette("gitops-server", ctx());
+    const out = buildPalette("argocd-server", ctx());
     const objects = out.filter((i) => i.type === "object");
     // A Service and a Pod share the name; both are offered, told apart by hint.
     const hints = objects.map((i) => (i.type === "object" ? i.hint : ""));
@@ -149,12 +149,12 @@ describe("buildPalette", () => {
   });
 
   it("carries the row through, so selecting it needs no second lookup", () => {
-    const out = buildPalette("notes-6b6d775f4-djpwx", ctx());
+    const out = buildPalette("wiki-6b6d775f4-djpwx", ctx());
     const first = out[0];
     expect(first.type).toBe("object");
     if (first.type === "object") {
       expect(first.kind).toBe("pods");
-      expect(first.row.namespace).toBe("notes");
+      expect(first.row.namespace).toBe("wiki");
     }
   });
 
@@ -169,18 +169,18 @@ describe("buildPalette", () => {
     const without = buildPalette("cordon", ctx());
     expect(without.some((i) => i.type === "action" && i.id === "cordon")).toBe(false);
 
-    const with_ = buildPalette("cordon", ctx({ nav: "nodes", selectedRow: row("orion") }));
+    const with_ = buildPalette("cordon", ctx({ nav: "nodes", selectedRow: row("freya") }));
     expect(with_.some((i) => i.type === "action" && i.id === "cordon")).toBe(true);
   });
 
   it("names the node in the action, so what it will do is unambiguous", () => {
-    const out = buildPalette("cordon", ctx({ nav: "nodes", selectedRow: row("orion") }));
+    const out = buildPalette("cordon", ctx({ nav: "nodes", selectedRow: row("freya") }));
     const cordon = out.find((i) => i.type === "action" && i.id === "cordon");
-    expect(cordon?.label).toBe("Cordon orion");
+    expect(cordon?.label).toBe("Cordon freya");
   });
 
   it("never offers delete or drain — they need a confirmation the palette has no room for", () => {
-    const out = buildPalette("", ctx({ nav: "nodes", selectedRow: row("orion") }));
+    const out = buildPalette("", ctx({ nav: "nodes", selectedRow: row("freya") }));
     const ids = out.filter((i) => i.type === "action").map((i) => (i.type === "action" ? i.id : ""));
     expect(ids).not.toContain("delete");
     expect(ids).not.toContain("drain");
@@ -189,8 +189,8 @@ describe("buildPalette", () => {
   // ---- ranking and shape ----
 
   it("ranks all classes in one list, so a strong object beats a weak kind", () => {
-    // "notes" matches the pod exactly-ish and no kind well.
-    const out = buildPalette("notes", ctx());
+    // "wiki" matches the pod exactly-ish and no kind well.
+    const out = buildPalette("wiki", ctx());
     expect(out[0].type).toBe("object");
   });
 

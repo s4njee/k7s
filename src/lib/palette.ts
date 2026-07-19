@@ -74,7 +74,7 @@ export interface ParsedQuery {
  * Kinds whose objects are not worth searching.
  *
  * Events are excluded because an event's name is an opaque id
- * ("notes-6b6d775f4-djpwx.17c3f8a2b1"), so it matches nothing a human would type
+ * ("wiki-6b6d775f4-djpwx.17c3f8a2b1"), so it matches nothing a human would type
  * and would only crowd the list. The Events *view* is still reachable by name.
  */
 const UNSEARCHABLE_KINDS: ReadonlySet<string> = new Set(["events"]);
@@ -90,7 +90,7 @@ const MAX_ACTIONS = 6;
 /**
  * Split a leading `ns:<name>` scope off a query.
  *
- * `ns:prod notes` → search "notes" within prod. The scope is only recognised at
+ * `ns:prod wiki` → search "wiki" within prod. The scope is only recognised at
  * the start: a bare "ns:" mid-query is far more likely to be someone typing a
  * name than reaching for a filter.
  */
@@ -198,7 +198,7 @@ function objectCandidates(ctx: PaletteContext, namespace: string | undefined) {
           label: row.name,
           hint: row.namespace ? `${label} · ${row.namespace}` : label,
         },
-        // "gitops/notes" should find it too, so the qualified name is a fallback
+        // "argocd/wiki" should find it too, so the qualified name is a fallback
         // target — it only wins when the bare name doesn't match.
         targets: row.namespace ? [row.name, `${row.namespace}/${row.name}`] : [row.name],
       });

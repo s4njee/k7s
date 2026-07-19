@@ -181,7 +181,7 @@ const WRAP_AT = 24;
 /**
  * Whether a cell may wrap. Decided by the value, not the column: the renderer is
  * generic, so it can't know that column 2 is an image here and a phase there —
- * but it can see that "registry.orion.io/valkyrie-api:2.14.0" needs to wrap and
+ * but it can see that "registry.freya.io/valkyrie-api:2.14.0" needs to wrap and
  * "Running" does not. Wrapping short values would let them break mid-token.
  */
 function wraps(cell: Cell): boolean {

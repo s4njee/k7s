@@ -41,7 +41,7 @@ export function hasPrevious(restarts: number | undefined): boolean {
   return (restarts ?? 0) > 0;
 }
 
-/** Filename offered when exporting, e.g. "notes-6b6d775f4-djpwx.notes.previous.log". */
+/** Filename offered when exporting, e.g. "wiki-6b6d775f4-djpwx.wiki.previous.log". */
 export function exportFilename(pod: string, container: string, previous: boolean): string {
   // An empty container means the interleaved all-containers view (B7).
   const part = container === "" ? "all" : container;

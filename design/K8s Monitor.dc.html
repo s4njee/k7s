@@ -70,7 +70,7 @@ input,textarea{outline:none}
   <div style="flex:1;min-width:0;display:flex;flex-direction:column">
     <!-- top bar -->
     <div style="flex:none;display:flex;align-items:center;gap:14px;height:46px;padding:0 16px;border-bottom:1px solid #26262b;background:#101012">
-      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#70707a">orion <span style="color:#3a3a42">/</span> {{ crumbGroup }} <span style="color:#3a3a42">/</span> <span style="color:#ececf1;font-weight:600">{{ crumbKind }}</span></div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#70707a">freya <span style="color:#3a3a42">/</span> {{ crumbGroup }} <span style="color:#3a3a42">/</span> <span style="color:#ececf1;font-weight:600">{{ crumbKind }}</span></div>
       <div style="flex:1"></div>
       <div style="position:relative">
         <div onClick="{{ toggleNsMenu }}" style="display:flex;align-items:center;gap:7px;padding:4px 10px;background:#17171a;border:1px solid #26262b;border-radius:5px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:11px;color:#a4a4ae" style-hover="border-color:#4a4a55"><span style="color:#57575f">ns:</span><span style="color:#ececf1">{{ nsLabel }}</span><span style="color:#57575f;font-size:8px">▼</span></div>
@@ -206,8 +206,8 @@ input,textarea{outline:none}
 
     <!-- status bar -->
     <div style="flex:none;display:flex;align-items:center;gap:18px;height:26px;padding:0 16px;border-top:1px solid #26262b;background:#121214;font-family:'JetBrains Mono',monospace;font-size:10px;color:#70707a">
-      <span style="color:#9ece6a">● orion</span><span>api: 42ms</span><span>nodes 6/6 ready</span><span>cpu 41%</span><span>mem 63%</span>
-      <div style="flex:1"></div><span>kubectl ctx: orion-admin</span>
+      <span style="color:#9ece6a">● freya</span><span>api: 42ms</span><span>nodes 6/6 ready</span><span>cpu 41%</span><span>mem 63%</span>
+      <div style="flex:1"></div><span>kubectl ctx: freya-admin</span>
     </div>
   </div>
 </div>
@@ -234,19 +234,19 @@ class Component extends DCLogic {
 
   // ---------- data ----------
   get pods() { return [
-    { name: 'valkyrie-api-7d9f8b64d-x2k4n', ns: 'prod', ready: '3/3', restarts: 0, cpu: '212m', mem: '486Mi', age: '4d2h', status: 'Running', node: 'orion-node-02', containers: ['valkyrie-api', 'istio-proxy', 'log-shipper'] },
-    { name: 'valkyrie-api-7d9f8b64d-p9w7z', ns: 'prod', ready: '3/3', restarts: 0, cpu: '198m', mem: '471Mi', age: '4d2h', status: 'Running', node: 'orion-node-04', containers: ['valkyrie-api', 'istio-proxy', 'log-shipper'] },
-    { name: 'bifrost-gateway-5c7dd4f6b-jl2mn', ns: 'prod', ready: '2/2', restarts: 1, cpu: '341m', mem: '812Mi', age: '11d', status: 'Running', node: 'orion-node-01', containers: ['bifrost-gateway', 'istio-proxy'] },
-    { name: 'yggdrasil-db-0', ns: 'prod', ready: '1/1', restarts: 0, cpu: '890m', mem: '3.2Gi', age: '31d', status: 'Running', node: 'orion-node-03', containers: ['postgres'] },
-    { name: 'yggdrasil-db-1', ns: 'prod', ready: '1/1', restarts: 0, cpu: '124m', mem: '2.9Gi', age: '31d', status: 'Running', node: 'orion-node-05', containers: ['postgres'] },
-    { name: 'heimdall-auth-6b8c9d5f7-qq3rt', ns: 'prod', ready: '1/2', restarts: 14, cpu: '45m', mem: '203Mi', age: '2h14m', status: 'CrashLoopBackOff', node: 'orion-node-02', containers: ['heimdall-auth', 'istio-proxy'] },
-    { name: 'mimir-cache-7f4b8c6d9-ab8cd', ns: 'prod', ready: '1/1', restarts: 0, cpu: '67m', mem: '1.1Gi', age: '11d', status: 'Running', node: 'orion-node-04', containers: ['redis'] },
+    { name: 'valkyrie-api-7d9f8b64d-x2k4n', ns: 'prod', ready: '3/3', restarts: 0, cpu: '212m', mem: '486Mi', age: '4d2h', status: 'Running', node: 'freya-node-02', containers: ['valkyrie-api', 'istio-proxy', 'log-shipper'] },
+    { name: 'valkyrie-api-7d9f8b64d-p9w7z', ns: 'prod', ready: '3/3', restarts: 0, cpu: '198m', mem: '471Mi', age: '4d2h', status: 'Running', node: 'freya-node-04', containers: ['valkyrie-api', 'istio-proxy', 'log-shipper'] },
+    { name: 'bifrost-gateway-5c7dd4f6b-jl2mn', ns: 'prod', ready: '2/2', restarts: 1, cpu: '341m', mem: '812Mi', age: '11d', status: 'Running', node: 'freya-node-01', containers: ['bifrost-gateway', 'istio-proxy'] },
+    { name: 'yggdrasil-db-0', ns: 'prod', ready: '1/1', restarts: 0, cpu: '890m', mem: '3.2Gi', age: '31d', status: 'Running', node: 'freya-node-03', containers: ['postgres'] },
+    { name: 'yggdrasil-db-1', ns: 'prod', ready: '1/1', restarts: 0, cpu: '124m', mem: '2.9Gi', age: '31d', status: 'Running', node: 'freya-node-05', containers: ['postgres'] },
+    { name: 'heimdall-auth-6b8c9d5f7-qq3rt', ns: 'prod', ready: '1/2', restarts: 14, cpu: '45m', mem: '203Mi', age: '2h14m', status: 'CrashLoopBackOff', node: 'freya-node-02', containers: ['heimdall-auth', 'istio-proxy'] },
+    { name: 'mimir-cache-7f4b8c6d9-ab8cd', ns: 'prod', ready: '1/1', restarts: 0, cpu: '67m', mem: '1.1Gi', age: '11d', status: 'Running', node: 'freya-node-04', containers: ['redis'] },
     { name: 'valkyrie-api-canary-89f7c5d4b-nn2kp', ns: 'staging', ready: '0/3', restarts: 0, cpu: '—', mem: '—', age: '38s', status: 'Pending', node: '—', containers: ['valkyrie-api', 'istio-proxy', 'log-shipper'] },
-    { name: 'loki-runner-6d9f7b8c5-tt4vw', ns: 'staging', ready: '1/1', restarts: 2, cpu: '88m', mem: '340Mi', age: '3d', status: 'Running', node: 'orion-node-06', containers: ['loki-runner'] },
-    { name: 'prometheus-server-0', ns: 'monitoring', ready: '2/2', restarts: 0, cpu: '512m', mem: '2.4Gi', age: '31d', status: 'Running', node: 'orion-node-01', containers: ['prometheus', 'config-reloader'] },
-    { name: 'grafana-5f8d7c6b9-mm1xz', ns: 'monitoring', ready: '1/1', restarts: 0, cpu: '34m', mem: '187Mi', age: '31d', status: 'Running', node: 'orion-node-06', containers: ['grafana'] },
-    { name: 'coredns-76f75df574-8rk2j', ns: 'kube-system', ready: '1/1', restarts: 0, cpu: '12m', mem: '31Mi', age: '31d', status: 'Running', node: 'orion-node-01', containers: ['coredns'] },
-    { name: 'kube-proxy-x9d4m', ns: 'kube-system', ready: '1/1', restarts: 0, cpu: '8m', mem: '24Mi', age: '31d', status: 'Running', node: 'orion-node-02', containers: ['kube-proxy'] },
+    { name: 'loki-runner-6d9f7b8c5-tt4vw', ns: 'staging', ready: '1/1', restarts: 2, cpu: '88m', mem: '340Mi', age: '3d', status: 'Running', node: 'freya-node-06', containers: ['loki-runner'] },
+    { name: 'prometheus-server-0', ns: 'monitoring', ready: '2/2', restarts: 0, cpu: '512m', mem: '2.4Gi', age: '31d', status: 'Running', node: 'freya-node-01', containers: ['prometheus', 'config-reloader'] },
+    { name: 'grafana-5f8d7c6b9-mm1xz', ns: 'monitoring', ready: '1/1', restarts: 0, cpu: '34m', mem: '187Mi', age: '31d', status: 'Running', node: 'freya-node-06', containers: ['grafana'] },
+    { name: 'coredns-76f75df574-8rk2j', ns: 'kube-system', ready: '1/1', restarts: 0, cpu: '12m', mem: '31Mi', age: '31d', status: 'Running', node: 'freya-node-01', containers: ['coredns'] },
+    { name: 'kube-proxy-x9d4m', ns: 'kube-system', ready: '1/1', restarts: 0, cpu: '8m', mem: '24Mi', age: '31d', status: 'Running', node: 'freya-node-02', containers: ['kube-proxy'] },
   ]; }
 
   get resourceDefs() {
@@ -260,10 +260,10 @@ class Component extends DCLogic {
       jobs: { group: 'workloads', label: 'Jobs', icon: '▸', cols: ['NAME','NAMESPACE','COMPLETIONS','DURATION','AGE'], rows: [ R('db-migrate-v214','prod',{c:['1/1','42s','4d2h']}), R('report-gen-28661','prod',{c:['1/1','3m12s','6h']}) ] },
       cronjobs: { group: 'workloads', label: 'CronJobs', icon: '↻', cols: ['NAME','NAMESPACE','SCHEDULE','LAST RUN','AGE'], rows: [ R('report-gen','prod',{c:['0 */6 * * *','6h ago','31d']}), R('cache-warm','prod',{c:['*/15 * * * *','4m ago','11d']}) ] },
       services: { group: 'network', label: 'Services', icon: '⇄', cols: ['NAME','NAMESPACE','TYPE','CLUSTER-IP','PORTS','AGE'], rows: [ R('valkyrie-api','prod',{c:['ClusterIP','10.96.14.22','8080/TCP','31d']}), R('bifrost-gateway','prod',{c:['LoadBalancer','10.96.8.101','443/TCP','31d']}), R('yggdrasil-db','prod',{c:['ClusterIP','None','5432/TCP','31d']}), R('grafana','monitoring',{c:['ClusterIP','10.96.31.7','3000/TCP','31d']}) ] },
-      ingresses: { group: 'network', label: 'Ingresses', icon: '⇥', cols: ['NAME','NAMESPACE','HOSTS','CLASS','AGE'], rows: [ R('api-public','prod',{c:['api.orion.io','nginx','31d']}), R('grafana','monitoring',{c:['grafana.orion.internal','nginx','31d']}) ] },
+      ingresses: { group: 'network', label: 'Ingresses', icon: '⇥', cols: ['NAME','NAMESPACE','HOSTS','CLASS','AGE'], rows: [ R('api-public','prod',{c:['api.freya.io','nginx','31d']}), R('grafana','monitoring',{c:['grafana.freya.internal','nginx','31d']}) ] },
       configmaps: { group: 'config', label: 'ConfigMaps', icon: '☰', cols: ['NAME','NAMESPACE','DATA','AGE'], rows: [ R('valkyrie-api-config','prod',{c:['9','4d2h']}), R('bifrost-routes','prod',{c:['14','11d']}), R('coredns','kube-system',{c:['1','31d']}) ] },
-      secrets: { group: 'config', label: 'Secrets', icon: '⚿', cols: ['NAME','NAMESPACE','TYPE','DATA','AGE'], rows: [ R('yggdrasil-db-creds','prod',{c:['Opaque','3','31d']}), R('tls-api-orion-io','prod',{c:['kubernetes.io/tls','2','12d']}), R('registry-pull','prod',{c:['dockerconfigjson','1','31d']}) ] },
-      nodes: { group: 'cluster', label: 'Nodes', icon: '▢', cols: ['NAME','STATUS','ROLES','CPU','MEMORY','VERSION'], rows: [ R('orion-node-01','',{c:['Ready','control-plane','38%','61%','v1.31.2'],ok:true}), R('orion-node-02','',{c:['Ready','worker','52%','74%','v1.31.2'],ok:true}), R('orion-node-03','',{c:['Ready','worker','71%','82%','v1.31.2'],ok:true}), R('orion-node-04','',{c:['Ready','worker','44%','58%','v1.31.2'],ok:true}), R('orion-node-05','',{c:['Ready','worker','29%','66%','v1.31.2'],ok:true}), R('orion-node-06','',{c:['Ready','worker','12%','39%','v1.31.2'],ok:true}) ] },
+      secrets: { group: 'config', label: 'Secrets', icon: '⚿', cols: ['NAME','NAMESPACE','TYPE','DATA','AGE'], rows: [ R('yggdrasil-db-creds','prod',{c:['Opaque','3','31d']}), R('tls-api-freya-io','prod',{c:['kubernetes.io/tls','2','12d']}), R('registry-pull','prod',{c:['dockerconfigjson','1','31d']}) ] },
+      nodes: { group: 'cluster', label: 'Nodes', icon: '▢', cols: ['NAME','STATUS','ROLES','CPU','MEMORY','VERSION'], rows: [ R('freya-node-01','',{c:['Ready','control-plane','38%','61%','v1.31.2'],ok:true}), R('freya-node-02','',{c:['Ready','worker','52%','74%','v1.31.2'],ok:true}), R('freya-node-03','',{c:['Ready','worker','71%','82%','v1.31.2'],ok:true}), R('freya-node-04','',{c:['Ready','worker','44%','58%','v1.31.2'],ok:true}), R('freya-node-05','',{c:['Ready','worker','29%','66%','v1.31.2'],ok:true}), R('freya-node-06','',{c:['Ready','worker','12%','39%','v1.31.2'],ok:true}) ] },
       namespaces: { group: 'cluster', label: 'Namespaces', icon: '◫', cols: ['NAME','STATUS','PODS','AGE'], rows: [ R('prod','',{c:['Active','7','31d'],ok:true}), R('staging','',{c:['Active','2','31d'],ok:true}), R('monitoring','',{c:['Active','2','31d'],ok:true}), R('kube-system','',{c:['Active','2','31d'],ok:true}), R('default','',{c:['Active','0','31d'],ok:true}) ] },
     };
   }
@@ -322,7 +322,7 @@ spec:
   serviceAccountName: ${pod.ns}-runtime
   containers:
 ${pod.containers.map(c => `    - name: ${c}
-      image: registry.orion.io/${c}:v2.4.1
+      image: registry.freya.io/${c}:v2.4.1
       ports:
         - containerPort: 8080
       resources:
@@ -412,18 +412,18 @@ status:
     const events = pod ? (pod.status === 'CrashLoopBackOff' ? [
       { type: 'Warning', typeColor: '#f7768e', reason: 'BackOff', age: '2m', n: 14, msg: 'Back-off restarting failed container heimdall-auth in pod ' + pod.name },
       { type: 'Warning', typeColor: '#f7768e', reason: 'Unhealthy', age: '3m', n: 9, msg: 'Liveness probe failed: HTTP probe failed with statuscode: 503' },
-      { type: 'Normal', typeColor: '#9ece6a', reason: 'Pulled', age: '2h', n: 1, msg: 'Container image "registry.orion.io/heimdall-auth:v2.4.1" already present on machine' },
+      { type: 'Normal', typeColor: '#9ece6a', reason: 'Pulled', age: '2h', n: 1, msg: 'Container image "registry.freya.io/heimdall-auth:v2.4.1" already present on machine' },
       { type: 'Normal', typeColor: '#9ece6a', reason: 'Scheduled', age: '2h', n: 1, msg: 'Successfully assigned prod/' + pod.name + ' to ' + pod.node },
     ] : [
       { type: 'Normal', typeColor: '#9ece6a', reason: 'Started', age: pod.age, n: 1, msg: 'Started container ' + containers[0] },
-      { type: 'Normal', typeColor: '#9ece6a', reason: 'Pulled', age: pod.age, n: 1, msg: 'Container image "registry.orion.io/' + containers[0] + ':v2.4.1" already present on machine' },
+      { type: 'Normal', typeColor: '#9ece6a', reason: 'Pulled', age: pod.age, n: 1, msg: 'Container image "registry.freya.io/' + containers[0] + ':v2.4.1" already present on machine' },
       { type: 'Normal', typeColor: '#9ece6a', reason: 'Scheduled', age: pod.age, n: 1, msg: 'Successfully assigned ' + pod.ns + '/' + pod.name + ' to ' + pod.node },
     ]) : [];
 
-    const clusterDefs = [{ name: 'orion', env: 'prod', active: true }, { name: 'odin-staging', env: 'staging', active: false }, { name: 'loki-dev', env: 'dev', active: false }];
+    const clusterDefs = [{ name: 'freya', env: 'prod', active: true }, { name: 'odin-staging', env: 'staging', active: false }, { name: 'loki-dev', env: 'dev', active: false }];
 
     return {
-      clusterName: 'orion', clusterMenuOpen: s.clusterMenuOpen,
+      clusterName: 'freya', clusterMenuOpen: s.clusterMenuOpen,
       toggleClusterMenu: () => this.setState({ clusterMenuOpen: !s.clusterMenuOpen }),
       clusters: clusterDefs.map(c => ({ name: c.name, env: c.env, dot: c.active ? '#9ece6a' : '#57575f', bg: c.active ? '#16233a' : 'transparent', pick: () => this.setState({ clusterMenuOpen: false }) })),
       navSections,

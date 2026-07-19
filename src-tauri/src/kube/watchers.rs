@@ -173,7 +173,7 @@ async fn run_helm_watcher(client: Client, app: AppHandle) {
 
 /// Spawn a watcher for a CRD-backed kind (B15), registered so it can be aborted
 /// on its own when the user navigates away. Unlike the built-ins these start
-/// lazily: orion alone has 44 CRDs, and watching them all on connect would open
+/// lazily: freya alone has 44 CRDs, and watching them all on connect would open
 /// dozens of pointless streams.
 pub async fn spawn_custom(mgr: &ClientManager, client: Client, kind: &CustomKind) {
     let app = mgr.app();

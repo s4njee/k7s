@@ -1,4 +1,4 @@
-# Handoff: K8s Monitor ("orion") — Tauri + Rust desktop app
+# Handoff: K8s Monitor ("freya") — Tauri + Rust desktop app
 
 ## Overview
 A Kubernetes cluster monitor in the spirit of Lens: left navigation over all common resource kinds, resource tables with namespace filtering, and a pod detail panel with **streaming logs**, **YAML view/edit**, and **Events**. Target implementation: a **Tauri desktop app** — Rust backend talking to the Kubernetes API, webview frontend recreating this design.
@@ -30,7 +30,7 @@ Horizontal flex, full viewport, `background:#0d0d0f`, text `#d2d2d8`, base font 
 - **Footer**: top border `#26262b`, mono 10.5px `#70707a`: pulsing 6px dot `#8e8e98` (2s opacity pulse) + "watch: 9 streams active" (make N = live watcher count).
 
 ### 2. Top bar — 46px, `background:#101012`, bottom border `#26262b`
-- Left: breadcrumb mono 12px — `orion / <group> / <Kind>`; separators `#3a3a42`, kind `#ececf1` semibold, rest `#70707a`.
+- Left: breadcrumb mono 12px — `freya / <group> / <Kind>`; separators `#3a3a42`, kind `#ececf1` semibold, rest `#70707a`.
 - Right: **namespace dropdown** — button `padding:4px 10px; background:#17171a; border:1px #26262b; radius:5px`, mono 11px: `ns:` in `#57575f`, current value `#ececf1`, 8px `▼`. Menu: absolute right-aligned, min-width 170px, same chrome as cluster menu, rows mono 11px with a blue `✓` (`#4d9fff`) on the selected namespace. Options: all + live namespace list.
 
 ### 3. Resource table (fills remaining width, scrolls)
@@ -60,7 +60,7 @@ Opens when a pod row is clicked; `×` button (24px square, hover bg `#222227`) c
 - Vertical list, 8px gap. Card: `background:#121214; border:1px #26262b; radius:6px; padding:9px 12px`. Left: type mono 10px semibold, 52px col — Normal `#9ece6a`, Warning `#f7768e`. Right: reason 12px semibold `#ececf1` + age/count mono 10px `#57575f` (`2m · ×14`), message 11.5px `#a4a4ae`.
 
 ### 5. Status bar — 26px, `background:#121214`, top border `#26262b`
-Mono 10px `#70707a`: `● orion` (green), api latency, nodes ready, cpu %, mem %; right-aligned `kubectl ctx: <context>`.
+Mono 10px `#70707a`: `● freya` (green), api latency, nodes ready, cpu %, mem %; right-aligned `kubectl ctx: <context>`.
 
 ## Interactions & Behavior
 - Nav click switches resource kind, clears selection. Pod row click opens detail (re-seeds log stream). Only pods open the detail panel in the prototype; extending YAML/Events to all kinds is a natural follow-up.

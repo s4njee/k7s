@@ -85,14 +85,14 @@ function ingressProperties(ref: ResourceRef): Properties {
       fields("Overview", [
         { label: "class", value: c("traefik"), nav: { kind: "ingressclasses", name: "traefik" } },
         f("default backend", "—"),
-        f("address", "10.0.0.11"),
+        f("address", "192.168.1.156"),
       ]),
       table(
         "Rules",
         ["HOST", "PATH", "PATH TYPE", "SERVICE", "PORT"],
         [
           [
-            n(`${ref.name}.orion.io`),
+            n(`${ref.name}.freya.io`),
             c("/"),
             c("Prefix"),
             link(ref.name, "services", ref.name, ns),
@@ -100,7 +100,7 @@ function ingressProperties(ref: ResourceRef): Properties {
             c("http"),
           ],
           [
-            n(`${ref.name}.orion.io`),
+            n(`${ref.name}.freya.io`),
             c("/api"),
             c("Prefix"),
             c(`${ref.name}-api (not found)`, "warn"),
@@ -112,7 +112,7 @@ function ingressProperties(ref: ResourceRef): Properties {
       table(
         "TLS",
         ["HOSTS", "SECRET"],
-        [[n(`${ref.name}.orion.io`), link(`${ref.name}-tls`, "secrets", `${ref.name}-tls`, ns)]],
+        [[n(`${ref.name}.freya.io`), link(`${ref.name}-tls`, "secrets", `${ref.name}-tls`, ns)]],
         "no TLS — served over HTTP",
       ),
       chips("Labels", [["app", ref.name]]),
@@ -199,7 +199,7 @@ function podProperties(ref: ResourceRef): Properties {
     const state = running ? "Running" : `Waiting: ${pod?.status ?? "Unknown"}`;
     return [
       n(name),
-      c(`registry.orion.io/${name}:v2.4.1`),
+      c(`registry.freya.io/${name}:v2.4.1`),
       c(state, running ? "ok" : "warn"),
       c(running ? "yes" : "no", running ? "ok" : "warn"),
       c(String(restarts), restarts > 5 ? "err" : "secondary"),
@@ -214,7 +214,7 @@ function podProperties(ref: ResourceRef): Properties {
       fields("Overview", [
         { label: "node", value: c(pod?.node ?? "—"), nav: { kind: "nodes", name: pod?.node ?? "" } },
         f("pod IP", "10.244.2.37"),
-        f("host IP", "10.0.0.10"),
+        f("host IP", "192.168.1.153"),
         f("QoS", "Burstable"),
         // Owner resolves through the ReplicaSet to its workload, with a nav target
         // that makes it a click-through link (B33). Which workload depends on the
@@ -398,8 +398,8 @@ function serviceProperties(ref: ResourceRef): Properties {
         "Endpoints",
         ["ADDRESS", "READY", "POD", "NODE"],
         [
-          [n("10.244.2.37"), c("ready", "ok"), c(`${ref.name}-6c8d9-mn4p`), c("orion-node-02")],
-          [n("10.244.3.14"), c("ready", "ok"), c(`${ref.name}-6c8d9-qq7z`), c("orion-node-03")],
+          [n("10.244.2.37"), c("ready", "ok"), c(`${ref.name}-6c8d9-mn4p`), c("freya-node-02")],
+          [n("10.244.3.14"), c("ready", "ok"), c(`${ref.name}-6c8d9-qq7z`), c("freya-node-03")],
         ],
         "no endpoints — nothing is backing this service",
       ),
@@ -493,7 +493,7 @@ function nodeProperties(ref: ResourceRef): Properties {
         "Addresses",
         ["TYPE", "ADDRESS"],
         [
-          [n("InternalIP"), c("10.0.0.1")],
+          [n("InternalIP"), c("192.168.50.4")],
           [n("Hostname"), c(ref.name)],
         ],
         "no addresses",

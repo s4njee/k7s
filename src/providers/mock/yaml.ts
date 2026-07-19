@@ -11,7 +11,7 @@ export function yamlForPod(pod: MockPod): string {
   const containers = pod.containers
     .map(
       (c) => `    - name: ${c}
-      image: registry.orion.io/${c}:v2.4.1
+      image: registry.freya.io/${c}:v2.4.1
       ports:
         - containerPort: 8080
       resources:

@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
     let target = kinds
         .iter()
         .find(|k| k.id == "argoproj.io/applications")
-        .expect("orion has Argo CD Applications");
+        .expect("freya has Argo CD Applications");
     println!("\n--- watching {} via reflector ---", target.id);
 
     let ar = target.api_resource();

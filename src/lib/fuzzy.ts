@@ -5,18 +5,18 @@
  * scorer rather than an `includes()`: it's the algorithm from fzy, which scores
  * *where* a match lands rather than merely that it matched. That matters for
  * Kubernetes names specifically, which are long, hyphenated and share prefixes —
- * typing "wik" should find `notes-6b6d775f4-djpwx` before `svclb-media-notes-nextra`,
- * and "argoapp" should find `gitops-application-controller-0`.
+ * typing "wik" should find `wiki-6b6d775f4-djpwx` before `svclb-cb8-wiki-nextra`,
+ * and "argoapp" should find `argocd-application-controller-0`.
  *
  * The scoring rules, in order of weight:
- *   - **consecutive characters** beat scattered ones ("notes" as a run beats
+ *   - **consecutive characters** beat scattered ones ("wiki" as a run beats
  *     w…i…k…i spread across a name),
  *   - **word boundaries** score well — a match after `-`, `/`, `.` or `_`, or at
  *     a camelCase hump, is where a human would look,
  *   - **leading gaps** cost a little, so an early match wins ties.
  *
  * A greedy left-to-right match would be simpler and rank badly: for "app"
- * against `gitops-application-controller`, greedy takes the `a` at index 0 and
+ * against `argocd-application-controller`, greedy takes the `a` at index 0 and
  * then hunts for `p`, scoring a scattered match, where the run at "application"
  * is obviously what was meant. The DP below considers both and keeps the best.
  */

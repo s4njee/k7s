@@ -29,7 +29,7 @@ Verified against the design spec (`design/README.md`) with the prototype's mock 
   (streaming with colored levels/timestamps, toolbar controls, footer), YAML
   (CodeMirror read view with syntax highlighting; Edit mode with accent border +
   Cancel/Apply), Events (Warning/Normal cards).
-- **Context switch** — switching orion → odin-staging updated the badge (`OD`),
+- **Context switch** — switching freya → odin-staging updated the badge (`OD`),
   breadcrumb, and status-bar context, and reset+repopulated the data with no leaks.
 
 Screenshots captured during development confirmed pixel-level match to the spec.

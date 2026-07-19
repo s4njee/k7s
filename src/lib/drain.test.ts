@@ -11,7 +11,7 @@ import { drainErrors, drainSummary, drainTone, pdbBlocked } from "./drain";
 import { MockProvider } from "../providers/mock/MockProvider";
 import type { DrainProgress } from "../providers/types";
 
-const base: DrainProgress = { node: "orion-node-02", evicted: 0, total: 6, failures: [], done: false };
+const base: DrainProgress = { node: "freya-node-02", evicted: 0, total: 6, failures: [], done: false };
 
 const pdbFailure = {
   pod: "prod/yggdrasil-db-0",
@@ -68,7 +68,7 @@ describe("MockProvider.drainNode", () => {
     const seen: DrainProgress[] = [];
     provider.onDrainProgress((p) => seen.push(p));
 
-    await provider.drainNode("orion-node-02");
+    await provider.drainNode("freya-node-02");
     // The mock ticks over a couple of seconds; wait for the terminal event.
     await new Promise<void>((resolve) => {
       const check = () => (seen.at(-1)?.done ? resolve() : setTimeout(check, 50));
@@ -76,7 +76,7 @@ describe("MockProvider.drainNode", () => {
     });
 
     const last = seen.at(-1)!;
-    expect(last.node).toBe("orion-node-02");
+    expect(last.node).toBe("freya-node-02");
     expect(last.done).toBe(true);
     // Progress is monotonic — a banner that went backwards would be alarming.
     const evictions = seen.map((p) => p.evicted);

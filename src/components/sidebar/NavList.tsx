@@ -4,7 +4,7 @@
  * switches the active resource and clears any pod selection.
  *
  * The Custom section (B15) lists CRD-backed kinds discovered on connect, folded
- * under their API group the way Lens does — orion has 44 CRDs across 10 groups, so
+ * under their API group the way Lens does — freya has 44 CRDs across 10 groups, so
  * a flat list would bury the built-in nav. Groups start collapsed; the one holding
  * the active kind opens automatically.
  *

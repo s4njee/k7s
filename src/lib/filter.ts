@@ -6,7 +6,7 @@
  *     the row's name (or, for the opaque-named Events feed, across its cells);
  *   - a **label selector** — a `key=value` term, matched against a pod's labels.
  *     Multiple selectors AND together, separated by whitespace *or* commas, so a
- *     workload's `matchLabels` pastes in verbatim as `app=notes,tier=web`.
+ *     workload's `matchLabels` pastes in verbatim as `app=wiki,tier=web`.
  *
  * This exists so "view pods" on a workload can drop that workload's selector
  * straight into the filter (B33's workload→pods jump). Only pods carry labels on

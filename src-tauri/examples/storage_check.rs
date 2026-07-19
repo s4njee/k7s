@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
         checked += 1;
     }
     println!("\n{checked} bound claim/volume pair(s) reference each other consistently.");
-    assert!(checked > 0, "orion has bound claims to check");
+    assert!(checked > 0, "freya has bound claims to check");
 
     println!("\nStorage tables OK.");
     Ok(())

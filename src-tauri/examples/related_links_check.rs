@@ -76,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
     assert!(
         sc_list.items.iter().any(|s| s.metadata.annotations.as_ref()
             .and_then(|a| a.get("storageclass.kubernetes.io/is-default-class")).is_some_and(|v| v == "true")),
-        "orion's local-path is the default class"
+        "freya's local-path is the default class"
     );
 
     // ---- every link a real pod's properties emit must resolve ----

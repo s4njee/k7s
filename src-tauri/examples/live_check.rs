@@ -4,7 +4,7 @@
 //!
 //!   KUBECONFIG=/path/to/kubeconfig cargo run --example live_check
 //!
-//! Picks the gitops-redis pod, runs `echo` in it (exec), then opens a portforward
+//! Picks the argocd-redis pod, runs `echo` in it (exec), then opens a portforward
 //! to 6379 and sends a Redis PING (port-forward).
 
 use k8s_openapi::api::core::v1::{Event, Pod};
@@ -36,17 +36,17 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let pods: Api<Pod> = Api::namespaced(client, "gitops");
+    let pods: Api<Pod> = Api::namespaced(client, "argocd");
 
-    // Find the gitops-redis pod.
+    // Find the argocd-redis pod.
     let list = pods
-        .list(&ListParams::default().labels("app.kubernetes.io/name=gitops-redis"))
+        .list(&ListParams::default().labels("app.kubernetes.io/name=argocd-redis"))
         .await?;
     let pod = list
         .items
         .into_iter()
         .find_map(|p| p.metadata.name)
-        .ok_or_else(|| anyhow::anyhow!("no gitops-redis pod found"))?;
+        .ok_or_else(|| anyhow::anyhow!("no argocd-redis pod found"))?;
     println!("target pod: {pod}");
 
     // ---- exec (B4 path: Api::exec + AttachedProcess::stdout) ----

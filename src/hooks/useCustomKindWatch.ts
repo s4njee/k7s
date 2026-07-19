@@ -1,7 +1,7 @@
 /**
  * Lazy watching for custom (CRD-backed) kinds (B15).
  *
- * A cluster can define hundreds of CRDs — orion alone has 44 — so watching them
+ * A cluster can define hundreds of CRDs — freya alone has 44 — so watching them
  * all on connect would open dozens of streams for data nobody is looking at.
  * Instead this hook keeps exactly one rule: *the open custom kind is watched, and
  * nothing else is*. Navigating away tears its watcher down (via the effect's

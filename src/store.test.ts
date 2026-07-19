@@ -32,7 +32,7 @@ describe("jumpTo (B28)", () => {
     namespace,
     cells: [],
     pod: {
-      node: "orion",
+      node: "freya",
       containers: ["app"],
       status: "Running",
       ready: "1/1",
@@ -53,7 +53,7 @@ describe("jumpTo (B28)", () => {
   // The reason jumpTo exists: setNav and setNamespace each clear the selection,
   // so doing this in three calls lands on the kind with nothing selected.
   it("sets kind and selection together", () => {
-    const row = pod("notes-6b6d775f4-djpwx", "notes");
+    const row = pod("wiki-6b6d775f4-djpwx", "wiki");
     useStore.setState({ nav: "nodes" });
     useStore.getState().jumpTo("pods", row);
     const s = useStore.getState();
@@ -64,28 +64,28 @@ describe("jumpTo (B28)", () => {
 
   it("moves the namespace filter when it would hide the row", () => {
     useStore.setState({ namespace: "prod" });
-    useStore.getState().jumpTo("pods", pod("notes-x", "notes"));
+    useStore.getState().jumpTo("pods", pod("wiki-x", "wiki"));
     // Landing on an empty table because of a filter set ten minutes ago is worse
     // than the filter moving.
-    expect(useStore.getState().namespace).toBe("notes");
-    expect(useStore.getState().selectedRow?.name).toBe("notes-x");
+    expect(useStore.getState().namespace).toBe("wiki");
+    expect(useStore.getState().selectedRow?.name).toBe("wiki-x");
   });
 
   it("leaves an 'all' filter alone — it already shows the row", () => {
     useStore.setState({ namespace: "all" });
-    useStore.getState().jumpTo("pods", pod("notes-x", "notes"));
+    useStore.getState().jumpTo("pods", pod("wiki-x", "wiki"));
     expect(useStore.getState().namespace).toBe("all");
   });
 
   it("leaves a filter that already matches alone", () => {
-    useStore.setState({ namespace: "notes" });
-    useStore.getState().jumpTo("pods", pod("notes-x", "notes"));
-    expect(useStore.getState().namespace).toBe("notes");
+    useStore.setState({ namespace: "wiki" });
+    useStore.getState().jumpTo("pods", pod("wiki-x", "wiki"));
+    expect(useStore.getState().namespace).toBe("wiki");
   });
 
   it("leaves the filter alone for a cluster-scoped row", () => {
     useStore.setState({ namespace: "prod" });
-    const node: Row = { uid: "orion", name: "orion", cells: [] };
+    const node: Row = { uid: "freya", name: "freya", cells: [] };
     useStore.getState().jumpTo("nodes", node);
     expect(useStore.getState().namespace).toBe("prod");
   });
@@ -239,9 +239,9 @@ describe("navigateTo (B33: owner link / event click-through)", () => {
   });
 
   it("selects the live row when the target kind is loaded", () => {
-    const row = dep("notes", "notes");
+    const row = dep("wiki", "wiki");
     useStore.setState({ rows: { deployments: [row] }, nav: "pods" });
-    useStore.getState().navigateTo({ kind: "deployments", namespace: "notes", name: "notes" });
+    useStore.getState().navigateTo({ kind: "deployments", namespace: "wiki", name: "wiki" });
     const s = useStore.getState();
     expect(s.nav).toBe("deployments");
     // The real row — so the table highlights and the panel shows real cells.
@@ -252,19 +252,19 @@ describe("navigateTo (B33: owner link / event click-through)", () => {
     useStore.setState({ rows: { deployments: [] } });
     useStore
       .getState()
-      .navigateTo({ kind: "deployments", namespace: "gitops", name: "gitops-repo-server" });
+      .navigateTo({ kind: "deployments", namespace: "argocd", name: "argocd-repo-server" });
     const s = useStore.getState();
     expect(s.nav).toBe("deployments");
-    expect(s.selectedRow?.name).toBe("gitops-repo-server");
-    expect(s.selectedRow?.namespace).toBe("gitops");
+    expect(s.selectedRow?.name).toBe("argocd-repo-server");
+    expect(s.selectedRow?.namespace).toBe("argocd");
     // Empty cells: the detail panel fetches by ref, so a stub row still works.
     expect(s.selectedRow?.cells).toEqual([]);
   });
 
   it("moves the namespace filter if it would hide the target", () => {
     useStore.setState({ rows: { deployments: [] }, namespace: "prod" });
-    useStore.getState().navigateTo({ kind: "deployments", namespace: "notes", name: "notes" });
-    expect(useStore.getState().namespace).toBe("notes");
+    useStore.getState().navigateTo({ kind: "deployments", namespace: "wiki", name: "wiki" });
+    expect(useStore.getState().namespace).toBe("wiki");
   });
 });
 
@@ -273,13 +273,13 @@ describe("viewPods (B33: workload → pods)", () => {
     useStore.setState({
       nav: "deployments",
       namespace: "all",
-      selectedRow: { uid: "d", name: "notes", cells: [] },
+      selectedRow: { uid: "d", name: "wiki", cells: [] },
     });
-    useStore.getState().viewPods("notes", "app=notes");
+    useStore.getState().viewPods("wiki", "app=wiki");
     const s = useStore.getState();
     expect(s.nav).toBe("pods");
-    expect(s.namespace).toBe("notes");
-    expect(s.tableFilter).toBe("app=notes");
+    expect(s.namespace).toBe("wiki");
+    expect(s.tableFilter).toBe("app=wiki");
     expect(s.selectedRow).toBeNull();
   });
 });
@@ -301,35 +301,35 @@ describe("seedNodeSamples (B38: Prometheus backfill)", () => {
   beforeEach(() => useStore.setState({ nodeSamples: {} }));
 
   it("seeds an empty series with history, oldest first", () => {
-    useStore.getState().seedNodeSamples("orion", [sample(1000), sample(2000)]);
-    expect(useStore.getState().nodeSamples.orion.map((s) => s.ts)).toEqual([1000, 2000]);
+    useStore.getState().seedNodeSamples("freya", [sample(1000), sample(2000)]);
+    expect(useStore.getState().nodeSamples.freya.map((s) => s.ts)).toEqual([1000, 2000]);
   });
 
   it("puts history before live points", () => {
-    useStore.setState({ nodeSamples: { orion: [sample(5000)] } });
-    useStore.getState().seedNodeSamples("orion", [sample(3000), sample(4000)]);
-    expect(useStore.getState().nodeSamples.orion.map((s) => s.ts)).toEqual([3000, 4000, 5000]);
+    useStore.setState({ nodeSamples: { freya: [sample(5000)] } });
+    useStore.getState().seedNodeSamples("freya", [sample(3000), sample(4000)]);
+    expect(useStore.getState().nodeSamples.freya.map((s) => s.ts)).toEqual([3000, 4000, 5000]);
   });
 
   // The two sources overlap in time; the live scrape measures the value directly
   // rather than re-deriving it from a rate over a wider window, so it wins.
   it("drops history that overlaps a live point, keeping the live reading", () => {
-    useStore.setState({ nodeSamples: { orion: [sample(4000, 99)] } });
-    useStore.getState().seedNodeSamples("orion", [sample(3000, 1), sample(4000, 1), sample(5000, 1)]);
-    const got = useStore.getState().nodeSamples.orion;
+    useStore.setState({ nodeSamples: { freya: [sample(4000, 99)] } });
+    useStore.getState().seedNodeSamples("freya", [sample(3000, 1), sample(4000, 1), sample(5000, 1)]);
+    const got = useStore.getState().nodeSamples.freya;
     expect(got.map((s) => s.ts)).toEqual([3000, 4000]);
     expect(got[1].cpuPercent).toBe(99);
   });
 
   it("is a no-op when there's no history — the common no-Prometheus case", () => {
-    useStore.setState({ nodeSamples: { orion: [sample(1000)] } });
-    useStore.getState().seedNodeSamples("orion", []);
-    expect(useStore.getState().nodeSamples.orion.map((s) => s.ts)).toEqual([1000]);
+    useStore.setState({ nodeSamples: { freya: [sample(1000)] } });
+    useStore.getState().seedNodeSamples("freya", []);
+    expect(useStore.getState().nodeSamples.freya.map((s) => s.ts)).toEqual([1000]);
   });
 
   it("caps the merged series so a long backfill can't grow it without bound", () => {
     const history = Array.from({ length: LOG_BUFFER_CAP * 3 }, (_, i) => sample(i));
-    useStore.getState().seedNodeSamples("orion", history);
-    expect(useStore.getState().nodeSamples.orion.length).toBeLessThanOrEqual(240);
+    useStore.getState().seedNodeSamples("freya", history);
+    expect(useStore.getState().nodeSamples.freya.length).toBeLessThanOrEqual(240);
   });
 });

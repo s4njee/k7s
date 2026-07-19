@@ -3,7 +3,7 @@
 //!
 //!   KUBECONFIG=/path/to/kubeconfig cargo run --example related_check
 //!
-//! Read-only. Checks the three jumps' backing data actually exists on orion:
+//! Read-only. Checks the three jumps' backing data actually exists on freya:
 //!   - pods carry labels and a Deployment carries a selector that *matches* them
 //!     (the "view pods" jump),
 //!   - a crash-looping pod's owner resolves through its ReplicaSet to its
@@ -70,8 +70,8 @@ async fn main() -> anyhow::Result<()> {
     assert!(matched > 0, "the selector must select at least one pod, or the jump lands empty");
 
     // ---- owner link: a crash-looper resolves through its RS to its Deployment ----
-    let notes: Api<Pod> = Api::namespaced(client.clone(), "notes");
-    let wpods = notes.list(&ListParams::default()).await?;
+    let wiki: Api<Pod> = Api::namespaced(client.clone(), "wiki");
+    let wpods = wiki.list(&ListParams::default()).await?;
     if let Some(p) = wpods.items.iter().max_by_key(|p| {
         p.status
             .as_ref()
@@ -79,9 +79,9 @@ async fn main() -> anyhow::Result<()> {
             .map(|cs| cs.iter().map(|c| c.restart_count).sum::<i32>())
             .unwrap_or(0)
     }) {
-        let (text, nav) = resolve_owner(&client, "notes", p).await;
+        let (text, nav) = resolve_owner(&client, "wiki", p).await;
         println!("\nowner link:");
-        println!("  pod notes/{}  →  owner \"{text}\"", p.name_any());
+        println!("  pod wiki/{}  →  owner \"{text}\"", p.name_any());
         match &nav {
             Some(t) => println!("  nav target: kind={} ns={:?} name={}", t.kind, t.namespace, t.name),
             None => println!("  nav target: none (bare pod or non-listed owner)"),

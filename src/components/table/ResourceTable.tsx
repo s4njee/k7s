@@ -249,7 +249,7 @@ const OVERSCAN = 20;
  * Row count above which the table windows its rendering.
  *
  * Below it, every row is rendered exactly as before — which is what keeps the
- * table pixel-identical at ordinary cluster sizes (orion's largest kind is 71
+ * table pixel-identical at ordinary cluster sizes (freya's largest kind is 71
  * rows). That matters because windowing forces `table-layout: fixed`: with the
  * default auto layout, column widths are computed from the *rendered* rows, so a
  * windowed table would visibly re-jig its columns as you scrolled.
