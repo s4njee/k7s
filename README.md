@@ -167,5 +167,7 @@ pointing at an `optional: true` Secret that didn't exist, a `previous`-container
 log read that returns *identical* bytes to the live one while a container sits in
 backoff, and an Ingress backend port that's a *name* rather than a number.
 
-> Cluster identifiers in this repo (hostnames, namespaces, addresses) are
-> placeholders, not a real environment.
+> The harnesses name the hosts and namespaces of the small self-hosted cluster
+> this was built against, so they'll need adjusting for yours. The ones that
+> discover their own fixtures (`storage_check`, `related_links_check`,
+> `helm_props_check`, `promql_check`) run anywhere as-is.
