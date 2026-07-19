@@ -368,7 +368,41 @@ flash. **Accept:** pasted value matches `kubectl get secret … | base64 -d`;
 grep the emitted Tauri event traffic to prove the value isn't in it; YAML/table
 remain redacted.
 
-### B38 — Prometheus-backed metrics history
+### B38 — Prometheus-backed metrics history  ✅ node charts shipped
+> **Unblocked and built.** The gate was cluster-side and is now fixed: freya's
+> Prometheus scraped a decommissioned node IP (`.153` after freya moved to
+> `.156`), so it held zero `node_*` series. Both jobs were converted from
+> hardcoded `static_configs` to `kubernetes_sd_configs: [{role: node}]` — node
+> names survive the DHCP churn that caused it — with cAdvisor going through the
+> API-server proxy. freya's targets are up; leo/mars remain down because those
+> machines are genuinely offline.
+>
+> **Shipped:** `kube/promql.rs` discovers a Prometheus by convention (exact name
+> beats prefix beats label; 9090 preferred) and backfills a node's charts via
+> `query_range` through the service proxy — no port-forward, same transport the
+> metrics pollers use. `node_history` returns the last hour at 30s.
+>
+> Three decisions worth keeping: series are joined **on timestamp, not zipped by
+> position** (a gap in one series would otherwise shift every later value of the
+> others onto the wrong time); backfilled points carry **no filesystems**, since
+> the UI renders those as a *current* bar chart and stale usage would read as
+> now; and the merge **drops history overlapping a live point**, because the live
+> scrape measures directly rather than re-deriving from a rate over a wider
+> window.
+>
+> Degrades to exactly B27 when there's no Prometheus: empty history, live scraper
+> unchanged, no error surfaced — no-history is a normal state.
+>
+> **Live:** discovers `panoptes/prometheus:9090`, backfills freya with real
+> cpu/mem/net/load. Only ~15 points so far — Prometheus doesn't back-fill the
+> past, so history accumulates from the scrape fix onward, and `--storage.tsdb.
+> retention.time=24h` caps it at a day.
+>
+> **Deferred:** the per-pod CPU/MEM sparklines half of this item. The cadvisor
+> series are landing (145 of them) so the data is there; it's a new UI surface,
+> not more plumbing.
+
+### B38 (original entry) — Prometheus-backed metrics history
 **Do:** When a Prometheus service is reachable (detect by conventional
 names/labels, query through the API-server service proxy — the transport is
 already proven against freya), B27's node charts backfill with

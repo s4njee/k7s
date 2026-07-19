@@ -285,6 +285,41 @@ export class MockProvider implements DataProvider {
   // uses, so the plots can be worked on without a cluster. One node deliberately
   // has no exporter: the error path is as much a part of the tab as the charts.
 
+  /**
+   * Synthesise an hour of history (B38), so demo mode shows the charts opening
+   * populated rather than filling one point at a time. The node with no exporter
+   * has no history either — a cluster without the metrics has neither source.
+   */
+  async nodeHistory(node: string): Promise<NodeSample[]> {
+    if (node.endsWith("06")) return [];
+    const step = 30_000;
+    const points = 120;
+    const now = Date.now();
+    const total = 64 * 1024 ** 3;
+    let cpu = 20 + (node.charCodeAt(node.length - 1) % 5) * 8;
+    let used = total * 0.42;
+    const out: NodeSample[] = [];
+    for (let i = points; i > 0; i--) {
+      cpu = clamp(cpu + (Math.random() - 0.5) * 10, 1, 98);
+      used = clamp(used + (Math.random() - 0.5) * 8e8, total * 0.15, total * 0.9);
+      const load = (cpu / 100) * 8;
+      out.push({
+        ts: now - i * step,
+        cpuPercent: cpu,
+        memUsedBytes: used,
+        memTotalBytes: total,
+        netRxBps: Math.max(0, 2e6 + (Math.random() - 0.5) * 1e6),
+        netTxBps: Math.max(0, 5e5 + (Math.random() - 0.5) * 3e5),
+        load1: load,
+        load5: load * 0.9,
+        load15: load * 0.8,
+        // Backfilled points carry no filesystems: the UI reads those as current.
+        filesystems: [],
+      });
+    }
+    return out;
+  }
+
   async watchNodeStats(node: string): Promise<void> {
     if (this.nodeTimers.has(node)) return;
 

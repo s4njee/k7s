@@ -238,6 +238,12 @@ export interface AppState {
   setNodeMetrics: (m: NodeMetricsMap) => void;
   setPortForwards: (list: ForwardInfo[]) => void;
   setDrain: (progress: DrainProgress) => void;
+  /**
+   * Seed a node's series with history from Prometheus (B38). Merged rather than
+   * replaced: the live scraper may already have produced points by the time the
+   * backfill lands, and those are the fresher reading.
+   */
+  seedNodeSamples: (node: string, history: NodeSample[]) => void;
   /** Append a sample to a node's series, capped at NODE_SAMPLE_CAP. */
   addNodeSample: (node: string, sample: NodeSample) => void;
   setNodeStatsError: (node: string, message: string) => void;
@@ -370,6 +376,23 @@ export const useStore = create<AppState>((set) => ({
   setNodeMetrics: (m) => set({ nodeMetrics: m }),
   setPortForwards: (list) => set({ portForwards: list }),
   setDrain: (p) => set((s) => ({ drains: { ...s.drains, [p.node]: p } })),
+  seedNodeSamples: (node, history) =>
+    set((s) => {
+      if (history.length === 0) return {};
+      const live = s.nodeSamples[node] ?? [];
+      // Keep only history strictly older than the oldest live point. The live
+      // scrape and the backfill can overlap in time, and the live reading is the
+      // more accurate of the two — it's measured, not re-derived from a rate over
+      // a wider window.
+      const oldestLive = live.length ? live[0].ts : Infinity;
+      const merged = history.filter((h) => h.ts < oldestLive).concat(live);
+      return {
+        nodeSamples: {
+          ...s.nodeSamples,
+          [node]: merged.length > NODE_SAMPLE_CAP ? merged.slice(-NODE_SAMPLE_CAP) : merged,
+        },
+      };
+    }),
   addNodeSample: (node, sample) =>
     set((s) => {
       const next = (s.nodeSamples[node] ?? []).concat(sample);

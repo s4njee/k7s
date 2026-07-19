@@ -7,8 +7,8 @@ use crate::error::{AppError, AppResult};
 use crate::kube::client::{self, ClusterInfo, ContextInfo};
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
 use crate::kube::{
-    discovery, drain, exec, helm, logs, mappers, metrics, nodestats, portforward, properties,
-    restart, watchers, ClientManager, ResourceKind,
+    discovery, drain, exec, exporter, helm, logs, mappers, metrics, nodestats, portforward,
+    promql, properties, restart, watchers, ClientManager, ResourceKind,
 };
 use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::core::v1::Event;
@@ -538,6 +538,28 @@ pub async fn drain_node(name: String, mgr: State<'_, Arc<ClientManager>>) -> App
     });
     manager.push_task(task).await;
     Ok(())
+}
+
+/// Backfill a node's charts from Prometheus (B38), or an empty list when the
+/// cluster has no Prometheus we recognise.
+///
+/// Empty is a normal answer, not an error: B27's live scraper is the source of
+/// truth and works without any of this, so a cluster with no Prometheus (or one
+/// whose scrape targets have drifted) simply opens the charts empty and fills
+/// them as it goes, exactly as before.
+#[tauri::command]
+pub async fn node_history(
+    node: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<Vec<exporter::NodeSample>> {
+    let client = require_client(&mgr).await?;
+    let Some(svc) = promql::discover(&client).await else {
+        return Ok(Vec::new());
+    };
+    let now = chrono::Utc::now().timestamp();
+    // An hour at 30s is 120 points — enough to open with a populated chart
+    // without crowding out the live samples that follow (the series is capped).
+    promql::node_history(&client, &svc, &node, now, 3600, 30).await
 }
 
 /// Start scraping a node's node-exporter for plots (B27), if not already running.

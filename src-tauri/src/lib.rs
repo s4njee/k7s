@@ -69,6 +69,7 @@ pub fn run() {
             commands::get_events,
             commands::get_properties,
             commands::watch_custom_kind,
+            commands::node_history,
             commands::watch_node_stats,
             commands::unwatch_node_stats,
             commands::unwatch_custom_kind,

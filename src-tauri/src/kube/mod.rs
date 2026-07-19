@@ -17,6 +17,7 @@ pub mod mappers;
 pub mod metrics;
 pub mod nodestats;
 pub mod portforward;
+pub mod promql;
 pub mod properties;
 pub mod restart;
 pub mod watchers;

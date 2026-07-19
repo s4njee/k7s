@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useStore, LOG_BUFFER_CAP } from "./store";
 import { DEFAULT_SETTINGS } from "./lib/settings";
-import type { LogLine, Row } from "./providers/types";
+import type { LogLine, NodeSample, Row } from "./providers/types";
 
 // Reset to a clean slate before each test (Zustand store is a singleton).
 beforeEach(() => {
@@ -281,5 +281,55 @@ describe("viewPods (B33: workload → pods)", () => {
     expect(s.namespace).toBe("wiki");
     expect(s.tableFilter).toBe("app=wiki");
     expect(s.selectedRow).toBeNull();
+  });
+});
+
+describe("seedNodeSamples (B38: Prometheus backfill)", () => {
+  const sample = (ts: number, cpu = 1): NodeSample => ({
+    ts,
+    cpuPercent: cpu,
+    memUsedBytes: 1,
+    memTotalBytes: 2,
+    netRxBps: 0,
+    netTxBps: 0,
+    load1: 0,
+    load5: 0,
+    load15: 0,
+    filesystems: [],
+  });
+
+  beforeEach(() => useStore.setState({ nodeSamples: {} }));
+
+  it("seeds an empty series with history, oldest first", () => {
+    useStore.getState().seedNodeSamples("freya", [sample(1000), sample(2000)]);
+    expect(useStore.getState().nodeSamples.freya.map((s) => s.ts)).toEqual([1000, 2000]);
+  });
+
+  it("puts history before live points", () => {
+    useStore.setState({ nodeSamples: { freya: [sample(5000)] } });
+    useStore.getState().seedNodeSamples("freya", [sample(3000), sample(4000)]);
+    expect(useStore.getState().nodeSamples.freya.map((s) => s.ts)).toEqual([3000, 4000, 5000]);
+  });
+
+  // The two sources overlap in time; the live scrape measures the value directly
+  // rather than re-deriving it from a rate over a wider window, so it wins.
+  it("drops history that overlaps a live point, keeping the live reading", () => {
+    useStore.setState({ nodeSamples: { freya: [sample(4000, 99)] } });
+    useStore.getState().seedNodeSamples("freya", [sample(3000, 1), sample(4000, 1), sample(5000, 1)]);
+    const got = useStore.getState().nodeSamples.freya;
+    expect(got.map((s) => s.ts)).toEqual([3000, 4000]);
+    expect(got[1].cpuPercent).toBe(99);
+  });
+
+  it("is a no-op when there's no history — the common no-Prometheus case", () => {
+    useStore.setState({ nodeSamples: { freya: [sample(1000)] } });
+    useStore.getState().seedNodeSamples("freya", []);
+    expect(useStore.getState().nodeSamples.freya.map((s) => s.ts)).toEqual([1000]);
+  });
+
+  it("caps the merged series so a long backfill can't grow it without bound", () => {
+    const history = Array.from({ length: LOG_BUFFER_CAP * 3 }, (_, i) => sample(i));
+    useStore.getState().seedNodeSamples("freya", history);
+    expect(useStore.getState().nodeSamples.freya.length).toBeLessThanOrEqual(240);
   });
 });

@@ -173,6 +173,10 @@ export class TauriProvider implements DataProvider {
 
   // ---- node-exporter statistics (B27) ----
 
+  nodeHistory(node: string): Promise<NodeSample[]> {
+    return invoke<NodeSample[]>("node_history", { node });
+  }
+
   watchNodeStats(node: string): Promise<void> {
     return invoke<void>("watch_node_stats", { node });
   }

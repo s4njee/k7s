@@ -475,6 +475,12 @@ export interface DataProvider {
    * moves a few hundred KB and holds a port-forward, so it runs only while the
    * node's Metrics tab is open. Safe to call twice.
    */
+  /**
+   * Backfill a node's charts from Prometheus (B38), newest last. Resolves to an
+   * empty list when the cluster has no Prometheus we recognise — that's the
+   * normal no-history case, not a failure, and the live scraper covers it.
+   */
+  nodeHistory(node: string): Promise<NodeSample[]>;
   watchNodeStats(node: string): Promise<void>;
   /** Stop scraping a node (idempotent). */
   unwatchNodeStats(node: string): Promise<void>;
