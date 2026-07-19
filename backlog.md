@@ -1,417 +1,216 @@
-# k7s — Backlog (v3)
+# k7s — Backlog (v4)
 
-New work only. Everything before this — the original epics (E1–E8) and both
-earlier backlogs (B1–B26 plus B27, the node-exporter plots) — is **shipped** on
-`feat/backlog-qol`; the per-item records, verification notes and design
-decisions live in the git log rather than being repeated here. Numbering
-continues from B27.
+Open work first, shipped work at the bottom. Detailed per-item records —
+verification notes, design decisions, corrections — live in the git log; the
+completed section here is an index, not the archive.
 
-Conventions are unchanged (see [tasks.md](tasks.md)): each item is
-self-contained with **Do**/**Accept**, the DoD is clippy `-D warnings` +
-`cargo test` + `tsc` + `vitest` + live or demo verification, colors come from
-tokens only. Backend patterns: commands for one-shots, events for streams,
-abortable tasks registered in
-[ClientManager](src-tauri/src/kube/manager.rs); lazy per-object work follows
-the CRD-watcher / node-scraper shape (start on open, stop on leave, counted in
-watch-status).
+Conventions (see [tasks.md](tasks.md)): each open item is self-contained with
+**Do**/**Accept**; the DoD is clippy `-D warnings` + `cargo test` + `tsc` +
+`vitest` + live or demo verification; colors come from tokens only. Backend
+patterns: commands for one-shots, events for streams, abortable tasks
+registered in [ClientManager](src-tauri/src/kube/manager.rs); lazy per-object
+work follows the CRD-watcher / node-scraper shape (start on open, stop on
+leave, counted in watch-status). References to other objects are links, and a
+reference that doesn't resolve says so (`ref_cell`) rather than linking to a
+404.
 
-### What the test cluster can and can't verify
+### What the test cluster can and can't verify (updated 2026-07-19)
 
-Acceptance criteria below are written against freya's *actual* state
-(2026-07-17), which constrains what "verified live" can honestly mean:
-
-- **Only `freya` is Ready.** `leo` and `mars` are NotReady, so anything
-  per-node is verifiable on exactly one node.
+- **Only `freya` is Ready.** `leo` and `mars` are NotReady (offline since
+  2026-07-03 / 2026-07-14), so anything per-node is verifiable on one node.
 - **metrics-server is broken (503)** — `metrics.k8s.io` items degrade to demo
   verification, honestly noted.
-- **Prometheus has no node data** (scrape targets point at a decommissioned
-  node IP). B38 stays gated on that cluster-side fix.
+- **Prometheus works now.** The scrape config was converted to `role: node`
+  service discovery (2026-07-18) after its static targets pointed at a
+  decommissioned IP; `node_*` and cadvisor series are landing. Retention is
+  24h, so history is shallow.
 - Deployments are mostly single-replica; multi-pod acceptance uses the app's
   own Scale action to make a second pod, then scales back.
-- Standing defects that make *great* test fixtures: `wiki/wiki-6b6d775f4-djpwx`
-  in CrashLoopBackOff (3258 restarts), `wiki/wiki-6b6d775f4-h97vb` stuck
-  Terminating for 16 days, `wiki-postgres` Pending for 13 days, recurring
-  FailedMount warnings in `cb8`.
+- Standing defects that make *great* test fixtures: `wiki/wiki-…-djpwx` in
+  CrashLoopBackOff (3300+ restarts), a pod stuck Terminating, `wiki-postgres`
+  Pending, recurring FailedMount warnings in `cb8`. Chatty log fixture:
+  `argocd/argocd-application-controller-0` (13k+ lines).
 
 ---
 
 ## P0 — highest priority
 
-### B28 — Command palette (⌘K)
-*Why first: every view in the app is now reachable, but only by mouse-walking
-the sidebar. One fuzzy box that jumps to any kind, any object, or any action is
-the single biggest daily-use upgrade left — it's the feature people actually
-touch a hundred times a day in Lens/k9s.*
-
-**Do:** ⌘K (and `:` like k9s) opens a centered palette over the app. Three
-result classes, ranked in one list: **kinds** ("pods", "Releases", discovered
-CRD kinds by Kind name), **objects** (fuzzy over `name` and `namespace/name`
-across all rows already in the store — no new backend), and **actions** for the
-current selection ("Restart rollout…", "Cordon", "Forward…"). Enter navigates /
-selects / runs; typing `ns:prod ` as a prefix scopes the namespace filter.
-Fuzzy match is subsequence-based with contiguous-run and word-boundary bonuses
-(pure function in `src/lib/fuzzy.ts`, unit-tested). Selecting an object sets
-nav + namespace + selects the row (reuse `selectRow`); the row must end up
-visible in the virtualized table (B21's `scrollToShow`).
-
-**Accept:** *(shipped — needs a GUI pass to confirm it feels right)*
-- [x] `wik` ranks the crash-looper first; `releases` reaches the Helm view;
-      `applications` reaches the Argo CRD kind (by its id — the plural doesn't
-      match the Kind label "Application"). Pinned by vitest against
-      freya-shaped data.
-- [x] Objects of unwatched CRD kinds are absent (their rows aren't loaded); the
-      kind itself still matches, and jumping to it starts its watcher.
-- [x] Esc closes only the palette, leaving the filter and detail panel behind it
-      alone — tested by dispatching real key events at the document listener.
-- [x] Ranking, `ns:` parsing, and `jumpTo`'s namespace behaviour are unit-tested
-      (54 new cases).
-- [ ] **Not verified:** how it looks and feels — highlight legibility, focus,
-      the jumped-to row being visible in a long list.
-
-*Two deviations from the sketch above, both deliberate. **j/k don't move the
-cursor**: in the palette you're typing a name, and names contain j and k — arrows
-and ⌃n/⌃p idioms are free, letters aren't. And the **object actions are only
-cordon/uncordon**: delete, drain, scale and forward each need a confirmation or
-a parameter, and that UI lives in the detail panel's actions menu — a palette
-where Enter can delete a pod is a footgun, not a shortcut. B34's rollout restart
-will want the same treatment (a confirm), so it belongs there too.*
-
-*Also fixed in passing: the `[`/`]` tab-cycle keys had drifted from the tab strip
-— they still believed non-pods had only YAML+Events, which stopped being true at
-B18 (Properties beyond pods), B26 (Helm has no Events) and B27 (Metrics), so
-cycling landed on tabs that weren't rendered. Both now read one `tabsFor()`.*
-
-### B29 — Crash-loop debugging: previous logs, since, save-to-file
-*Why: the single most common debugging motion the app can't do today. The
-current container of a crash-looper has seconds of logs; the answer is always
-in the **previous** container's output. freya has a live specimen with 3258
-restarts to prove it on.*
-
-> **Correction (found while building this).** The "always" above is wrong. While
-> a container sits in CrashLoopBackOff it *isn't running*, so the API already
-> serves the last terminated container for a plain read — `current` and
-> `previous` return identical bytes, which is exactly what freya's wiki pod shows.
-> They diverge only once the container has restarted and is running again: then
-> the live stream shows the new attempt's first seconds and `previous` is the only
-> way to see why the last one died. Still worth having — that's the moment you're
-> usually looking — but the justification was overstated.
-
-**Do:** Backend: `LogParams.previous` and `since_seconds` threaded through
-`start_log_stream` (kube supports both natively). Frontend, in the logs
-toolbar: a "previous" toggle (shown only when `restarts > 0`), a since selector
-(`5m / 1h / 24h / all` — maps to `since_seconds`, replacing the stream on
-change like the container cycler does), and a save button that writes the
-*full* current stream to a file via the existing dialog plugin (`.save()`), not
-just the ring buffer — the backend re-fetches without `tail` for the export so
-the file isn't capped at the on-screen 200 lines.
-
-**Accept:** *(shipped — needs a GUI pass)*
-- [x] `previous` reads the prior container generation and **terminates** rather
-      than hanging on a dead container — verified against the wiki crash-looper
-      with `cargo run --example logs_check`: returns in 6ms. (See the correction
-      above for what this fixture can and can't demonstrate.)
-- [x] Toggling previous/since empties the buffer rather than mixing generations;
-      "previous" isn't offered on a 0-restart pod (`hasPrevious`), and the follow
-      control is hidden for a previous read — there is nothing to follow.
-- [x] The export reaches past the ring buffer: `argocd-application-controller-0`
-      saves **13,553 lines / 4.8MB** where the view holds 200. A since window
-      still bounds it (5m → 22 lines).
-- [ ] **Not verified:** the toolbar itself — the controls, the save dialog, and
-      the footer's "↺ previous container" state.
-
-*The API constrains two things, both now pinned by tests: `previous` can't be
-followed (a dead container never emits again, so following it hangs the task
-instead of ending the stream), and `since_time` and `since_seconds` are mutually
-exclusive (sending both is a 400) — the resume anchor wins, since it's more
-precise and always inside the window anyway.*
-
-*The backend writes the export file itself rather than returning the text: 4.8MB
-has no business crossing the IPC bridge and landing in the webview's heap just to
-be written straight back out.*
-
 ### B30 — CRD printer columns
-*Why: custom kinds currently show NAME / NAMESPACE / AGE, which wastes the
-whole point of B15 on CRDs like Argo's. The CRD itself declares its columns —
-`additionalPrinterColumns` with JSONPath — and we already fetch the full CRD at
-discovery and throw that part away. Verified on freya: the Application CRD
-declares Sync Status (`.status.sync.status`) and Health Status
-(`.status.health.status`), and the live apps read Synced/Progressing and
+*Why: custom kinds show NAME / NAMESPACE / AGE, which wastes the whole point
+of B15 on CRDs like Argo's. The CRD declares its own columns
+(`additionalPrinterColumns` with JSONPath) and we already fetch the full CRD
+at discovery and throw that part away. Verified on freya: the Application CRD
+declares Sync Status and Health Status, live apps read Synced/Progressing and
 Synced/Healthy.*
 
 **Do:** Extend [discovery.rs](src-tauri/src/kube/discovery.rs) to carry each
-kind's printer columns (name, type, jsonPath; skip `priority > 0` columns —
-kubectl hides those without `-o wide` too). Implement a deliberately small
-JSONPath subset in a new `jsonpath.rs`: dotted field access plus `[n]` array
-index over `serde_json::Value` — that covers every column freya's 44 CRDs
-declare; anything it can't evaluate renders "—" rather than guessing.
-`map_dynamic` appends the evaluated columns between NAMESPACE and AGE; columns
-of type `date` render through the existing age cell; tone stays `secondary`
-(the backend can't know which values are "bad" for an arbitrary CRD — v1 takes
-no colour opinions). Frontend: `kindMeta` for a custom kind builds its column
-list from the discovered metadata instead of the fixed generic set.
+kind's printer columns (name, type, jsonPath; skip `priority > 0` — kubectl
+hides those without `-o wide` too). Implement a deliberately small JSONPath
+subset in a new `jsonpath.rs`: dotted field access plus `[n]` array index over
+`serde_json::Value` — that covers every column freya's 44 CRDs declare;
+anything it can't evaluate renders "—" rather than guessing. `map_dynamic`
+appends evaluated columns between NAMESPACE and AGE; `date`-typed columns
+render through the age cell; tone stays secondary (v1 takes no colour opinions
+on arbitrary CRDs). Frontend: `kindMeta` for a custom kind builds its columns
+from the discovered metadata.
 
 **Accept:**
-- [ ] Argo Applications on freya show SYNC STATUS and HEALTH STATUS live —
-      `cb8` reads Synced/Progressing, `csearch-v2` Synced/Healthy — matching
-      `kubectl get applications -n argocd` exactly.
-- [ ] Kinds with no printer columns keep the generic set; a jsonPath the subset
-      can't evaluate shows "—" and logs once (no crash, no wrong value).
-- [ ] The JSONPath subset is unit-tested against the exact expressions found on
+- [ ] Argo Applications on freya show SYNC STATUS and HEALTH STATUS live,
+      matching `kubectl get applications -n argocd` exactly.
+- [ ] Kinds with no printer columns keep the generic set; an unevaluable
+      jsonPath shows "—" and logs once.
+- [ ] The JSONPath subset is unit-tested against the exact expressions on
       freya's CRDs, plus array-index and missing-field cases.
 
 ### B31 — Workload logs (stern-style)
-*Why: "why is this Deployment misbehaving" means reading all its pods'
-logs interleaved, not opening pods one at a time. B7 already interleaves
-containers within a pod; this is the same idea one level up, and it's the
-feature that makes the Logs tab better than `kubectl logs`.*
+*Why: "why is this Deployment misbehaving" means reading all its pods' logs
+interleaved, not opening pods one at a time. B7 already interleaves containers
+within a pod; this is the same idea one level up.*
 
 **Do:** Backend: `start_workload_logs(kind, ns, name)` resolves the workload's
-selector (Deployments/STS/DS — reuse the selector plumbing from
-[portforward.rs](src-tauri/src/kube/portforward.rs)'s service resolution),
-starts one log pump per matching pod, and multiplexes into a single stream id;
-lines carry a `pod` field the way B7 lines carry `container`. Pod set is
-re-resolved on a slow tick (~15s) so scale-ups join the stream and gone pods
-drop out; the whole bundle registers as *one* entry in the manager (one
-watch-count unit, one abort). Frontend: Deployments/STS/DS gain the Logs tab;
-the line prefix shows a short pod suffix (`-x2k4n`) tinted with the same
-per-source palette the container prefix uses.
+selector, starts one log pump per matching pod, and multiplexes into a single
+stream id; lines carry a `pod` field the way B7 lines carry `container`. Pod
+set re-resolves on a slow tick (~15s) so scale-ups join and gone pods drop;
+the bundle registers as *one* manager entry (one watch-count unit, one abort).
+Frontend: Deployments/STS/DS gain the Logs tab; the line prefix shows a short
+pod suffix tinted with the per-source palette.
 
 **Accept:**
-- [ ] Scale a stateless freya Deployment to 2 via the app's own Scale action:
-      both pods' lines interleave with distinct prefixes; scale back to 1 and
-      the second prefix stops appearing within a tick. (Uses the app to build
-      its own multi-pod fixture — freya runs almost everything single-replica.)
+- [ ] Scale a freya Deployment to 2 via the app's own Scale action: both pods'
+      lines interleave with distinct prefixes; scale back and the second
+      prefix stops within a tick.
 - [ ] Search/timestamps/follow/save (B29) work unchanged on workload streams.
-- [ ] Closing the tab or navigating away tears down every per-pod pump
-      (watch-status returns to baseline — the same proof B15 uses).
+- [ ] Closing the tab tears down every per-pod pump (watch-status returns to
+      baseline — the same proof B15 uses).
+
+### B44 — Pod CPU/MEM sparklines from Prometheus
+*Why: the deferred half of B38. The cadvisor series are landing (145 of them
+on freya) since the scrape fix — the data exists; this is a UI surface, not
+plumbing.*
+
+**Do:** Reuse `promql.rs`: `pod_history(ns, pod)` over
+`container_cpu_usage_seconds_total` / `container_memory_working_set_bytes`
+summed per pod (cadvisor's `node` label keys the join). Render small
+sparklines in the pod detail header (or a Metrics section of Properties) —
+not per-row in the table, which would fire hundreds of range queries. Same
+degrade rule as B38: no Prometheus → no sparklines, nothing surfaced as an
+error.
+
+**Accept:**
+- [ ] A freya pod shows CPU/MEM sparklines with plausible values (cross-check
+      one against `kubectl top pod` when metrics-server is fixed, else against
+      Prometheus directly).
+- [ ] A cluster without Prometheus renders the panel exactly as today.
+- [ ] Opening a pod fires a bounded number of queries (≤2 range queries), and
+      closing cancels any in flight.
 
 ## P1 — next
 
 ### B32 — Problems view
 *Why: the data to answer "is anything wrong?" is already streaming into the
 store — it's just scattered across six kinds. freya demonstrates today: two
-NotReady nodes, a CrashLoopBackOff, a pod stuck Terminating for 16 days, a
-13-day Pending, recurring FailedMount warnings.*
+NotReady nodes, a CrashLoopBackOff, a stuck Terminating, a long Pending,
+recurring FailedMount warnings.*
 
-**Do:** A `problems` pseudo-kind at the top of the Cluster group (frontend-only
-aggregation, like the namespace pod counts — no new watchers). Sources, each
-with a one-line reason: NotReady/unschedulable nodes; pods whose status tone is
-err, Pending or Terminating beyond a threshold (10m / 30m); degraded
-workloads (ready < desired); failed Jobs; Warning events (already capped and
-sorted from B14). Columns: SEVERITY, KIND, OBJECT, REASON, AGE — severity red
-before amber, then newest. Rows navigate to the object (sets nav + selects, the
-B28/B33 jump). The sidebar item shows a count badge toned by the worst severity
-present; zero problems renders a deliberately quiet "nothing wrong" state.
+**Do:** A `problems` pseudo-kind at the top of the Cluster group
+(frontend-only aggregation, like the namespace pod counts — no new watchers).
+Sources, each with a one-line reason: NotReady/unschedulable nodes; pods with
+err tone, Pending or Terminating beyond a threshold; degraded workloads
+(ready < desired); failed Jobs; Warning events. Columns: SEVERITY, KIND,
+OBJECT, REASON, AGE — red before amber, then newest. Rows navigate to the
+object (the B28/B33 jump). Sidebar count badge toned by worst severity; zero
+problems renders a deliberately quiet "nothing wrong" state.
 
 **Accept:**
-- [ ] freya today lists: leo + mars NotReady, the wiki crash-looper, the 16-day
-      Terminating pod, the 13-day Pending postgres, cb8's FailedMount warnings
-      — each with a legible reason, worst first.
-- [ ] Clicking the crash-looper row lands on that pod with the detail panel
-      open; clicking a node problem lands on the node.
+- [ ] freya today lists: leo + mars NotReady, the wiki crash-looper, the stuck
+      Terminating pod, the Pending postgres, cb8's FailedMount warnings — each
+      with a legible reason, worst first.
+- [ ] Clicking a problem lands on the object with the detail panel open.
 - [ ] The derivation is a pure function over store rows with vitest cases per
       source (including "healthy cluster → empty").
 
-### B33 — Related-resource navigation  ✅ shipped
-*Why: the mental model of Kubernetes is a graph; the app shows disconnected
-tables. Also closes B14's deliberate v1 gap (events rows aren't clickable).*
+### B34b — Rollout undo
+*Why: restart shipped (B34); its safety net didn't. The Deployment properties
+panel already shows the ReplicaSet revision history this needs.*
 
-> **Shipped — all three jumps.** (1) **Owner link**: a pod's Overview `owner`
-> field is a click-through link; a ReplicaSet owner resolves *through* the RS to
-> its Deployment backend-side (`resolve_owner`), since we don't list RS.
-> (2) **Workload → pods**: a "View pods" action on Deployment/STS/DS drops the
-> workload's `matchLabels` into the table filter, which now parses
-> `key=value[,k2=v2]` label selectors alongside name substrings
-> (`lib/filter.ts`); pods carry `labels`, workloads carry `selector` on the Row.
-> (3) **Event → object**: B14 event rows are clickable when the involvedObject's
-> kind resolves to a table we list (`navIdForKind`, built-ins + CRDs by
-> kind+group); unresolvable kinds stay inert. All navigation goes through a
-> shared `jumpPatch` (reused from B28's `jumpTo`) via new store actions
-> `navigateTo`/`viewPods`. Live-verified read-only (`examples/related_check`):
-> the wiki crash-looper's owner resolves to Deployment/wiki; a real Deployment's
-> selector matches its pods; every sampled event carries an involvedObject.
->
-> Types widened: `Row` gained `labels`/`selector`/`involved`; properties `Field`
-> gained an optional `nav` target; a shared `NavTarget`.
-
-**Do:** Three jumps, all landing as nav + namespace + row selection:
-**owner** — the properties Overview's owner field becomes a link; ReplicaSet
-owners resolve *through* the RS to its Deployment backend-side (we don't list
-RS as a kind); **workload → pods** — a "view pods" affordance on
-Deployments/STS/DS rows that jumps to Pods with the workload's selector
-applied, which needs the table filter to accept `key=value[,k2=v2]` label
-selector syntax alongside name substrings (parser in `lib/filter.ts`,
-unit-tested; pods carry labels on the Row for this); **event → object** — B14
-rows become clickable when the involved object's kind is one we show, mapping
-Kind → nav id (including discovered CRDs by group/kind; unresolvable kinds stay
-inert rather than dead-clicking).
+**Do:** `undo_rollout(ns, name, revision)` copies the target ReplicaSet's pod
+template back onto the Deployment (revisions from the same owner-uid +
+revision-annotation logic properties.rs already has). Frontend: "Roll back to
+revision N…" per-row in the properties ReplicaSets table for non-current
+revisions, with a red confirm naming the revision.
 
 **Accept:**
-- [x] From the wiki crash-looper's properties, the owner link lands on the
-      `wiki` Deployment (resolved through its ReplicaSet) — verified live.
-- [x] "View pods" on a workload shows its pods, the selector visible in the
-      filter box as removable text (verified the selector matches live pods).
-- [x] Event rows are clickable when the involvedObject resolves to a listed kind;
-      unlisted kinds (ReplicaSet, Endpoints, wrong-group CRD) render inert.
-      *GUI pass still wanted for the click/cursor feel.*
+- [ ] Unit test pins the template-copy (fixture Deployment + two RS revisions
+      → patch equals the old template).
+- [ ] Live, against a scratch Deployment (B36's create, or kubectl-made):
+      restart cycles a new RS revision; undo returns to the prior template.
+- [ ] Rows for the *current* revision don't offer the action.
 
-### B34 — Rollout actions: restart & undo
-*Why: scale/delete shipped in B3, but the most common workload verb is
-`kubectl rollout restart`, and its safety net is `rollout undo`. The B18
-properties panel already shows the ReplicaSet revision history this needs.*
+### B45 — Discovery-based live harnesses
+*Why: six of the `examples/*_check.rs` harnesses hardcode freya's namespaces
+and pod names; the four written later (`storage_check`,
+`related_links_check`, `helm_props_check`, `promql_check`) discover their own
+fixtures and run anywhere. Now that the repo is public, the harnesses are the
+project's proof-of-honesty — they should run on any cluster, including a
+fresh kind cluster.*
 
-> **Restart shipped** (asked for directly: "there should be a way to restart a
-> pod"). Two mechanisms, one "Restart…" menu row: a **pod** restarts by
-> delete-and-recreate (`restart_pod` refuses a pod with no controller —
-> deleting *that* is a delete, not a restart), a **workload**
-> (Deployment/STS/DaemonSet) rollout-restarts via the template `restartedAt`
-> patch (`restart_rollout`). Pure decisions in `kube/restart.rs`
-> (`has_controller`, `restart_patch`, `is_rollout_kind`) with 5 unit tests
-> pinning the patch shape and owner check. Live-verified read-only via
-> `examples/restart_check`: on freya all 71 pods are controller-owned (no bare
-> specimen to show the refusal — the unit test carries that case), and the
-> rollout patch is accepted as a **server-side dry run** that echoes the
-> annotation onto the template while persisting nothing. Also fixed in passing:
-> the Scale/Forward confirm panels referenced `styles.cancelBtn`/`applyBtn`
-> that never existed in `DetailPanel.module.css` (only YamlTab's), so those
-> buttons had been rendering unstyled — the classes now live in the shared
-> module.
->
-> **Still open: undo (rollback to revision N)** — the `undo_rollout` half below
-> is not built.
-
-**Do:** Backend: `restart_rollout(kind, ns, name)` patches
-`spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"]` to
-now (the exact mechanism kubectl uses — the annotation *is* the API);
-`undo_rollout(ns, name, revision)` for Deployments copies the target
-ReplicaSet's pod template back onto the Deployment (revisions come from the
-same owner-uid + revision-annotation logic properties.rs already has).
-Frontend: "Restart rollout…" (confirm) in the actions menu for
-Deployments/STS/DS; "Roll back to revision N…" offered per-row in the
-properties ReplicaSets table for non-current revisions, with a red confirm
-naming the revision. Progress is already visible — the READY column and
-conditions do that job.
+**Do:** Convert `live_check`, `crd_check`, `properties_check`, `logs_check`,
+`helm_check`, `svc_forward_check` to discover fixtures (highest-restart pod
+for crash-loop cases, any pod with volumes, any Helm release, etc.), degrading
+to a skip-with-message when a cluster has no suitable fixture rather than
+failing. Document the pattern in the README's verification section.
 
 **Accept:**
-- [x] Unit tests pin the restart patch shape (undo template-copy still pending).
-- [x] Live: rollout patch validated server-side (dry run) against a real
-      Deployment; the operator does the actual restart — same honesty rule as
-      the B20 drain.
-- [x] Kinds without rollout semantics don't offer restart (pods get
-      delete-and-recreate; jobs/cronjobs/configmaps/etc. get neither).
-- [ ] undo_rollout: template-copy test + live rollback to the prior template.
+- [ ] Every harness runs green against freya with no edits.
+- [ ] Every harness runs against the kind fixture cluster (`dev/cluster/up.sh`)
+      and either passes or prints an explicit "no fixture for X, skipping".
+- [ ] No harness names a namespace or pod that isn't discovered at runtime.
 
-### B35 — Helm release detail: history & values  ✅ shipped
-*Why: B26 deliberately shipped list + manifest only. The other two questions
-you ask of a release — "what changed between revisions" and "what values is it
-running with" — are sitting in the same Secrets we already decode; freya's
-releases are all rev 1 today, so history is thin there, but the decode path is
-identical.*
+### B46 — The remaining reference gaps
+*Why: the audit trail from B40–B43. What's left is small and enumerable, and
+each is the same defect the PV column was: the app knows a relationship and
+doesn't show or link it.*
 
-> **Shipped.** A Helm release now gets a Properties tab (added `helm` to
-> `KINDS_WITH_PROPERTIES`, reusing B18's section renderer). `gather_helm` lists a
-> release's revision Secrets by Helm's own `owner=helm,name=…` labels — the
-> inverse of B26's `latest_only` — and decodes all of them into: an **Overview**
-> (chart, app version, status, first/last deployed, revision, description), a
-> **History** table (REVISION/STATUS/CHART/DESCRIPTION/UPDATED, newest first,
-> superseded muted / current ok / failed red), and a **Values** table. The
-> decoder gained `config` (user overrides) + `first_deployed`; `flatten_values`
-> renders overrides as sorted `dotted.path` → value pairs and **redacts any value
-> under a `password|secret|token|key` key by name** — the value string never
-> leaves Rust. Empty config → "chart defaults (no overrides)". Still zero writes.
-> Pure `build_helm_properties` is unit-tested on synthetic v1/v2/v3; live-verified
-> via `examples/helm_props_check` (traefik: 13 values; traefik-crd: chart
-> defaults; arc: 5 values — all decoded from the cluster, no helm CLI).
-
-**Do:** Selecting a release gains Properties-shaped detail (reuse the B18
-section renderer): an Overview (chart, app version, status, first/last
-deployed, description), a **History** table — every revision's Secret decoded:
-REVISION, STATUS, CHART, DESCRIPTION, UPDATED, newest first (the
-`latest_only` reduction already computes the grouping; this is its inverse
-view) — and a **Values** section rendering the release's `config` JSON (the
-user-supplied overrides; empty → "chart defaults"). Values pass through the
-same redaction stance as manifests: keys matching `password|secret|token|key`
-render `<redacted>` — a values blob is exactly where credentials end up.
-Still zero write operations.
+**Do:** Three ungathered references: **imagePullSecrets** and **env/envFrom**
+ConfigMap/Secret refs on the pod panel (existence-checked via `ref_cell`,
+like volume sources); **Helm release → installed objects** — the manifest is
+already decoded, so parse kind/name pairs out of it and render an "Objects"
+table on the release panel, linking the kinds we list. Plus properties
+gatherers for the storage kinds: a **PVC panel** showing which pods mount it
+(reverse of the pod's Storage table), its volume, class and events; a **PV
+panel** showing its claim and reclaim state; **ReplicaSet panel** showing its
+pods and owner Deployment.
 
 **Accept:**
-- [x] freya's `traefik` release shows Overview + a 1-row history + its 13 values;
-      `traefik-crd` shows "chart defaults" — all decoded from the cluster, no helm
-      CLI (`examples/helm_props_check`).
-- [x] Multi-revision history pinned by `helm_history_orders_and_tones` on
-      synthetic v1/v2/v3 (newest-first, superseded muted, current deployed ok).
-- [x] A `config` with `auth.password`/`dbPassword` renders `<redacted>`; both the
-      cargo tests (`flatten_redacts_credentials`, `helm_history_orders_and_tones`)
-      assert the value string never reaches the cells.
+- [ ] A pod using a private registry shows its pull secret as a link; an env
+      var sourced from a ConfigMap links to it.
+- [ ] freya's `traefik` release lists the objects it installed, each a link
+      when the kind is listed.
+- [ ] A PVC panel answers "who mounts this" — verified against
+      `wiki-postgres-data` → the postgres pod.
+- [ ] `related_links_check` extended to walk the new panels; all links resolve.
 
 ## P2 — later
 
 ### B36 — Create from YAML, and dry-run diff before apply
-**Do:** A "+ Create" affordance (topbar or ⌘K action): paste/edit a manifest in
-the CodeMirror editor, `create` it via the dynamic API (kind/ns parsed from the
-manifest itself). And for *edits*: Apply first sends the replace with
-`dryRun=All`, shows a unified diff (current ↔ server-normalized result) in the
-editor gutter/panel, and only then offers the real apply — mistakes surface
-before the cluster changes, and defaulting/mutation webhooks are visible in
-the diff. **Accept:** creating a scratch ConfigMap and a Deployment works (and
-gives B34 its live fixture); an edit that a webhook would mutate shows the
-mutation in the diff before apply; invalid manifests fail the dry-run with the
-server's message, cluster untouched.
+**Do:** A "+ Create" affordance (topbar or ⌘K action): paste/edit a manifest
+in the CodeMirror editor, `create` it via the dynamic API (kind/ns parsed from
+the manifest). For *edits*: Apply first sends the replace with `dryRun=All`,
+shows a unified diff (current ↔ server-normalized result), and only then
+offers the real apply — mistakes surface before the cluster changes, and
+webhook mutations are visible in the diff. **Accept:** creating a scratch
+ConfigMap and a Deployment works (and gives B34b its live fixture); an edit a
+webhook would mutate shows the mutation in the diff before apply; invalid
+manifests fail the dry-run with the server's message, cluster untouched.
 
 ### B37 — Secret values: copy without display
-**Do:** The app's stance is that Secret values never render (B-series decision,
-docs/verification.md) — but *using* a secret is legitimate. Per key in a
-Secret's detail: a "copy value" button whose command decodes and writes the
-value to the clipboard **in Rust** (`tauri-plugin-clipboard-manager`), so the
-plaintext never enters the webview/DOM at all; UI shows only a "copied ✓"
-flash. **Accept:** pasted value matches `kubectl get secret … | base64 -d`;
-grep the emitted Tauri event traffic to prove the value isn't in it; YAML/table
-remain redacted.
-
-### B38 — Prometheus-backed metrics history  ✅ node charts shipped
-> **Unblocked and built.** The gate was cluster-side and is now fixed: freya's
-> Prometheus scraped a decommissioned node IP (`.153` after freya moved to
-> `.156`), so it held zero `node_*` series. Both jobs were converted from
-> hardcoded `static_configs` to `kubernetes_sd_configs: [{role: node}]` — node
-> names survive the DHCP churn that caused it — with cAdvisor going through the
-> API-server proxy. freya's targets are up; leo/mars remain down because those
-> machines are genuinely offline.
->
-> **Shipped:** `kube/promql.rs` discovers a Prometheus by convention (exact name
-> beats prefix beats label; 9090 preferred) and backfills a node's charts via
-> `query_range` through the service proxy — no port-forward, same transport the
-> metrics pollers use. `node_history` returns the last hour at 30s.
->
-> Three decisions worth keeping: series are joined **on timestamp, not zipped by
-> position** (a gap in one series would otherwise shift every later value of the
-> others onto the wrong time); backfilled points carry **no filesystems**, since
-> the UI renders those as a *current* bar chart and stale usage would read as
-> now; and the merge **drops history overlapping a live point**, because the live
-> scrape measures directly rather than re-deriving from a rate over a wider
-> window.
->
-> Degrades to exactly B27 when there's no Prometheus: empty history, live scraper
-> unchanged, no error surfaced — no-history is a normal state.
->
-> **Live:** discovers `panoptes/prometheus:9090`, backfills freya with real
-> cpu/mem/net/load. Only ~15 points so far — Prometheus doesn't back-fill the
-> past, so history accumulates from the scrape fix onward, and `--storage.tsdb.
-> retention.time=24h` caps it at a day.
->
-> **Deferred:** the per-pod CPU/MEM sparklines half of this item. The cadvisor
-> series are landing (145 of them) so the data is there; it's a new UI surface,
-> not more plumbing.
-
-### B38 (original entry) — Prometheus-backed metrics history
-**Do:** When a Prometheus service is reachable (detect by conventional
-names/labels, query through the API-server service proxy — the transport is
-already proven against freya), B27's node charts backfill with
-`query_range` history and pods gain CPU/MEM sparklines; the live scraper stays
-as the fallback and freshest point. **Accept:** gated on the cluster-side
-scrape-target fix (freya's Prometheus currently holds zero `node_*` series —
-targets point at a decommissioned IP); until then, query plumbing verifies
-against `up`, and the fallback path is what B27 already proves. *Blocked on
-operator action; do not start before the scrape config is fixed.*
+**Do:** The app's stance is that Secret values never render — but *using* a
+secret is legitimate. Per key in a Secret's detail: a "copy value" button
+whose command decodes and writes the value to the clipboard **in Rust**
+(`tauri-plugin-clipboard-manager`), so the plaintext never enters the
+webview/DOM; UI shows only a "copied ✓" flash. **Accept:** pasted value
+matches `kubectl get secret … | base64 -d`; the value never appears in Tauri
+event traffic; YAML/table remain redacted.
 
 ### B39 — Bulk selection & row context menu
 **Do:** Shift/⌘-click multi-select in the table; right-click context menu
@@ -419,145 +218,73 @@ mirroring the detail actions menu (delete on N pods with one confirm listing
 them; cordon on multiple nodes). Selection state per kind, cleared on nav; the
 confirm always enumerates what it's about to do. **Accept:** deleting 3
 selected pods of a scaled deployment issues 3 deletes and one confirm;
-context-menu actions and detail-panel actions share one implementation (no
-drift).
+context-menu and detail-panel actions share one implementation.
 
-### B40 — Storage: PersistentVolumes & PersistentVolumeClaims  ✅ shipped
-*Why: asked for directly. PVs/PVCs existed only as *resolved references* inside a
-pod's properties — you could see that a pod was backed by `pvc-5a948cc3…` but
-there was no table to open it in, so the reference dead-ended. Storage is also
-the one place a cluster quietly runs out of something.*
+### B47 — CronJob and Job verbs
+*Why: the workload verbs shipped (scale, restart, drain) skip the batch kinds
+entirely, and both of their missing verbs are things kubectl makes annoyingly
+manual.*
 
-> **Shipped.** Two new kinds in a new **Storage** nav group:
-> `persistentvolumeclaims` (namespaced) and `persistentvolumes` (cluster-scoped),
-> claims first — a claim is what a workload references, the volume behind it is
-> the follow-up. Columns follow kubectl: claims are
-> NAME·NAMESPACE·STATUS·VOLUME·CAPACITY·ACCESS·CLASS·AGE, volumes are
-> NAME·CAPACITY·ACCESS·RECLAIM·STATUS·CLAIM·CLASS·AGE (no NAMESPACE; CLAIM
-> carries "namespace/name"). Access modes render in kubectl's shorthand
-> (RWO/ROX/RWX/RWOP), unknown modes passing through rather than being dropped.
->
-> Two things the mapping gets right that the obvious version wouldn't:
-> **a Pending claim has no bound capacity**, so CAPACITY falls back to the
-> *requested* size — otherwise the column is blank exactly when you're asking how
-> big the claim was; and PVs need **their own tone function**, because the shared
-> `status_tone` sends anything unrecognised to red, which would paint an
-> `Available` (idle, unclaimed) volume as a failure and a `Released` one (claim
-> gone, data still there — needs a decision) the same red as `Failed`.
->
-> Also registered in B33's Kind→nav map, so an event about a claim is clickable.
-> Live-verified via `examples/storage_check`: freya's 9 claims and 9 volumes
-> render, and every bound pair cross-references the other consistently.
->
-> **Not done:** properties gatherers for either kind (consistent with jobs,
-> daemonsets, configmaps etc., which also have tables but no Properties tab).
-> *(The PV/CLAIM-cells-aren't-links gap noted here was closed by B41.)*
+**Do:** **Suspend/resume** a CronJob (patch `spec.suspend`, status shown in
+the table with a muted "suspended" tone); **Run now** (create a Job from the
+CronJob's jobTemplate with a `manual-` name prefix, the exact mechanic of
+`kubectl create job --from=cronjob/x`); **Retry** a failed Job (delete +
+recreate from its own spec, minus controller-owned fields). All through the
+actions menu with the usual confirm. **Accept:** suspending freya's cronjobs
+stops schedule-time Jobs appearing; Run now produces a Job that runs to
+completion and is visibly owned by nothing (so it's deletable); unit tests pin
+the jobTemplate copy (immutable fields stripped).
 
-### B41 — Cell-level nav, ReplicaSets, StorageClasses, volume sources  ✅ shipped
-*Why: an audit for "other gaps like the PVs" found the PV work wasn't actually
-finished, and that the gap had two different shapes.*
+### B48 — TLS certificate inspection
+*Why: `kubernetes.io/tls` Secrets hold certs whose expiry is the thing that
+takes sites down, and the app deliberately never shows secret values — but a
+cert's metadata (subject, SANs, issuer, notAfter) isn't secret.*
 
-> **The structural half.** B33 put `nav` on a properties `Field`, but most
-> references to another object live in a **table**, and `Cell` had no nav — so
-> B40's new PV/PVC tables were still unreachable from the pod that used them.
-> `NavTarget` moved to `dto.rs`, `Cell` gained an optional `nav`, and one
-> `NavLink` component now renders both fields and cells. Wired up: pod
-> Overview `node` and StatefulSet `service name` (fields), and the pod's
-> Storage (CLAIM/PV/CLASS), Other volumes (SOURCE), Services (NAME) and the
-> Deployment's ReplicaSets (NAME) tables.
->
-> **The missing-tables half.** `replicasets` (Workloads) and `storageclasses`
-> (Storage, cluster-scoped, default class marked in the NAME as kubectl does).
-> A 0-desired ReplicaSet reads **muted, not amber** — a superseded generation is
-> history, and freya has 45 of them against 28 live, so colouring them as
-> degraded would make every Deployment look broken. With ReplicaSets listed,
-> `resolve_owner`'s bare-RS fallback finally links instead of dead-ending.
->
-> **The ungathered half.** `volume_kind` only ever returned a *classification*,
-> so the panel said a pod mounts "a Secret" without saying which. The source name
-> is now captured and linked.
->
-> **A bug the live check caught in this very change.** `related_links_check`
-> resolves every emitted nav target against the API, and found one 404:
-> argocd-repo-server mounts `argocd-repo-server-tls` with `optional: true`, and
-> that Secret doesn't exist — so linking it produced exactly the dead link this
-> item set out to remove. Volume sources are now existence-checked via
-> `get_metadata` (deliberately: an existence check must not pull a Secret's
-> contents), and an absent source renders `name (not found)` in amber, which is
-> itself the answer to "why isn't this config applying". 7/7 links now resolve.
->
-> *(The unlisted-kinds list here was worked down by B42.)*
+**Do:** For `kubernetes.io/tls` Secrets, a Properties section parsing the
+public cert **in Rust** (the private key is never touched): subject, SANs,
+issuer, valid-from/notAfter — notAfter toned amber under 30 days, red when
+expired. The Ingress TLS table inherits the tone on its SECRET link, so an
+expiring cert is visible from the routing side. **Accept:** a live TLS secret
+shows correct fields vs `openssl x509 -text`; an expired fixture cert reads
+red; the private key never appears in any payload (grep the event traffic, the
+B37 proof).
 
-### B42 — The links B41 missed, and ServiceAccounts  ✅ shipped
-*Why: re-running the "any other gaps like the PVs?" audit against the post-B41
-code found three tables B41 had simply skipped — the same gap, in sites I'd
-missed rather than in a new shape.*
+### B49 — RBAC: who can do what
+*Why: 16 Roles / 83 ClusterRoles / 86 bindings on freya and the app shows none
+of it. The interesting question isn't listing them — it's the chain: this
+ServiceAccount → these bindings → these rules.*
 
-> **Three missed tables**, all referencing kinds already listed, all previously
-> plain text: Service → **Endpoints** (POD, NODE), StatefulSet → **Persistent
-> volume claims** (NAME, CLASS, PV), and StatefulSet → **Volume claim
-> templates** (CLASS). A StatefulSet's storage panel had been *entirely*
-> dead-ended — the original complaint, one kind over.
->
-> **ServiceAccounts** as a kind (Config group, namespaced). Its SECRETS column
-> keeps kubectl parity even though it reads 0 on every modern cluster (all 69 of
-> freya's): it earns its place by the exception, so a non-zero count — a
-> long-lived token attached by hand — is toned amber rather than blending in.
-> The pod's `service account` field links there now.
->
-> **A second 404, in B41's own code.** The harness caught
-> `statefulsets/argocd-application-controller` → a Service that doesn't exist:
-> Argo declares a `serviceName` for a headless Service it never creates. B41 had
-> *rationalised* this in a comment ("can link somewhere empty — still better
-> than making you search by hand"), which contradicts the rule the volume
-> sources follow. Now consistent: existence-checked, and a missing one renders
-> `name (not found)` in amber — a StatefulSet whose governing Service is absent
-> has no stable pod DNS, so that's worth surfacing, not hiding.
->
-> The harness also grew a gap of its own: it only walked the *pod* panel, so the
-> Service and StatefulSet links it was meant to guard went unchecked, and it
-> picked a StatefulSet with no volume claim templates. It now walks every
-> gatherer that emits links and prefers a StatefulSet that actually declares
-> storage. 15/15 links resolve.
->
-> *(Ingress backends and IngressClass were closed by B43.)*
+**Do:** Tables for Roles/ClusterRoles/RoleBindings/ClusterRoleBindings (an
+Access nav group; move ServiceAccounts there). The ServiceAccount panel gains
+the resolved chain: bindings naming it, each linking to its role, with the
+role's rules rendered as a compact verb×resource table. **Accept:** freya's
+`prometheus` SA shows the `panoptes-prometheus` binding → ClusterRole with
+`nodes/metrics` + `nodes/proxy` — the exact chain debugged by hand during the
+Prometheus fix; binding subjects that reference absent SAs render with the
+`ref_cell` not-found treatment.
 
-### B43 — Ingress detail: what it routes, and to what  ✅ shipped
-*Why: the last "invisible rather than merely unlinked" gap. Ingresses had no
-Properties tab at all, so the list showed HOSTS and CLASS and nothing about the
-backends — the thing an Ingress exists to describe.*
+### B50 — Warning notifications
+*Why: the app knows about CrashLoopBackOff the moment it happens; the person
+running it finds out when they next look. Desktop notifications are the point
+of being a native app.*
 
-> **Do:** `gather_ingress` — Overview (class, default backend, the address the
-> controller is answering on, from `status`), a **Rules** table
-> (HOST/PATH/PATH TYPE/SERVICE/PORT) and a **TLS** table (HOSTS/SECRET). Every
-> Service and Secret it names is existence-checked and linked, resolved once per
-> distinct name rather than once per rule — an Ingress routinely points many
-> paths at one backend.
->
-> Two details the obvious version gets wrong, both pinned by tests: a backend
-> **port is a number *or* a name** (freya's only Ingress uses `http`, so a
-> number-only reading would show nothing), and a **host-less rule is a
-> catch-all**, rendered `*` as kubectl does.
->
-> **IngressClasses** shipped alongside (Network, cluster-scoped, default marked
-> in the NAME). Not scope creep: the new panel's `class` field would otherwise
-> have been a brand-new dead end, which is the mistake this whole run kept
-> repeating.
->
-> The "may not exist" rule now has one home — `ref_cell` — rather than being
-> re-derived per gatherer. A missing backend renders `name (not found)` in
-> amber, which is what an Ingress 503 actually looks like.
->
-> Live: `lakitu/lakitu` renders `* · / · Prefix · lakitu · http`, address
-> 192.168.1.156, TLS empty with its note; 17/17 links across all four panels
-> resolve.
->
-> **Still unlisted** (referenced, no table): PriorityClass, ControllerRevision,
-> Endpoints. **Never gathered**: imagePullSecrets, `env.valueFrom`, a Helm
-> release's installed objects. **Absent entirely**: NetworkPolicies (7 on
-> freya), RBAC (16 roles / 83 clusterroles), Leases, APIServices.
+**Do:** Opt-in (Settings, default off): native notifications via
+`tauri-plugin-notification` for *transitions into* a problem state (B32's
+derivation reused — new Warning event burst, pod entering err tone, node going
+NotReady). Debounced per object (one notification per object per cooldown,
+not per event), never while the window is focused. Clicking the notification
+focuses the window and jumps to the object. **Accept:** killing a pod's
+process on freya notifies once within a poll tick; a crash-looper doesn't
+re-notify every restart within the cooldown; focused-window activity produces
+nothing.
 
----
+### B51 — Publishing hygiene
+**Do:** Pick and add a LICENSE (the repo is public and currently
+all-rights-reserved by default); a README screenshot from demo mode; CI
+(GitHub Actions: clippy + cargo test + tsc + vitest on push — the B25 release
+pipeline exists but nothing runs the test gate on the public repo).
+**Accept:** fresh clone shows license + screenshot on the landing page; a PR
+that fails clippy is red.
 
 ## Parking lot (one-liners, not yet worth a number)
 
@@ -566,20 +293,100 @@ backends — the thing an Ingress exists to describe.*
 - **App auto-update** — tauri-updater riding the B25 release pipeline; wants a
   signing identity first.
 - **RBAC-aware actions** — `SelfSubjectAccessReview` to grey out verbs the
-  user can't perform instead of failing on click.
+  user can't perform instead of failing on click (pairs with B49).
 - **Watch staleness badge** — a watcher stuck in backoff currently degrades
   silently; surface per-kind staleness in the table header.
-- **Copy as kubectl** — per-row "copy kubectl command" (get/describe/logs
-  equivalents) for handing to people without k7s.
+- **Copy as kubectl** — per-row "copy kubectl command" for handing to people
+  without k7s.
 - **Multi-cluster windows** — one connection per window via Tauri
   multi-window; the ClientManager-per-window boundary already almost allows it.
 - **Light theme** — tokens.css is the single source; a second palette is
   mechanical but needs design taste applied.
+- **NetworkPolicies** — 7 on freya; a table is easy, but the *useful* version
+  (which policies select this pod, in the pod panel) is a selector-matching
+  join worth designing properly.
+- **Persistent port-forwards** — forwards die with the app; remember and
+  re-establish them on reconnect (prefs already persist imports).
 
 ## Suggested order
 
-B28 → B29 → B30 → B31 (P0) → B32 → B33 → B34 → B35 (P1) → B36 → B37 → B39;
-B38 whenever the Prometheus scrape config gets fixed cluster-side.
-Dependencies: B33's object-jump is B28's jump machinery reused (build B28
-first); B34's live fixture wants B36's create (or a kubectl-made scratch
-Deployment); B35 reuses B18's section renderer and B26's decoder as-is.
+B30 → B31 → B44 (P0) → B32 → B34b → B45 → B46 (P1) → B36 → B37 → B39 → B47 →
+B48 → B49 → B50 → B51.
+Dependencies: B34b's live fixture wants B36's create (or a kubectl-made
+scratch Deployment); B44 and B50 reuse B32's problem derivation and B38's
+promql plumbing respectively; B49 is where ServiceAccounts move out of Config.
+
+---
+
+## Completed
+
+Newest first. One line each — the full records (design decisions, live
+verification, corrections of wrong premises) are in the git log and, for
+B28–B43, in the commit messages of `feat/backlog-qol`.
+
+### Backlog v3 (B28–B43)
+
+- **B43 — Ingress detail + IngressClasses.** Rules/TLS tables with
+  existence-checked backend links; named backend ports handled; `ref_cell`
+  born here.
+- **B42 — Links B41 missed + ServiceAccounts.** Endpoints/STS-storage tables
+  wired; SA kind added (SECRETS column flags hand-attached tokens); caught a
+  second 404 (STS `serviceName` naming a Service Argo never created).
+- **B41 — Cell-level nav, ReplicaSets, StorageClasses, volume sources.**
+  `NavTarget` on `Cell`; two new kinds; ConfigMap/Secret volume names
+  surfaced; live harness caught a link to an optional-and-absent Secret —
+  sources are existence-checked via `get_metadata`.
+- **B40 — PersistentVolumes & PersistentVolumeClaims.** Storage nav group;
+  Pending claims show requested capacity; PVs get their own tone function
+  (Available ≠ error).
+- **B38 — Prometheus-backed node-chart history.** `promql.rs`: discovery by
+  convention, `query_range` via the service proxy, timestamp-joined series,
+  live-wins merge; unblocked by converting freya's scrape config to `role:
+  node` SD. *Pod sparklines deferred → B44.*
+- **B37/B36/B39 — not done** (moved above).
+- **B35 — Helm release detail.** Overview / full revision history / values
+  flattened with credential keys redacted in Rust.
+- **B34 — Restart** (pod delete-and-recreate with bare-pod refusal; workload
+  rollout-restart via `restartedAt` patch, validated server-side by dry run).
+  *Undo half → B34b.*
+- **B33 — Related-resource navigation.** Owner links resolving through
+  ReplicaSets; workload → pods via label-selector filter syntax
+  (`lib/filter.ts`); clickable events via Kind+group → nav id resolution.
+- **B32/B31/B30 — not done** (moved above).
+- **B29 — Crash-loop debugging.** `previous` reads (terminate, never follow),
+  since-windows, save-to-file written in Rust (13k lines / 4.8MB past the
+  200-line ring buffer). Backlog premise about `previous` corrected in the
+  process.
+- **B28 — Command palette (⌘K).** fzy-style scorer (`lib/fuzzy.ts`), kinds /
+  objects / actions ranked in one list, `ns:` scoping, atomic `jumpTo`.
+- **B27 — Node metrics plots.** node-exporter scraped over a port-forward,
+  lazy per-open-tab; plotly charts; counter-rate sampler with virtual-iface
+  and pseudo-fs filtering.
+
+### Backlog v2 (B14–B26) — all shipped
+
+Cluster-wide Events view (B14) · CRD discovery + lazy watchers (B15) ·
+Service port-forwards with targetPort resolution (B16) · persisted kubeconfig
+imports (B17) · Properties beyond pods (B18) · shell UX polish (B19) · drain
+via the eviction subresource, PDB-aware (B20) · table virtualization (B21) ·
+window-state persistence incl. SIGTERM (B22) · settings panel with poll
+intervals and log-buffer cap (B23) · dev launch hygiene, `dev/run.sh` (B24) ·
+release pipeline: .app/.dmg + CI caveats (B25) · Helm releases decoded from
+storage Secrets, manifest redaction, `latest_only` (B26).
+
+### Backlog v1 (B1–B13) — all shipped
+
+Detail panel for all kinds (B1) · table filter (B2) · resource actions:
+delete/scale/cordon (B3) · exec shell over xterm (B4) · column sorting (B5) ·
+pod port-forwards (B6) · multi-container interleaved logs (B7) · keyboard
+navigation (B10) · persisted UI state (B11) · namespace pod counts (B12) ·
+pod properties panel (B13).
+
+### Epics (E1–E8) — the original build, all shipped
+
+Scaffold & design foundation (E1) · Rust Kubernetes core: client manager,
+watchers → Row DTOs, metrics/status pollers (E2) · app shell: sidebar,
+topbar, status bar (E3) · resource tables for the 12 original kinds (E4) ·
+pod detail panel: logs/YAML/events (E5) · context switching & resilience
+(E6) · verification, pixel fidelity, packaging (E7) · kubeconfig import (E8).
+Story-level breakdown: [tasks.md](tasks.md).
