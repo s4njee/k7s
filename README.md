@@ -1,10 +1,46 @@
 # k7s
 
-A dark, Lens-style **Kubernetes visual monitor** built as a [Tauri](https://tauri.app) desktop app — a Rust backend talking to the Kubernetes API, with a React + TypeScript frontend that recreates the design in [`design/`](design/).
+A Lens-style **Kubernetes visual monitor** built as a [Tauri](https://tauri.app) desktop app — a Rust backend talking to the Kubernetes API, with a React + TypeScript frontend that recreates the design in [`design/`](design/).
 
 Left navigation over all common resource kinds, live resource tables with namespace filtering, and a pod detail panel with **streaming logs**, **YAML view/edit/apply**, and **Events**.
 
 > Design source of truth: [`design/README.md`](design/README.md) (exact tokens/spacing) and the interactive prototype [`design/K8s Monitor.dc.html`](design/). See [`plan.md`](plan.md) for architecture and [`tasks.md`](tasks.md) for the epic/story breakdown.
+
+## Screenshots
+
+Captured from demo mode, so the data is the stable fixture set rather than a real
+cluster. Regenerate with `pnpm dev:shots` (see [`dev/shots.mjs`](dev/shots.mjs)).
+
+![The resource table](docs/screenshots/01-pods-table.png)
+
+*The resource table: 22 built-in kinds plus discovered CRDs, with live counts and
+backend-driven status colouring.*
+
+![Logs](docs/screenshots/02-logs.png)
+
+*Log streaming with follow/pause, a container cycler, since-windows and
+save-to-file. Levels are parsed and toned, so a crash loop reads at a glance.*
+
+![Properties](docs/screenshots/03-properties.png)
+
+*The Properties view — "what is this actually wired to". References are links: the
+owner resolves through the ReplicaSet to the Deployment. A reference that doesn't
+resolve says so (`heimdall-auth-tls (not found)`) instead of linking to a 404.*
+
+![YAML](docs/screenshots/04-yaml.png)
+
+*YAML view and edit. Applying runs a server-side dry run first and shows the diff
+— defaulting and mutating webhooks included — before anything is written.*
+
+![Shell](docs/screenshots/05-shell.png)
+
+*An interactive shell into a container. Nodes get one too, via a privileged debug
+pod that `nsenter`s into the host's namespaces.*
+
+![Node metrics](docs/screenshots/06-metrics.png)
+
+*Node metrics from node-exporter, backfilled from Prometheus when the cluster runs
+one. Filesystems are sorted fullest-first.*
 
 ## Features
 
@@ -13,11 +49,12 @@ Left navigation over all common resource kinds, live resource tables with namesp
 - **Resource tables** with per-kind columns, namespace filtering, label-selector filtering (`app=web,tier=api`), sorting, and status coloring driven by the backend. Large tables are windowed.
 - **Detail panels** for every kind: follow/pause **log streaming** (container cycler, interleaved multi-container, `previous`-container reads for crash loops, since-windows, save-to-file), **YAML** view/edit/apply, **Events**, and a **Properties** view answering "what is this actually wired to".
 - **Related-resource navigation** — references are links. A pod's owner resolves *through* its ReplicaSet to the Deployment; a claim opens its volume; an event opens the object it's about. A reference that doesn't resolve says so instead of linking to a 404.
-- **Interactive shell** into a container (xterm.js), and **port-forwarding** for pods and Services.
-- **Actions**: scale, restart (pod delete-and-recreate, or a workload rollout restart), cordon/uncordon, drain (eviction-based, so PodDisruptionBudgets are honoured), delete — each with the confirmation its blast radius deserves.
+- **Interactive shell** into a container (xterm.js), and **port-forwarding** for pods and Services. Nodes get a **root debug shell** too — a privileged pod pinned to the node that `nsenter`s into the host's namespaces, behind an explicit consent screen and with a server-side deadline so it can't outlive the app.
+- **Actions**: scale, restart (pod delete-and-recreate, or a workload rollout restart), cordon/uncordon, drain (eviction-based, so PodDisruptionBudgets are honoured), delete — each with the confirmation its blast radius deserves. Reachable from the detail panel or a **row context menu**, with shift/⌘-click **multi-select** for bulk deletes and cordons; bulk confirmations enumerate exactly what they'll act on.
 - **Helm releases** decoded straight from their storage Secrets — overview, full revision history, and values with credential keys redacted in Rust.
 - **Node metrics** plotted from node-exporter, backfilled from **Prometheus** when the cluster runs one.
 - **Command palette** (⌘K) with fzy-style fuzzy ranking over kinds, objects and actions.
+- **Light and dark themes**, following the OS by default. Light mode keeps a bright work area with dark side panels; the terminal and charts resolve their colours from the live design tokens rather than a hardcoded copy.
 - **Status bar** with API latency, nodes ready, and cluster CPU/MEM % (via `metrics.k8s.io`, degrading to `—` when metrics-server is absent).
 
 ## Prerequisites
@@ -83,7 +120,8 @@ against the design without a cluster.
 | `Enter` | Open the highlighted row's detail |
 | `g g` / `G` | Jump to the first / last row |
 | `/` | Focus the table filter |
-| `Esc` | Close an open menu → else clear the filter → else close the detail panel |
+| `Esc` | Close an open menu → else clear a multi-row selection → else clear the filter → else close the detail panel |
+| Shift-click / ⌘-click | Extend / toggle the row selection; right-click for the actions menu |
 | `[` / `]` | Cycle the detail panel's tabs |
 
 Shortcuts are ignored while typing in a field (filter, log search, YAML editor).
@@ -116,10 +154,15 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 npm run tauri:build              # produces a native app/installer under src-tauri/target
 ```
 
-Output: `src-tauri/target/release/bundle/macos/k7s.app` (and a `.dmg`). The Tauri
-window background is set to `#0d0d0f` and fonts are bundled locally, so the app
-launches dark with no white flash and needs no network at startup. Launching without
-a kubeconfig lands in a clean disconnected state.
+Output: `src-tauri/target/release/bundle/macos/k7s.app` (and a `.dmg`). Fonts are
+bundled locally, so the app needs no network at startup, and the palette is chosen
+before first paint (from a `localStorage` cache, since prefs load asynchronously)
+so there's no flash of the wrong theme. Launching without a kubeconfig lands in a
+clean disconnected state.
+
+> The Tauri window's own `backgroundColor` is still the dark `#0d0d0f`, so
+> launching *in light mode* shows a brief dark frame before the webview paints.
+> That one is static config and can't follow the runtime theme.
 
 > Note: the final `.dmg` styling step (`bundle_dmg.sh`) drives Finder/AppleScript
 > and requires a logged-in GUI session — it fails in headless/CI environments even
