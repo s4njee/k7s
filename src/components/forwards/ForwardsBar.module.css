@@ -1,0 +1,58 @@
+/* Active port-forwards strip (B6), shown above the status bar when any exist. */
+.bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 16px;
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-panel);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  overflow-x: auto;
+}
+.label {
+  color: var(--text-faint);
+  flex: none;
+}
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+  flex: none;
+}
+/* A forward whose connections are failing (B16) — still listed, but flagged. */
+.itemError {
+  border-color: var(--status-err);
+}
+.errorMark {
+  color: var(--status-err);
+  font-weight: 700;
+}
+
+.local {
+  color: var(--accent);
+  cursor: pointer;
+}
+.local:hover {
+  text-decoration: underline;
+}
+.arrow {
+  color: var(--text-faint);
+}
+.target {
+  color: var(--text-secondary);
+}
+.stop {
+  cursor: pointer;
+  color: var(--text-muted);
+  padding-left: 2px;
+}
+.stop:hover {
+  color: var(--status-err);
+}

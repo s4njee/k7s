@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;background:#0d0d0f;overflow:hidden}
+a{color:#4d9fff;text-decoration:none}a:hover{color:#7db8ff}
+*{box-sizing:border-box}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#26262b;border-radius:5px;border:2px solid #0d0d0f}
+::-webkit-scrollbar-thumb:hover{background:#34343c}
+@keyframes livePulse{0%,100%{opacity:1}50%{opacity:.25}}
+input,textarea{outline:none}
+</style>
+</helmet>
+<div style="display:flex;width:100vw;height:100vh;background:#0d0d0f;color:#d2d2d8;font-family:'IBM Plex Sans',sans-serif;font-size:13px;overflow:hidden">
+
+  <!-- ============ SIDEBAR ============ -->
+  <div style="width:216px;flex:none;display:flex;flex-direction:column;background:#121214;border-right:1px solid #26262b">
+    <!-- cluster switcher -->
+    <div style="position:relative;padding:10px 10px 8px;border-bottom:1px solid #26262b">
+      <div onClick="{{ toggleClusterMenu }}" style="display:flex;align-items:center;gap:9px;padding:8px 10px;background:#17171a;border:1px solid #2e2e34;border-radius:6px;cursor:pointer" style-hover="border-color:#4a4a55">
+        <div style="width:24px;height:24px;flex:none;border-radius:5px;background:#34343c;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:#d2d2d8">FR</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:12.5px;color:#ececf1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ clusterName }}</div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:#70707a;font-family:'JetBrains Mono',monospace"><span style="width:6px;height:6px;border-radius:50%;background:#9ece6a"></span>connected · v1.31</div>
+        </div>
+        <span style="color:#70707a;font-size:9px">▼</span>
+      </div>
+      <sc-if value="{{ clusterMenuOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;left:10px;right:10px;top:56px;z-index:50;background:#17171a;border:1px solid #38383f;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.5);overflow:hidden">
+          <sc-for list="{{ clusters }}" as="cl" hint-placeholder-count="2">
+            <div onClick="{{ cl.pick }}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;background:{{ cl.bg }}" style-hover="background:#222227">
+              <span style="width:6px;height:6px;border-radius:50%;flex:none;background:{{ cl.dot }}"></span>
+              <span style="flex:1;font-size:12.5px;color:#ececf1">{{ cl.name }}</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#70707a">{{ cl.env }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+    <!-- nav -->
+    <div style="flex:1;overflow-y:auto;padding:6px 0 12px">
+      <sc-for list="{{ navSections }}" as="sec" hint-placeholder-count="4">
+        <div style="padding:12px 16px 5px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.12em;color:#57575f;text-transform:uppercase">{{ sec.label }}</div>
+        <sc-for list="{{ sec.items }}" as="it" hint-placeholder-count="3">
+          <div onClick="{{ it.go }}" style="display:flex;align-items:center;gap:9px;margin:1px 8px;padding:5px 8px;border-radius:5px;cursor:pointer;background:{{ it.bg }};border-left:2px solid {{ it.bar }}" style-hover="background:#1b1b1f">
+            <span style="width:14px;text-align:center;font-size:11px;color:{{ it.iconColor }}">{{ it.icon }}</span>
+            <span style="flex:1;font-size:12.5px;color:{{ it.color }}">{{ it.label }}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#70707a">{{ it.count }}</span>
+          </div>
+        </sc-for>
+      </sc-for>
+    </div>
+    <div style="padding:10px 16px;border-top:1px solid #26262b;display:flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#70707a">
+      <span style="width:6px;height:6px;border-radius:50%;background:#8e8e98;animation:livePulse 2s infinite"></span>watch: 9 streams active
+    </div>
+  </div>
+
+  <!-- ============ MAIN ============ -->
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+    <!-- top bar -->
+    <div style="flex:none;display:flex;align-items:center;gap:14px;height:46px;padding:0 16px;border-bottom:1px solid #26262b;background:#101012">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#70707a">freya <span style="color:#3a3a42">/</span> {{ crumbGroup }} <span style="color:#3a3a42">/</span> <span style="color:#ececf1;font-weight:600">{{ crumbKind }}</span></div>
+      <div style="flex:1"></div>
+      <div style="position:relative">
+        <div onClick="{{ toggleNsMenu }}" style="display:flex;align-items:center;gap:7px;padding:4px 10px;background:#17171a;border:1px solid #26262b;border-radius:5px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:11px;color:#a4a4ae" style-hover="border-color:#4a4a55"><span style="color:#57575f">ns:</span><span style="color:#ececf1">{{ nsLabel }}</span><span style="color:#57575f;font-size:8px">▼</span></div>
+        <sc-if value="{{ nsMenuOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;right:0;top:32px;z-index:60;min-width:170px;background:#17171a;border:1px solid #38383f;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.5);overflow:hidden;padding:4px 0">
+            <sc-for list="{{ nsItems }}" as="ns" hint-placeholder-count="5">
+              <div onClick="{{ ns.pick }}" style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:11px;color:{{ ns.color }};background:{{ ns.bg }}" style-hover="background:#222227"><span style="width:12px;color:#4d9fff">{{ ns.check }}</span>{{ ns.label }}</div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+
+    <div style="flex:1;min-height:0;display:flex">
+      <!-- resource table -->
+      <div style="flex:1;min-width:0;overflow:auto">
+        <table style="width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:11.5px">
+          <thead>
+            <tr>
+              <sc-for list="{{ columns }}" as="col" hint-placeholder-count="5">
+                <th style="position:sticky;top:0;z-index:2;background:#101012;text-align:left;padding:8px 14px;font-size:10px;font-weight:600;letter-spacing:.1em;color:#57575f;border-bottom:1px solid #26262b;white-space:nowrap">{{ col }}</th>
+              </sc-for>
+            </tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{ rows }}" as="row" hint-placeholder-count="8">
+              <tr onClick="{{ row.pick }}" style="cursor:pointer;background:{{ row.bg }}" style-hover="background:#17171a">
+                <sc-for list="{{ row.cells }}" as="cell" hint-placeholder-count="5">
+                  <td style="padding:6px 14px;border-bottom:1px solid #1b1b1f;white-space:nowrap;color:{{ cell.color }}">{{ cell.dot }}{{ cell.text }}</td>
+                </sc-for>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+        <sc-if value="{{ emptyTable }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:40px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px;color:#57575f">no resources match filter</div>
+        </sc-if>
+      </div>
+
+      <!-- ============ DETAIL PANEL ============ -->
+      <sc-if value="{{ detailOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="width:47%;min-width:520px;flex:none;display:flex;flex-direction:column;border-left:1px solid #26262b;background:#101012">
+          <!-- detail header -->
+          <div style="flex:none;padding:12px 16px 0">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:8px;height:8px;border-radius:50%;flex:none;background:{{ detail.statusColor }}"></span>
+              <div style="flex:1;min-width:0;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:#ececf1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ detail.name }}</div>
+              <div onClick="{{ closeDetail }}" style="width:24px;height:24px;flex:none;display:flex;align-items:center;justify-content:center;border-radius:5px;cursor:pointer;color:#70707a;font-size:14px" style-hover="background:#222227;color:#ececf1">×</div>
+            </div>
+            <div style="display:flex;gap:14px;margin:6px 0 10px;padding-left:18px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#70707a">
+              <span>ns: <span style="color:#a4a4ae">{{ detail.namespace }}</span></span>
+              <span>node: <span style="color:#a4a4ae">{{ detail.node }}</span></span>
+              <span>age: <span style="color:#a4a4ae">{{ detail.age }}</span></span>
+              <span style="color:{{ detail.statusColor }}">{{ detail.status }}</span>
+            </div>
+            <div style="display:flex;gap:2px;border-bottom:1px solid #26262b">
+              <sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="3">
+                <div onClick="{{ tab.pick }}" style="padding:7px 14px;cursor:pointer;font-size:12px;font-weight:500;color:{{ tab.color }};border-bottom:2px solid {{ tab.bar }};margin-bottom:-1px" style-hover="color:#ececf1">{{ tab.label }}</div>
+              </sc-for>
+            </div>
+          </div>
+
+          <!-- LOGS TAB -->
+          <sc-if value="{{ showLogs }}" hint-placeholder-val="{{ true }}">
+            <div style="flex:none;display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #1b1b1f">
+              <div style="display:flex;align-items:center;gap:6px;flex:1;background:#0d0d0f;border:1px solid #26262b;border-radius:5px;padding:4px 9px">
+                <span style="color:#57575f;font-size:11px">⌕</span>
+                <input value="{{ logSearch }}" onChange="{{ setLogSearch }}" placeholder="filter logs…" style="flex:1;background:transparent;border:none;color:#d2d2d8;font-family:'JetBrains Mono',monospace;font-size:11px">
+              </div>
+              <div onClick="{{ cycleContainer }}" title="container" style="display:flex;align-items:center;gap:6px;padding:4px 9px;background:#0d0d0f;border:1px solid #26262b;border-radius:5px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#a4a4ae" style-hover="border-color:#4a4a55"><span style="color:#57575f">▣</span>{{ containerLabel }}<span style="color:#57575f;font-size:8px">▼</span></div>
+              <div onClick="{{ toggleTimestamps }}" style="padding:4px 9px;border-radius:5px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:10.5px;border:1px solid {{ tsBorder }};color:{{ tsColor }}" style-hover="border-color:#4a4a55">ts</div>
+              <div onClick="{{ toggleFollow }}" style="display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:5px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:600;border:1px solid {{ followBorder }};color:{{ followColor }};background:{{ followBg }}">{{ followLabel }}</div>
+            </div>
+            <div ref="{{ logRef }}" style="flex:1;min-height:0;overflow-y:auto;padding:8px 0;background:#0a0a0c;font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.65">
+              <sc-for list="{{ logLines }}" as="ln" hint-placeholder-count="10">
+                <div style="display:flex;gap:10px;padding:0 14px;white-space:pre-wrap" style-hover="background:#151519">
+                  <span style="flex:none;color:#4c4c55">{{ ln.ts }}</span>
+                  <span style="flex:none;width:42px;font-weight:600;color:{{ ln.levelColor }}">{{ ln.level }}</span>
+                  <span style="color:{{ ln.msgColor }};word-break:break-word">{{ ln.msg }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="flex:none;display:flex;gap:14px;padding:6px 14px;border-top:1px solid #1b1b1f;font-family:'JetBrains Mono',monospace;font-size:10px;color:#57575f">
+              <span>{{ logCount }} lines</span><span>container: {{ containerLabel }}</span><span style="color:{{ followColor }}">{{ streamStatus }}</span>
+            </div>
+          </sc-if>
+
+          <!-- YAML TAB -->
+          <sc-if value="{{ showYaml }}" hint-placeholder-val="{{ false }}">
+            <div style="flex:none;display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #1b1b1f">
+              <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#70707a">{{ yamlPath }}</span>
+              <div style="flex:1"></div>
+              <sc-if value="{{ yamlEditing }}" hint-placeholder-val="{{ false }}">
+                <div onClick="{{ cancelYaml }}" style="padding:4px 12px;border-radius:5px;cursor:pointer;font-size:11px;color:#a4a4ae;border:1px solid #26262b" style-hover="border-color:#4a4a55">Cancel</div>
+                <div onClick="{{ applyYaml }}" style="padding:4px 12px;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;color:#0d0d0f;background:#4d9fff" style-hover="background:#7db8ff">Apply ⏎</div>
+              </sc-if>
+              <sc-if value="{{ yamlNotEditing }}" hint-placeholder-val="{{ true }}">
+                <div onClick="{{ startYamlEdit }}" style="padding:4px 12px;border-radius:5px;cursor:pointer;font-size:11px;color:#4d9fff;border:1px solid #2a4a75" style-hover="background:#12203a">✎ Edit</div>
+              </sc-if>
+            </div>
+            <sc-if value="{{ yamlEditing }}" hint-placeholder-val="{{ false }}">
+              <textarea defaultValue="{{ yamlText }}" onChange="{{ setYamlDraft }}" spellCheck="{{ false }}" style="flex:1;min-height:0;resize:none;border:none;background:#0a0a0c;color:#d2d2d8;font-family:'JetBrains Mono',monospace;font-size:11.5px;line-height:1.6;padding:10px 16px;border-left:3px solid #4d9fff"></textarea>
+            </sc-if>
+            <sc-if value="{{ yamlNotEditing }}" hint-placeholder-val="{{ true }}">
+              <div style="flex:1;min-height:0;overflow:auto;background:#0a0a0c;padding:10px 0;font-family:'JetBrains Mono',monospace;font-size:11.5px;line-height:1.6">
+                <sc-for list="{{ yamlLines }}" as="yl" hint-placeholder-count="12">
+                  <div style="display:flex;padding:0 14px;white-space:pre" style-hover="background:#151519">
+                    <span style="flex:none;width:30px;color:#34343c;text-align:right;padding-right:14px;user-select:none">{{ yl.n }}</span>
+                    <span style="color:#a4a4ae">{{ yl.key }}</span><span style="color:#70707a">{{ yl.colon }}</span><span style="color:{{ yl.valColor }}">{{ yl.val }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </sc-if>
+
+          <!-- EVENTS TAB -->
+          <sc-if value="{{ showEvents }}" hint-placeholder-val="{{ false }}">
+            <div style="flex:1;min-height:0;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:8px">
+              <sc-for list="{{ events }}" as="ev" hint-placeholder-count="4">
+                <div style="display:flex;gap:12px;padding:9px 12px;background:#121214;border:1px solid #26262b;border-radius:6px">
+                  <span style="flex:none;width:52px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;padding-top:2px;color:{{ ev.typeColor }}">{{ ev.type }}</span>
+                  <div style="flex:1;min-width:0">
+                    <div style="display:flex;gap:10px;align-items:baseline"><span style="font-weight:600;font-size:12px;color:#ececf1">{{ ev.reason }}</span><span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#57575f">{{ ev.age }} · ×{{ ev.n }}</span></div>
+                    <div style="font-size:11.5px;color:#a4a4ae;margin-top:2px">{{ ev.msg }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+    </div>
+
+    <!-- status bar -->
+    <div style="flex:none;display:flex;align-items:center;gap:18px;height:26px;padding:0 16px;border-top:1px solid #26262b;background:#121214;font-family:'JetBrains Mono',monospace;font-size:10px;color:#70707a">
+      <span style="color:#9ece6a">● freya</span><span>api: 42ms</span><span>nodes 6/6 ready</span><span>cpu 41%</span><span>mem 63%</span>
+      <div style="flex:1"></div><span>kubectl ctx: freya-admin</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;logRateMs&quot;: {&quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 900, &quot;min&quot;: 200, &quot;max&quot;: 3000, &quot;step&quot;: 100, &quot;unit&quot;: &quot;ms&quot;, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Log stream&quot;}, &quot;maxLogLines&quot;: {&quot;editor&quot;: &quot;int&quot;, &quot;default&quot;: 200, &quot;min&quot;: 50, &quot;max&quot;: 1000, &quot;tsType&quot;: &quot;number&quot;, &quot;section&quot;: &quot;Log stream&quot;}}">
+class Component extends DCLogic {
+  state = { nav: 'pods', ns: 'all', clusterMenuOpen: false, nsMenuOpen: false, selected: 'valkyrie-api-7d9f8b64d-x2k4n', tab: 'logs',
+    logSearch: '', containerIdx: 0, showTs: true, following: true, logs: [], yamlEditing: false, yamlDraft: '' };
+
+  componentDidMount() {
+    this.logRef = React.createRef();
+    this.seedLogs();
+    this.timer = setInterval(() => {
+      if (!this.state.following || this.state.tab !== 'logs' || !this.state.selected) return;
+      this.pushLog();
+    }, this.props.logRateMs ?? 900);
+  }
+  componentWillUnmount() { clearInterval(this.timer); }
+  componentDidUpdate() {
+    if (this.state.following && this.logRef && this.logRef.current) {
+      const el = this.logRef.current; el.scrollTop = el.scrollHeight;
+    }
+  }
+
+  // ---------- data ----------
+  get pods() { return [
+    { name: 'valkyrie-api-7d9f8b64d-x2k4n', ns: 'prod', ready: '3/3', restarts: 0, cpu: '212m', mem: '486Mi', age: '4d2h', status: 'Running', node: 'freya-node-02', containers: ['valkyrie-api', 'istio-proxy', 'log-shipper'] },
+    { name: 'valkyrie-api-7d9f8b64d-p9w7z', ns: 'prod', ready: '3/3', restarts: 0, cpu: '198m', mem: '471Mi', age: '4d2h', status: 'Running', node: 'freya-node-04', containers: ['valkyrie-api', 'istio-proxy', 'log-shipper'] },
+    { name: 'bifrost-gateway-5c7dd4f6b-jl2mn', ns: 'prod', ready: '2/2', restarts: 1, cpu: '341m', mem: '812Mi', age: '11d', status: 'Running', node: 'freya-node-01', containers: ['bifrost-gateway', 'istio-proxy'] },
+    { name: 'yggdrasil-db-0', ns: 'prod', ready: '1/1', restarts: 0, cpu: '890m', mem: '3.2Gi', age: '31d', status: 'Running', node: 'freya-node-03', containers: ['postgres'] },
+    { name: 'yggdrasil-db-1', ns: 'prod', ready: '1/1', restarts: 0, cpu: '124m', mem: '2.9Gi', age: '31d', status: 'Running', node: 'freya-node-05', containers: ['postgres'] },
+    { name: 'heimdall-auth-6b8c9d5f7-qq3rt', ns: 'prod', ready: '1/2', restarts: 14, cpu: '45m', mem: '203Mi', age: '2h14m', status: 'CrashLoopBackOff', node: 'freya-node-02', containers: ['heimdall-auth', 'istio-proxy'] },
+    { name: 'mimir-cache-7f4b8c6d9-ab8cd', ns: 'prod', ready: '1/1', restarts: 0, cpu: '67m', mem: '1.1Gi', age: '11d', status: 'Running', node: 'freya-node-04', containers: ['redis'] },
+    { name: 'valkyrie-api-canary-89f7c5d4b-nn2kp', ns: 'staging', ready: '0/3', restarts: 0, cpu: '—', mem: '—', age: '38s', status: 'Pending', node: '—', containers: ['valkyrie-api', 'istio-proxy', 'log-shipper'] },
+    { name: 'loki-runner-6d9f7b8c5-tt4vw', ns: 'staging', ready: '1/1', restarts: 2, cpu: '88m', mem: '340Mi', age: '3d', status: 'Running', node: 'freya-node-06', containers: ['loki-runner'] },
+    { name: 'prometheus-server-0', ns: 'monitoring', ready: '2/2', restarts: 0, cpu: '512m', mem: '2.4Gi', age: '31d', status: 'Running', node: 'freya-node-01', containers: ['prometheus', 'config-reloader'] },
+    { name: 'grafana-5f8d7c6b9-mm1xz', ns: 'monitoring', ready: '1/1', restarts: 0, cpu: '34m', mem: '187Mi', age: '31d', status: 'Running', node: 'freya-node-06', containers: ['grafana'] },
+    { name: 'coredns-76f75df574-8rk2j', ns: 'kube-system', ready: '1/1', restarts: 0, cpu: '12m', mem: '31Mi', age: '31d', status: 'Running', node: 'freya-node-01', containers: ['coredns'] },
+    { name: 'kube-proxy-x9d4m', ns: 'kube-system', ready: '1/1', restarts: 0, cpu: '8m', mem: '24Mi', age: '31d', status: 'Running', node: 'freya-node-02', containers: ['kube-proxy'] },
+  ]; }
+
+  get resourceDefs() {
+    const R = (name, ns, rest) => ({ name, ns, ...rest });
+    return {
+      pods: { group: 'workloads', label: 'Pods', icon: '◉' },
+      deployments: { group: 'workloads', label: 'Deployments', icon: '▲', cols: ['NAME','NAMESPACE','READY','UP-TO-DATE','AVAILABLE','AGE'], rows: [
+        R('valkyrie-api','prod',{c:['2/2','2','2','4d2h']}), R('bifrost-gateway','prod',{c:['1/1','1','1','11d']}), R('heimdall-auth','prod',{c:['0/1','1','0','2h14m'],warn:true}), R('mimir-cache','prod',{c:['1/1','1','1','11d']}), R('valkyrie-api-canary','staging',{c:['0/1','1','0','38s'],warn:true}), R('grafana','monitoring',{c:['1/1','1','1','31d']}) ] },
+      statefulsets: { group: 'workloads', label: 'StatefulSets', icon: '≡', cols: ['NAME','NAMESPACE','READY','AGE'], rows: [ R('yggdrasil-db','prod',{c:['2/2','31d']}), R('prometheus-server','monitoring',{c:['1/1','31d']}) ] },
+      daemonsets: { group: 'workloads', label: 'DaemonSets', icon: '⦿', cols: ['NAME','NAMESPACE','DESIRED','READY','AGE'], rows: [ R('kube-proxy','kube-system',{c:['6','6','31d']}), R('node-exporter','monitoring',{c:['6','6','31d']}), R('fluent-bit','monitoring',{c:['6','6','18d']}) ] },
+      jobs: { group: 'workloads', label: 'Jobs', icon: '▸', cols: ['NAME','NAMESPACE','COMPLETIONS','DURATION','AGE'], rows: [ R('db-migrate-v214','prod',{c:['1/1','42s','4d2h']}), R('report-gen-28661','prod',{c:['1/1','3m12s','6h']}) ] },
+      cronjobs: { group: 'workloads', label: 'CronJobs', icon: '↻', cols: ['NAME','NAMESPACE','SCHEDULE','LAST RUN','AGE'], rows: [ R('report-gen','prod',{c:['0 */6 * * *','6h ago','31d']}), R('cache-warm','prod',{c:['*/15 * * * *','4m ago','11d']}) ] },
+      services: { group: 'network', label: 'Services', icon: '⇄', cols: ['NAME','NAMESPACE','TYPE','CLUSTER-IP','PORTS','AGE'], rows: [ R('valkyrie-api','prod',{c:['ClusterIP','10.96.14.22','8080/TCP','31d']}), R('bifrost-gateway','prod',{c:['LoadBalancer','10.96.8.101','443/TCP','31d']}), R('yggdrasil-db','prod',{c:['ClusterIP','None','5432/TCP','31d']}), R('grafana','monitoring',{c:['ClusterIP','10.96.31.7','3000/TCP','31d']}) ] },
+      ingresses: { group: 'network', label: 'Ingresses', icon: '⇥', cols: ['NAME','NAMESPACE','HOSTS','CLASS','AGE'], rows: [ R('api-public','prod',{c:['api.freya.io','nginx','31d']}), R('grafana','monitoring',{c:['grafana.freya.internal','nginx','31d']}) ] },
+      configmaps: { group: 'config', label: 'ConfigMaps', icon: '☰', cols: ['NAME','NAMESPACE','DATA','AGE'], rows: [ R('valkyrie-api-config','prod',{c:['9','4d2h']}), R('bifrost-routes','prod',{c:['14','11d']}), R('coredns','kube-system',{c:['1','31d']}) ] },
+      secrets: { group: 'config', label: 'Secrets', icon: '⚿', cols: ['NAME','NAMESPACE','TYPE','DATA','AGE'], rows: [ R('yggdrasil-db-creds','prod',{c:['Opaque','3','31d']}), R('tls-api-freya-io','prod',{c:['kubernetes.io/tls','2','12d']}), R('registry-pull','prod',{c:['dockerconfigjson','1','31d']}) ] },
+      nodes: { group: 'cluster', label: 'Nodes', icon: '▢', cols: ['NAME','STATUS','ROLES','CPU','MEMORY','VERSION'], rows: [ R('freya-node-01','',{c:['Ready','control-plane','38%','61%','v1.31.2'],ok:true}), R('freya-node-02','',{c:['Ready','worker','52%','74%','v1.31.2'],ok:true}), R('freya-node-03','',{c:['Ready','worker','71%','82%','v1.31.2'],ok:true}), R('freya-node-04','',{c:['Ready','worker','44%','58%','v1.31.2'],ok:true}), R('freya-node-05','',{c:['Ready','worker','29%','66%','v1.31.2'],ok:true}), R('freya-node-06','',{c:['Ready','worker','12%','39%','v1.31.2'],ok:true}) ] },
+      namespaces: { group: 'cluster', label: 'Namespaces', icon: '◫', cols: ['NAME','STATUS','PODS','AGE'], rows: [ R('prod','',{c:['Active','7','31d'],ok:true}), R('staging','',{c:['Active','2','31d'],ok:true}), R('monitoring','',{c:['Active','2','31d'],ok:true}), R('kube-system','',{c:['Active','2','31d'],ok:true}), R('default','',{c:['Active','0','31d'],ok:true}) ] },
+    };
+  }
+
+  seedLogs() {
+    const lines = []; const now = Date.now();
+    for (let i = 30; i > 0; i--) lines.push(this.makeLog(new Date(now - i * 1400)));
+    this.setState({ logs: lines });
+  }
+  makeLog(date) {
+    const pod = this.pods.find(p => p.name === this.state.selected) || this.pods[0];
+    const crash = pod.status === 'CrashLoopBackOff';
+    const pool = crash ? [
+      ['ERROR', 'connection refused: dial tcp 10.96.14.30:6379 (auth token cache)'],
+      ['ERROR', 'panic recovered: nil pointer in session.Validate — restarting handler'],
+      ['WARN', 'retry 4/5 for upstream token exchange, backoff 8s'],
+      ['INFO', 'starting heimdall-auth v2.4.1 (commit 9f2ec1a)'],
+      ['ERROR', 'liveness probe will fail: dependency check timed out after 5s'],
+    ] : [
+      ['INFO', 'GET /v1/valkyries/roster 200 12ms trace=8f2c1a'],
+      ['INFO', 'POST /v1/flights 201 34ms trace=b91e02'],
+      ['INFO', 'GET /healthz 200 1ms'],
+      ['DEBUG', 'cache hit ratio=0.94 keys=18234 evictions=0'],
+      ['INFO', 'GET /v1/valkyries/551/loadout 200 18ms trace=77ac1f'],
+      ['WARN', 'slow query: SELECT * FROM missions WHERE realm=$1 (412ms)'],
+      ['INFO', 'grpc unary /odin.Dispatch/Assign ok 9ms'],
+      ['DEBUG', 'wal checkpoint complete lsn=0/8F2A1C40'],
+      ['INFO', 'PUT /v1/flights/2214/status 200 22ms trace=cd120e'],
+      ['ERROR', 'context deadline exceeded calling mimir-cache (fallback to db)'],
+    ];
+    const [level, msg] = pool[Math.floor(Math.random() * pool.length)];
+    const d = date || new Date();
+    const ts = d.toISOString().slice(11, 23);
+    const container = (pod.containers || ['app'])[this.state.containerIdx % (pod.containers || ['app']).length];
+    return { ts, level, msg, container };
+  }
+  pushLog() {
+    this.setState(s => ({ logs: [...s.logs.slice(-(this.props.maxLogLines ?? 200)), this.makeLog()] }));
+  }
+
+  yamlFor(pod) {
+    return `apiVersion: v1
+kind: Pod
+metadata:
+  name: ${pod.name}
+  namespace: ${pod.ns}
+  labels:
+    app: ${pod.name.split('-').slice(0, 2).join('-')}
+    version: v2.4.1
+    team: platform
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+spec:
+  nodeName: ${pod.node}
+  serviceAccountName: ${pod.ns}-runtime
+  containers:
+${pod.containers.map(c => `    - name: ${c}
+      image: registry.freya.io/${c}:v2.4.1
+      ports:
+        - containerPort: 8080
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+      readinessProbe:
+        httpGet:
+          path: /healthz
+          port: 8080
+        periodSeconds: 10`).join('\n')}
+  restartPolicy: Always
+status:
+  phase: ${pod.status === 'Running' ? 'Running' : pod.status}
+  podIP: 10.244.${Math.floor(Math.random() * 5) + 1}.${Math.floor(Math.random() * 200) + 10}
+  qosClass: Burstable`;
+  }
+
+  // ---------- render ----------
+  renderVals() {
+    const s = this.state, defs = this.resourceDefs;
+    const statusColor = st => st === 'Running' || st === 'Ready' || st === 'Active' ? '#9ece6a' : st === 'Pending' ? '#e0af68' : '#f7768e';
+    const namespaces = ['all', 'prod', 'staging', 'monitoring', 'kube-system'];
+    const groupLabels = { workloads: 'Workloads', network: 'Network', config: 'Config', cluster: 'Cluster' };
+    const groups = ['workloads', 'network', 'config', 'cluster'];
+    const podRows = this.pods;
+
+    const navSections = groups.map(g => ({ label: groupLabels[g], items: Object.entries(defs).filter(([, d]) => d.group === g).map(([id, d]) => {
+      const active = s.nav === id;
+      const count = id === 'pods' ? podRows.length : (d.rows || []).length;
+      return { label: d.label, icon: d.icon, count, go: () => this.setState({ nav: id, selected: null, clusterMenuOpen: false }),
+        bg: active ? '#16233a' : 'transparent', bar: active ? '#4d9fff' : 'transparent',
+        color: active ? '#ececf1' : '#8e8e98', iconColor: active ? '#4d9fff' : '#57575f' };
+    }) }));
+
+    let columns, rows, emptyTable = false;
+    const nsFiltered = arr => arr.filter(r => s.ns === 'all' || r.ns === s.ns || !r.ns);
+    if (s.nav === 'pods') {
+      columns = ['NAME', 'NAMESPACE', 'READY', 'RESTARTS', 'CPU', 'MEM', 'AGE', 'STATUS'];
+      rows = nsFiltered(podRows).map(p => ({
+        pick: () => this.setState({ selected: p.name, tab: 'logs', yamlEditing: false }, () => this.seedLogs()),
+        bg: s.selected === p.name ? '#122036' : 'transparent',
+        cells: [
+          { text: p.name, color: '#ececf1', dot: '' },
+          { text: p.ns, color: '#70707a', dot: '' },
+          { text: p.ready, color: p.ready[0] === '0' || p.ready[0] !== p.ready[2] ? '#e0af68' : '#a4a4ae', dot: '' },
+          { text: String(p.restarts), color: p.restarts > 5 ? '#f7768e' : '#a4a4ae', dot: '' },
+          { text: p.cpu, color: '#a4a4ae', dot: '' }, { text: p.mem, color: '#a4a4ae', dot: '' },
+          { text: p.age, color: '#70707a', dot: '' },
+          { text: p.status, color: statusColor(p.status), dot: '● ' },
+        ] }));
+    } else {
+      const d = defs[s.nav];
+      columns = d.cols;
+      rows = nsFiltered(d.rows).map(r => ({ pick: () => {}, bg: 'transparent',
+        cells: [{ text: r.name, color: '#ececf1', dot: '' }, ...(r.ns !== '' ? [{ text: r.ns, color: '#70707a', dot: '' }] : []),
+          ...r.c.map((v, i) => ({ text: v, color: r.ok && i === 0 ? '#9ece6a' : r.warn && (v[0] === '0') ? '#e0af68' : '#a4a4ae', dot: r.ok && i === 0 ? '● ' : '' }))] }));
+    }
+    emptyTable = rows.length === 0;
+
+    const pod = s.nav === 'pods' ? podRows.find(p => p.name === s.selected) : null;
+    const detailOpen = !!pod;
+    const containers = pod ? pod.containers : ['app'];
+    const containerLabel = containers[s.containerIdx % containers.length];
+
+    const tabDefs = [['logs', 'Logs'], ['yaml', 'YAML'], ['events', 'Events']];
+    const tabs = tabDefs.map(([id, label]) => ({ label, pick: () => this.setState({ tab: id, yamlEditing: false }),
+      color: s.tab === id ? '#ececf1' : '#70707a', bar: s.tab === id ? '#4d9fff' : 'transparent' }));
+
+    const q = s.logSearch.toLowerCase();
+    const logLines = s.logs.filter(l => !q || l.msg.toLowerCase().includes(q) || l.level.toLowerCase().includes(q)).map(l => ({
+      ts: s.showTs ? l.ts : '', level: l.level,
+      levelColor: { INFO: '#4d9fff', WARN: '#e0af68', ERROR: '#f7768e', DEBUG: '#70707a' }[l.level],
+      msg: l.msg, msgColor: l.level === 'ERROR' ? '#f2a5b3' : l.level === 'WARN' ? '#d8c39a' : '#a4a4ae' }));
+
+    const yamlText = s.yamlEditing ? s.yamlDraft : (pod ? (this._yamlCache && this._yamlCacheKey === pod.name ? this._yamlCache : (this._yamlCacheKey = pod.name, this._yamlCache = this.yamlFor(pod))) : '');
+    const yamlLines = yamlText.split('\n').map((line, i) => {
+      const m = line.match(/^(\s*(?:- )?[\w./-]+)(:)(.*)$/);
+      const val = m ? m[3] : '';
+      return { n: i + 1, key: m ? m[1] : line, colon: m ? ':' : '',
+        val, valColor: /"|'/.test(val) ? '#9ece6a' : /^\s*-?\d/.test(val) ? '#e0af68' : '#d2d2d8' };
+    });
+
+    const events = pod ? (pod.status === 'CrashLoopBackOff' ? [
+      { type: 'Warning', typeColor: '#f7768e', reason: 'BackOff', age: '2m', n: 14, msg: 'Back-off restarting failed container heimdall-auth in pod ' + pod.name },
+      { type: 'Warning', typeColor: '#f7768e', reason: 'Unhealthy', age: '3m', n: 9, msg: 'Liveness probe failed: HTTP probe failed with statuscode: 503' },
+      { type: 'Normal', typeColor: '#9ece6a', reason: 'Pulled', age: '2h', n: 1, msg: 'Container image "registry.freya.io/heimdall-auth:v2.4.1" already present on machine' },
+      { type: 'Normal', typeColor: '#9ece6a', reason: 'Scheduled', age: '2h', n: 1, msg: 'Successfully assigned prod/' + pod.name + ' to ' + pod.node },
+    ] : [
+      { type: 'Normal', typeColor: '#9ece6a', reason: 'Started', age: pod.age, n: 1, msg: 'Started container ' + containers[0] },
+      { type: 'Normal', typeColor: '#9ece6a', reason: 'Pulled', age: pod.age, n: 1, msg: 'Container image "registry.freya.io/' + containers[0] + ':v2.4.1" already present on machine' },
+      { type: 'Normal', typeColor: '#9ece6a', reason: 'Scheduled', age: pod.age, n: 1, msg: 'Successfully assigned ' + pod.ns + '/' + pod.name + ' to ' + pod.node },
+    ]) : [];
+
+    const clusterDefs = [{ name: 'freya', env: 'prod', active: true }, { name: 'odin-staging', env: 'staging', active: false }, { name: 'loki-dev', env: 'dev', active: false }];
+
+    return {
+      clusterName: 'freya', clusterMenuOpen: s.clusterMenuOpen,
+      toggleClusterMenu: () => this.setState({ clusterMenuOpen: !s.clusterMenuOpen }),
+      clusters: clusterDefs.map(c => ({ name: c.name, env: c.env, dot: c.active ? '#9ece6a' : '#57575f', bg: c.active ? '#16233a' : 'transparent', pick: () => this.setState({ clusterMenuOpen: false }) })),
+      navSections,
+      crumbGroup: defs[s.nav].group, crumbKind: defs[s.nav].label,
+      nsLabel: s.ns, nsMenuOpen: s.nsMenuOpen,
+      toggleNsMenu: () => this.setState({ nsMenuOpen: !s.nsMenuOpen, clusterMenuOpen: false }),
+      nsItems: namespaces.map(n => ({ label: n, check: s.ns === n ? '✓' : '', pick: () => this.setState({ ns: n, nsMenuOpen: false }),
+        color: s.ns === n ? '#ececf1' : '#a4a4ae', bg: s.ns === n ? '#1b1b1f' : 'transparent' })),
+      columns, rows, emptyTable,
+      detailOpen,
+      detail: pod ? { name: pod.name, namespace: pod.ns, node: pod.node, age: pod.age, status: pod.status, statusColor: statusColor(pod.status) } : {},
+      closeDetail: () => this.setState({ selected: null }),
+      tabs, showLogs: s.tab === 'logs', showYaml: s.tab === 'yaml', showEvents: s.tab === 'events',
+      logSearch: s.logSearch, setLogSearch: e => this.setState({ logSearch: e.target.value }),
+      containerLabel, cycleContainer: () => this.setState({ containerIdx: s.containerIdx + 1 }),
+      toggleTimestamps: () => this.setState({ showTs: !s.showTs }),
+      tsBorder: s.showTs ? '#4d9fff' : '#26262b', tsColor: s.showTs ? '#4d9fff' : '#70707a',
+      toggleFollow: () => this.setState({ following: !s.following }),
+      followLabel: s.following ? '⏸ pause' : '▶ follow', followColor: s.following ? '#9ece6a' : '#e0af68',
+      followBorder: s.following ? '#3a5f35' : '#5a4a2a', followBg: s.following ? '#122015' : '#1f1a10',
+      streamStatus: s.following ? '● streaming' : '⏸ paused',
+      logLines, logCount: logLines.length, logRef: this.logRef,
+      yamlPath: pod ? `pods/${pod.ns}/${pod.name}.yaml` : '',
+      yamlEditing: s.yamlEditing, yamlNotEditing: !s.yamlEditing,
+      yamlText, yamlLines,
+      startYamlEdit: () => this.setState({ yamlEditing: true, yamlDraft: yamlText }),
+      cancelYaml: () => this.setState({ yamlEditing: false }),
+      applyYaml: () => { this._yamlCache = s.yamlDraft; this._yamlCacheKey = pod ? pod.name : ''; this.setState({ yamlEditing: false }); },
+      setYamlDraft: e => this.setState({ yamlDraft: e.target.value }),
+      events,
+    };
+  }
+}
+</script>
+</body>
+</html>

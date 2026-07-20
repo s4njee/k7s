@@ -1,0 +1,316 @@
+/* Sidebar (Design §1): 216px fixed, panel background, right border. Contains the
+   cluster switcher, scrollable nav, and the watch footer. All values transcribed
+   from design/README.md §1 and the prototype. */
+
+.sidebar {
+  width: 216px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border-default);
+}
+
+/* ---------- Cluster switcher ---------- */
+
+.switcher {
+  position: relative;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.switcherButton {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.switcherButton:hover {
+  border-color: var(--border-hover);
+}
+
+/* 24×24 initials badge. */
+.badge {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--badge-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-body);
+}
+
+.switcherText {
+  flex: 1;
+  min-width: 0;
+}
+.clusterName {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.statusLine {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.chevron {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+/* Dropdown menu of kubeconfig contexts. */
+.menu {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 56px;
+  z-index: 50;
+  background: var(--bg-control);
+  border: 1px solid var(--border-menu);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  overflow: hidden;
+}
+.menuRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.menuRow:hover {
+  background: var(--bg-hover-strong);
+}
+.menuRowActive {
+  background: var(--bg-hover);
+}
+.menuName {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+.menuEnv {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Divider between the context list and the import action. */
+.menuDivider {
+  height: 1px;
+  background: var(--border-default);
+  margin: 2px 0;
+}
+/* The "＋" glyph on the import row, sized to align with the context dots. */
+.importIcon {
+  width: 6px;
+  flex: none;
+  text-align: center;
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* ---------- Nav ---------- */
+
+.nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0 12px;
+}
+.sectionHeader {
+  padding: 12px 16px 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* Count of discovered CRD kinds, beside the "Custom" header (B15). */
+.sectionCount {
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+
+/* Filter box for the Custom group, shown only when the list is long. */
+.navFilter {
+  width: calc(100% - 16px);
+  margin: 2px 8px 4px;
+  padding: 4px 8px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  outline: none;
+}
+.navFilter:focus {
+  border-color: var(--border-hover);
+}
+.navFilter::placeholder {
+  color: var(--text-faint);
+}
+
+/* Empty state when the Custom filter matches nothing. */
+.navEmpty {
+  padding: 4px 16px 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ---------- Custom section: collapsible API-group rows (B15) ---------- */
+
+/* A foldable API group ("argoproj.io"). Sits between a section header and a nav
+   item in weight: it's clickable like an item, but names a group, not a kind. */
+.navGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 1px 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  /* Match .navItem's accent gutter so group rows and kind rows align. */
+  border-left: 2px solid transparent;
+}
+.navGroup:hover {
+  background: var(--bg-hover);
+}
+.navGroupChevron {
+  width: 14px;
+  flex: none;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.navGroupLabel {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  /* Group names are long ("gateway.networking.k8s.io"); clip rather than wrap. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A kind nested under its API group — indented to sit under the group's label,
+   and iconless (the group row carries the visual anchor). */
+.navItemNested {
+  padding-left: 28px;
+}
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 1px 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  /* 2px left accent bar (transparent unless active) — kept in layout always so
+     the label doesn't shift when a row becomes active. */
+  border-left: 2px solid transparent;
+}
+.navItem:hover {
+  background: var(--bg-hover);
+}
+.navItemActive {
+  background: var(--bg-nav-active);
+  border-left-color: var(--accent);
+}
+.navIcon {
+  width: 14px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.navItemActive .navIcon {
+  color: var(--accent);
+}
+.navLabel {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--text-nav-inactive);
+}
+.navItemActive .navLabel {
+  color: var(--text-primary);
+}
+.navCount {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+/* ---------- Watch footer ---------- */
+
+.footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.footerDot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--dot-watch);
+  animation: livePulse 2s infinite;
+}
+.footerText {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Settings gear (B23) — the only affordance in the footer, so it earns its place
+   at the far edge rather than competing with the watch count. */
+.gear {
+  flex: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+}
+.gear:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}

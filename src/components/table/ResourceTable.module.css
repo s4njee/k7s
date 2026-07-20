@@ -1,0 +1,165 @@
+/* Resource table (Design §3): fills the remaining width and scrolls; sticky
+   monospace header; tone-colored cells; hover and selected row backgrounds. */
+
+/* Column: filter toolbar (fixed) above the scrolling table. */
+.container {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Filter toolbar (mirrors the logs search chrome). */
+.toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-row);
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: min(320px, 100%);
+  background: var(--bg-terminal);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 4px 9px;
+}
+.search:focus-within {
+  border-color: var(--border-hover);
+}
+.searchIcon {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-chrome);
+  text-align: left;
+  padding: 8px 14px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border-default);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.th:hover {
+  color: var(--text-secondary);
+}
+/* Active-sort direction indicator. */
+.sortArrow {
+  color: var(--accent);
+}
+
+/* Windowed tables only (B21): with the default auto layout, column widths are
+   derived from the rendered rows, so they'd visibly re-jig as you scrolled a
+   windowed table. Small tables keep auto layout and are unaffected. */
+.tableFixed {
+  table-layout: fixed;
+}
+.tableFixed .td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row {
+  background: transparent;
+}
+
+/* Windowed rows are pinned to exactly the height the spacer math assumes — a row
+   even a pixel off would drift the window out of step with the scrollbar. The
+   height itself is set inline from ROW_HEIGHT rather than written here, so the
+   two can't disagree; this only stops the padding from stretching the row. */
+.rowFixed td {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+/* Row hover uses the control background, per Design §3. */
+.rowClickable {
+  cursor: pointer;
+}
+.rowClickable:hover {
+  background: var(--bg-control);
+}
+.rowSelected {
+  background: var(--bg-selected-row);
+}
+/* Keyboard-highlighted row: a subtle inset accent bar + hover-like background. */
+.rowHighlight {
+  background: var(--bg-control);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.rowHighlight.rowSelected {
+  background: var(--bg-selected-row);
+}
+
+.td {
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border-row);
+  white-space: nowrap;
+}
+
+/* Empty-filter state (Design §3). */
+.empty {
+  padding: 40px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* Rows included in a multi-row selection but not the one whose detail panel is
+   open (B39). Quieter than .rowSelected on purpose: the panel's row is still the
+   one you're reading, and two identical highlights would hide which that is.
+   Listed after .rowSelected and with the same specificity as .rowClickable:hover
+   so source order resolves the overlap predictably. */
+.rowInSelection {
+  background: var(--bg-nav-active);
+}
+.rowClickable.rowInSelection:hover {
+  background: var(--bg-hover-strong);
+}
+
+/* Bulk-action error banner. */
+.actionError {
+  flex: none;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--status-err);
+  background: color-mix(in srgb, var(--status-err) 12%, transparent);
+  border-top: 1px solid var(--border-row);
+  cursor: pointer;
+  white-space: pre-wrap;
+}

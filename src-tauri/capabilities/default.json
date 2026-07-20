@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core permissions for the k7s main window. All Kubernetes access goes through our own Rust commands, so we only need the minimal window/event surface plus the shell plugin scaffold.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:window:allow-set-theme",
+    "core:webview:default",
+    "shell:allow-open",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "window-state:default"
+  ]
+}

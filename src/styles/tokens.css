@@ -1,0 +1,250 @@
+/*
+ * k7s design tokens — the single source of truth for color, typography, radius,
+ * and border values. The dark palette is transcribed verbatim from the design
+ * handoff (design/README.md § "Design Tokens", plus the exact shades used in the
+ * prototype design/K8s Monitor.dc.html). Components must reference these variables
+ * only — never inline hex — so the whole UI stays pixel-consistent with the design.
+ *
+ * Two palettes (B52). `:root` is dark, `[data-theme="light"]` overrides it, and
+ * every token is redefined in both — a token defined only in `:root` would silently
+ * keep its dark value in light mode, which is exactly the bug that's hard to spot.
+ * The attribute is set on <html> by src/lib/theme.ts.
+ *
+ * Token *names* describe role, not brightness, so both palettes can use the same
+ * set. Two names are historical and now mildly misleading, worth knowing before
+ * you re-value them:
+ *   --text-linenum is also the scrollbar thumb hover background (global.css)
+ *   --bg-terminal is the *deepest* surface in dark, and the *brightest* in the
+ *     light content area; light-mode side panels re-darken it via data-surface.
+ */
+
+:root {
+  /* ---- Backgrounds ---- */
+  --bg-app: #0d0d0f; /* app root / window background */
+  --bg-panel: #121214; /* sidebar, detail event cards, status bar */
+  --bg-chrome: #101012; /* top bar, table header, detail panel body */
+  --bg-control: #17171a; /* buttons, menus, cluster switcher, ns button */
+  --bg-terminal: #0a0a0c; /* log area, YAML view, log search field */
+  --bg-hover: #1b1b1f; /* generic hover / active menu row */
+  --bg-hover-strong: #222227; /* stronger hover (menu rows, close button) */
+  --bg-selected-row: #122036; /* selected pod row */
+  --bg-nav-active: #16233a; /* active nav item background */
+  --bg-log-hover: #151519; /* hovered log/yaml line */
+
+  /* ---- Borders ---- */
+  --border-default: #26262b; /* default separators, panel borders */
+  --border-control: #2e2e34; /* control (button) borders */
+  --border-menu: #38383f; /* dropdown menu borders */
+  --border-hover: #4a4a55; /* border on hover */
+  --border-blue-action: #2a4a75; /* outline of the ghost "Edit" button */
+  --border-row: #1b1b1f; /* table row bottom border, toolbar dividers */
+
+  /* ---- Text ---- */
+  --text-primary: #ececf1; /* names, active labels, headings */
+  --text-body: #d2d2d8; /* default body text, inputs, yaml values */
+  --text-secondary: #a4a4ae; /* metrics, secondary values, log messages */
+  --text-muted: #70707a; /* namespace/age cells, muted metadata */
+  --text-faint: #57575f; /* section headers, faint labels, empty state */
+  --text-linenum: #34343c; /* yaml line numbers (also badge bg) */
+  --text-log-ts: #4c4c55; /* log timestamp column */
+  --text-nav-inactive: #8e8e98; /* inactive nav item label */
+
+  /* ---- Accent (blue): active indicators + primary actions ONLY ---- */
+  --accent: #4d9fff;
+  --accent-hover: #7db8ff;
+
+  /* ---- Semantic status colors ---- */
+  --status-ok: #9ece6a; /* Running / Ready / Active / Normal event */
+  --status-warn: #e0af68; /* Pending / degraded ready / restarts / Warning */
+  --status-err: #f7768e; /* CrashLoopBackOff / Failed / Warning event */
+  --status-warn-msg: #d8c39a; /* soft tint for WARN log message text */
+  --status-err-msg: #f2a5b3; /* soft tint for ERROR log message text */
+
+  /* ---- Misc specific shades from the prototype ---- */
+  --badge-bg: #34343c; /* cluster initials badge background */
+  --dot-inactive: #57575f; /* inactive context/status dot */
+  --dot-watch: #8e8e98; /* pulsing "watch: N streams" dot */
+  --separator: #3a3a42; /* breadcrumb "/" separators */
+
+  /* ---- Follow / pause button (logs toolbar) ---- */
+  --follow-green-border: #3a5f35;
+  --follow-green-bg: #122015;
+  --follow-amber-border: #5a4a2a;
+  --follow-amber-bg: #1f1a10;
+
+  /* ---- Terminal / editor surfaces (read at runtime by theme.ts) ----
+   * xterm and CodeMirror need literal colors, so these exist as tokens rather
+   * than as hex buried in a TS object. ANSI black is the terminal background in
+   * dark (the usual convention) but real ink in light, where using the
+   * background would render black text invisible. */
+  --ansi-black: #0a0a0c;
+  --ansi-magenta: #bb9af7;
+  --ansi-cyan: #7dcfff;
+  --editor-selection: #23324a; /* xterm + CodeMirror selection */
+
+  /* ---- Overlays ---- */
+  --scrim: rgba(0, 0, 0, 0.45); /* modal backdrop (settings, palette) */
+  --bg-edit-hover: #12203a; /* ghost "Edit" button hover */
+
+  /* ---- Typography ---- */
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif; /* general UI */
+  --font-mono: "JetBrains Mono", ui-monospace, monospace; /* data, code, logs */
+
+  /* ---- Radius (design uses 5–6px) ---- */
+  --radius-sm: 5px;
+  --radius-md: 6px;
+
+  /* ---- Elevation ---- */
+  --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.5); /* dropdown menus */
+}
+
+/*
+ * Light palette (B52). Same names, same roles, inverted surfaces.
+ *
+ * Two things that are not a mechanical inversion, because a straight invert
+ * looks wrong:
+ *
+ * 1. The accent and status hues are *darkened*, not lightened. #4d9fff on white
+ *    is roughly 2.2:1 — unreadable as text — and the status colors are worse.
+ *    These carry meaning (a red cell is the whole point of the cell), so they're
+ *    re-picked for contrast on a light background rather than reused.
+ * 2. The main content area (table, top bar, status bar) stays light. Side panels
+ *    (sidebar + detail) opt into a dark chrome surface via [data-surface="panel"]
+ *    below — very dark grey with light text, so the white work area stays the
+ *    brightest thing without the inspector washing out into the same grey.
+ */
+[data-theme="light"] {
+  /* ---- Backgrounds ---- */
+  --bg-app: #fbfbfc;
+  --bg-panel: #f4f4f6;
+  --bg-chrome: #eeeef1;
+  --bg-control: #ffffff;
+  --bg-terminal: #ffffff;
+  --bg-hover: #ebebef;
+  --bg-hover-strong: #e0e0e6;
+  --bg-selected-row: #dbe9ff;
+  --bg-nav-active: #e5efff;
+  --bg-log-hover: #f3f5f8;
+
+  /* ---- Borders ---- */
+  --border-default: #dcdce2;
+  --border-control: #cfcfd7;
+  --border-menu: #c2c2cc;
+  --border-hover: #a6a6b2;
+  --border-blue-action: #9dc3f0;
+  --border-row: #ececf0;
+
+  /* ---- Text ---- */
+  --text-primary: #15151a;
+  --text-body: #2b2b33;
+  --text-secondary: #55555f;
+  --text-muted: #71717b;
+  --text-faint: #8b8b95;
+  --text-linenum: #b4b4bd;
+  --text-log-ts: #9696a0;
+  --text-nav-inactive: #5b5b65;
+
+  /* ---- Accent ---- */
+  --accent: #0b62c4;
+  --accent-hover: #0a4e9c;
+
+  /* ---- Semantic status colors ---- */
+  --status-ok: #2e7d32;
+  --status-warn: #8a5a00;
+  --status-err: #c0243c;
+  --status-warn-msg: #6f4a0a;
+  --status-err-msg: #9c1f33;
+
+  /* ---- Misc ---- */
+  --badge-bg: #d9d9e0;
+  --dot-inactive: #b2b2bb;
+  --dot-watch: #71717b;
+  --separator: #bfbfc9;
+
+  /* ---- Follow / pause button ---- */
+  --follow-green-border: #a3ce9f;
+  --follow-green-bg: #e9f6e9;
+  --follow-amber-border: #ddc189;
+  --follow-amber-bg: #fdf3e2;
+
+  /* ---- Terminal / editor surfaces ---- */
+  --ansi-black: #15151a;
+  --ansi-magenta: #7c3aed;
+  --ansi-cyan: #0e7490;
+  --editor-selection: #cfe1ff;
+
+  /* ---- Overlays ---- */
+  --scrim: rgba(0, 0, 0, 0.3);
+  --bg-edit-hover: #dbe9ff;
+
+  /* ---- Elevation: a dark-theme shadow reads as soot on white. ---- */
+  --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+/*
+ * Light-mode dark panels. Sidebar and detail panel set data-surface="panel";
+ * CSS variables inherit, so every child (tabs, logs, menus, editors using
+ * var(--…)) picks up dark surfaces + light text without per-component forks.
+ *
+ * Accents/status use the *dark* palette values — they need to read on near-black,
+ * not on white. xterm/plotly can't see inherited vars from <html>, so they resolve
+ * colours from a host element inside the panel (see lib/theme.ts).
+ */
+[data-theme="light"] [data-surface="panel"] {
+  color-scheme: dark;
+
+  --bg-app: #0d0d0f;
+  --bg-panel: #161618;
+  --bg-chrome: #141416;
+  --bg-control: #1c1c20;
+  --bg-terminal: #0c0c0e;
+  --bg-hover: #1b1b1f;
+  --bg-hover-strong: #222227;
+  --bg-selected-row: #122036;
+  --bg-nav-active: #16233a;
+  --bg-log-hover: #151519;
+
+  --border-default: #2a2a30;
+  --border-control: #34343c;
+  --border-menu: #3a3a42;
+  --border-hover: #4a4a55;
+  --border-blue-action: #2a4a75;
+  --border-row: #1b1b1f;
+
+  --text-primary: #f2f2f6;
+  --text-body: #e0e0e6;
+  --text-secondary: #b0b0ba;
+  --text-muted: #8e8e98;
+  --text-faint: #6a6a74;
+  --text-linenum: #4a4a54;
+  --text-log-ts: #5c5c66;
+  --text-nav-inactive: #9a9aa4;
+
+  --accent: #4d9fff;
+  --accent-hover: #7db8ff;
+
+  --status-ok: #9ece6a;
+  --status-warn: #e0af68;
+  --status-err: #f7768e;
+  --status-warn-msg: #d8c39a;
+  --status-err-msg: #f2a5b3;
+
+  --badge-bg: #34343c;
+  --dot-inactive: #57575f;
+  --dot-watch: #8e8e98;
+  --separator: #3a3a42;
+
+  --follow-green-border: #3a5f35;
+  --follow-green-bg: #122015;
+  --follow-amber-border: #5a4a2a;
+  --follow-amber-bg: #1f1a10;
+
+  --ansi-black: #0a0a0c;
+  --ansi-magenta: #bb9af7;
+  --ansi-cyan: #7dcfff;
+  --editor-selection: #23324a;
+
+  --scrim: rgba(0, 0, 0, 0.45);
+  --bg-edit-hover: #12203a;
+  --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.5);
+}

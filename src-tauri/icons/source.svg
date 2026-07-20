@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- k7s app icon: a dark rounded tile with the accent-blue wordmark, matching
+       the app's design tokens (bg #17171a, border #26262b, accent #4d9fff). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b1b1f"/>
+      <stop offset="1" stop-color="#0d0d0f"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="180" fill="url(#bg)" stroke="#26262b" stroke-width="8"/>
+  <!-- Accent bracket motif echoing the sidebar's active-item left border. -->
+  <rect x="196" y="300" width="26" height="424" rx="13" fill="#4d9fff"/>
+  <text x="540" y="512" font-family="'JetBrains Mono', monospace" font-size="360"
+        font-weight="700" fill="#ececf1" text-anchor="middle" dominant-baseline="central">k7s</text>
+</svg>

@@ -1,0 +1,79 @@
+/* Node debug shell (B53). The consent gate plus the session header. */
+
+.gate {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 24px;
+  max-width: 620px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.gateTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gateBody {
+  line-height: 1.6;
+}
+
+.gateBody strong {
+  /* The one place a warning colour is warranted: this is the whole point of the
+     screen, and it should be the thing the eye lands on. */
+  color: var(--status-warn);
+  font-weight: 600;
+}
+
+.gateList {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.gateAction {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 6px 14px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-blue-action);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.gateAction:hover {
+  background: var(--bg-edit-hover);
+}
+
+.nodeName {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-primary);
+}
+
+.podName {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.close {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.close:hover {
+  color: var(--status-err);
+}

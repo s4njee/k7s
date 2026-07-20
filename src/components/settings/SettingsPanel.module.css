@@ -1,0 +1,150 @@
+/* Settings panel (B23): a modal over the app, opened from the sidebar gear.
+   Chrome mirrors the cluster switcher's dropdown so it reads as the same app. */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel {
+  width: min(520px, calc(100vw - 48px));
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-menu);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  overflow: hidden;
+}
+
+/* ---------- header ---------- */
+
+.header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-default);
+}
+.title {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.close {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.close:hover {
+  color: var(--text-primary);
+}
+
+/* ---------- rows ---------- */
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 14px 10px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-row);
+}
+.row:last-child {
+  border-bottom: none;
+}
+
+.labels {
+  flex: 1;
+  min-width: 0;
+}
+.label {
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+/* The hint carries the bounds and the "applies on next connect" caveat, so it's
+   readable rather than fine print. */
+.hint {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  line-height: 1.4;
+}
+
+.number,
+.text {
+  flex: none;
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 4px 8px;
+  outline: none;
+}
+.number {
+  width: 84px;
+  text-align: right;
+}
+.text {
+  width: 180px;
+}
+.select {
+  flex: none;
+  width: 180px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 4px 8px;
+  outline: none;
+}
+.number:focus,
+.text:focus,
+.select:focus {
+  border-color: var(--border-hover);
+}
+.text::placeholder {
+  color: var(--text-faint);
+}
+
+/* ---------- footer ---------- */
+
+.footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border-default);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.note {
+  flex: 1;
+  color: var(--text-faint);
+}
+.reset {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.reset:hover {
+  color: var(--accent);
+}

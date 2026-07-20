@@ -1,0 +1,84 @@
+/* Shell tab (B4, B19): an optional container picker, the xterm terminal, and a
+   reconnect bar shown once the session ends. */
+
+.wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Container picker (B19) ---------- */
+
+.header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-panel);
+}
+.headerLabel {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+.picker {
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  outline: none;
+  cursor: pointer;
+}
+.picker:hover {
+  border-color: var(--border-hover);
+}
+
+/* ---------- Terminal ---------- */
+
+.shell {
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-terminal);
+  padding: 6px 8px 4px;
+  overflow: hidden;
+}
+
+/* ---------- Ended / reconnect bar (B19) ---------- */
+
+.endedBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-panel);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.endedReason {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reconnect {
+  flex: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 1px 6px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+}
+.reconnect:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}

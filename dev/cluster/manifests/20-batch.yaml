@@ -1,0 +1,59 @@
+# Jobs and CronJobs for the Workloads section.
+
+# A completed Job.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate-v214
+  namespace: prod
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: busybox:1.36
+          command: ["sh", "-c", "echo 'INFO migration complete'; sleep 1"]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+  backoffLimit: 1
+---
+# A CronJob (runs every 15 minutes).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cache-warm
+  namespace: prod
+spec:
+  schedule: "*/15 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: warm
+              image: busybox:1.36
+              command: ["sh", "-c", "echo 'INFO cache warmed'; sleep 1"]
+              resources:
+                requests: { cpu: 10m, memory: 16Mi }
+---
+# A CronJob that runs every 6 hours.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: report-gen
+  namespace: prod
+spec:
+  schedule: "0 */6 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: report
+              image: busybox:1.36
+              command: ["sh", "-c", "echo 'INFO report generated'; sleep 1"]
+              resources:
+                requests: { cpu: 10m, memory: 16Mi }

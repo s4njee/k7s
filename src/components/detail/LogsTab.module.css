@@ -1,0 +1,182 @@
+/* Logs tab (Design §4-Logs): toolbar, streaming log viewport, footer strip. */
+
+.toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-row);
+}
+
+/* Search field (flex-1). */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  background: var(--bg-terminal);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 4px 9px;
+}
+.searchIcon {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.searchInput {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* Container cycler button. */
+.button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  background: var(--bg-terminal);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+.button:hover {
+  border-color: var(--border-hover);
+}
+.buttonGlyph {
+  color: var(--text-faint);
+}
+.buttonChevron {
+  color: var(--text-faint);
+  font-size: 8px;
+}
+
+/* ts toggle. */
+.toggle {
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  border: 1px solid var(--border-default);
+  color: var(--text-muted);
+}
+.toggle:hover {
+  border-color: var(--border-hover);
+}
+.toggleActive {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* follow / pause button. */
+.follow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.following {
+  color: var(--status-ok);
+  border: 1px solid var(--follow-green-border);
+  background: var(--follow-green-bg);
+}
+.paused {
+  color: var(--status-warn);
+  border: 1px solid var(--follow-amber-border);
+  background: var(--follow-amber-bg);
+}
+
+/* ---------- Log viewport ---------- */
+
+.viewport {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 0;
+  background: var(--bg-terminal);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.65;
+}
+.line {
+  display: flex;
+  gap: 10px;
+  padding: 0 14px;
+  white-space: pre-wrap;
+}
+.line:hover {
+  background: var(--bg-log-hover);
+}
+.lineTs {
+  flex: none;
+  color: var(--text-log-ts);
+}
+/* Container tag column, shown only when streaming all containers. */
+.lineContainer {
+  flex: none;
+  width: 96px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lineLevel {
+  flex: none;
+  width: 42px;
+  font-weight: 600;
+}
+.lineMsg {
+  word-break: break-word;
+}
+
+/* ---------- Footer strip ---------- */
+
+.footer {
+  flex: none;
+  display: flex;
+  gap: 14px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--border-row);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* ---------- Log read options (B29) ---------- */
+
+/* The since window. Matches the toolbar's other controls rather than the
+   browser's default select chrome. */
+.select {
+  flex: none;
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 3px 4px;
+  outline: none;
+  cursor: pointer;
+}
+.select:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+/* Transient "saved N lines" feedback in the footer. */
+.saveNote {
+  color: var(--accent);
+}

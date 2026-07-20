@@ -1,0 +1,76 @@
+[package]
+name = "k7s"
+version = "0.1.0"
+description = "k7s — a Lens-style Kubernetes visual monitor"
+authors = ["k7s"]
+edition = "2021"
+# 1.77.2 is what our dependency set actually needs (tauri-plugin-window-state
+# 2.x declares it). Leaving this at 1.77 silently resolved that plugin to a
+# v0.1.1 built for Tauri v1 — cargo downgrades rather than complains.
+rust-version = "1.77.2"
+
+# The library crate holds all app logic (commands, kube plumbing) so it can be
+# unit-tested with `cargo test`; main.rs is a thin binary that calls into it.
+[lib]
+name = "k7s_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# --- Tauri shell ---
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+# Native file-open dialog for the "Import kubeconfig" action.
+tauri-plugin-dialog = "2"
+# Remembers window size/position/monitor across launches (B22).
+tauri-plugin-window-state = "2"
+
+# HTTP client for scraping node-exporter over a port-forward (B27). Already in
+# the tree via kube, so this adds no build time; default features off because the
+# forward is plaintext on localhost and needs no TLS stack of its own.
+reqwest = { version = "0.13", default-features = false }
+
+# --- Serialization ---
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# --- Async runtime & stream helpers ---
+# "signal" powers the SIGTERM handler that saves window state (B22): dev/run.sh
+# stops the app with SIGTERM, which Tauri does not hook.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+futures = "0.3"
+
+# --- Kubernetes ---
+# `kube` gives us the typed client, config parsing, and the watcher/reflector runtime.
+kube = { version = "0.99", features = ["client", "config", "runtime", "ws"] }
+# `k8s-openapi` provides the typed resource structs. The feature gate pins the API
+# surface; `latest` tracks the newest Kubernetes release supported by the crate.
+k8s-openapi = { version = "0.24", features = ["latest"] }
+
+# --- Error handling & logging ---
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# --- Time formatting for log timestamps ---
+chrono = { version = "0.4", features = ["serde"] }
+
+# --- Raw HTTP requests to metrics.k8s.io (via kube::Client::request) ---
+http = "1"
+base64 = "0.22"
+flate2 = "1"
+
+[features]
+# Reserved for future custom-protocol tweaks; kept so tauri.conf can reference it.
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+# Smaller, faster desktop binary.
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

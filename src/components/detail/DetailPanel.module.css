@@ -1,0 +1,165 @@
+/* Pod detail panel (Design §4): 47% width (min 520px), left border, chrome bg.
+   Opens when a pod is selected. Contains a header, tab strip, and the active tab. */
+
+.panel {
+  width: 47%;
+  min-width: 520px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border-default);
+  background: var(--bg-chrome);
+  /* min-height:0 lets inner scroll regions (logs/yaml) size correctly. */
+  min-height: 0;
+}
+
+/* ---------- Header ---------- */
+
+.header {
+  flex: none;
+  padding: 12px 16px 0;
+}
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.close {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.close:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+
+/* ---------- Actions menu (⋯) ---------- */
+
+.actionsWrap {
+  position: relative;
+  flex: none;
+}
+.actionsButton {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+}
+.actionsButton:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.actionsAnchor {
+  position: absolute;
+  right: 0;
+  top: 28px;
+  z-index: 60;
+}
+/* Action error banner (below the title row). */
+.actionError {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--status-err);
+  background: color-mix(in srgb, var(--status-err) 12%, transparent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.meta {
+  display: flex;
+  gap: 14px;
+  margin: 6px 0 10px;
+  padding-left: 18px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.metaVal {
+  color: var(--text-secondary);
+}
+
+/* ---------- Tabs ---------- */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border-default);
+}
+.tab {
+  padding: 7px 14px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover {
+  color: var(--text-primary);
+}
+.tabActive {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+
+/* ---------- Drain progress banner (B20) ---------- */
+
+/* Left-bordered in the tone of the drain's worst outcome (see DrainBanner). */
+.drainBanner {
+  margin: 6px 0 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border-default);
+  border-left-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.drainLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.drainSpinner {
+  color: var(--text-faint);
+}
+.drainDetail {
+  margin-top: 3px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}

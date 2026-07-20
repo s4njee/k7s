@@ -1,0 +1,156 @@
+/* Properties tab (B13): scrollable sections describing what the pod is wired to.
+   Styling follows the design tokens — mono for data, faint uppercase section
+   headers (same treatment as the sidebar nav groups). */
+
+.wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 16px;
+}
+
+.section {
+  margin-bottom: 18px;
+}
+.sectionHeader {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  margin-bottom: 7px;
+}
+
+/* Two-column key/value grid for the overview. */
+.grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.gridKey {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.gridVal {
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+/* A reference that navigates (B33, B40): reads as a link, no button chrome.
+   Inherits font and colour from whatever contains it, so the same element works
+   in the overview grid and inside a table cell — only the underline marks it. */
+.navLink {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  word-break: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--border-hover);
+  text-underline-offset: 2px;
+}
+.navLink:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Wrapper so a wide table (the 8-column volumes grid) scrolls on its own rather
+   than clipping — the panel itself never scrolls sideways. */
+.tableScroll {
+  overflow-x: auto;
+}
+
+/* Compact table used for containers / volumes / services. */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.th {
+  text-align: left;
+  padding: 4px 10px 4px 0;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border-default);
+  white-space: nowrap;
+}
+.td {
+  padding: 5px 10px 5px 0;
+  border-bottom: 1px solid var(--border-row);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+/* First column (names) reads as primary, like the resource tables. */
+.tdName {
+  color: var(--text-primary);
+}
+/* Long values (images, mount paths, condition messages) wrap rather than blow out
+   the panel — applied per value, not per column (see `wraps` in PropertiesTab).
+   `anywhere` breaks at spaces first and only splits a token when it has no other
+   choice, which keeps prose messages readable while still taming a long image
+   reference that contains no spaces at all. */
+.tdWrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  /* Floor the column width so a breakable token (a PV name, an image ref) can't
+     be squeezed to a sliver by wider neighbours — `anywhere` makes its
+     min-content width ~0, which the auto table would otherwise collapse.
+     Sized so a 40-char identifier (`pvc-` + a uuid, the longest thing that lands
+     here) wraps to two lines rather than four. It can afford to be generous
+     because the table scrolls in its own container: the width no longer has to
+     be stolen from a neighbouring column. */
+  min-width: 20ch;
+}
+
+/* Label / annotation chips. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.chip {
+  display: inline-flex;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.chipKey {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+/* Annotation values can be multi-KB (e.g. last-applied-configuration); truncate
+   so one blob can't blow out the panel. Full value is in the title tooltip. */
+.chipVal {
+  color: var(--text-secondary);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Empty section note. */
+.empty {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* Loading / error states. */
+.state {
+  padding: 24px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-faint);
+}

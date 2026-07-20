@@ -1,0 +1,71 @@
+# Services (ClusterIP + LoadBalancer + headless) and an Ingress.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkyrie-api
+  namespace: prod
+spec:
+  type: ClusterIP
+  selector: { app: valkyrie-api }
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bifrost-gateway
+  namespace: prod
+spec:
+  type: LoadBalancer
+  selector: { app: bifrost-gateway }
+  ports:
+    - port: 443
+      targetPort: 8443
+      protocol: TCP
+---
+# Headless service (clusterIP: None) for the StatefulSet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: yggdrasil-db
+  namespace: prod
+spec:
+  clusterIP: None
+  selector: { app: yggdrasil-db }
+  ports:
+    - port: 5432
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  type: ClusterIP
+  selector: { app: grafana }
+  ports:
+    - port: 3000
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-public
+  namespace: prod
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: api.freya.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: valkyrie-api
+                port:
+                  number: 8080

@@ -1,0 +1,88 @@
+/*
+ * Global base styles: reset, root background/typography, custom scrollbars, and
+ * the single allowed animation (the 2s "live" pulse). All values come from the
+ * design handoff (design/README.md § App shell + the prototype's <style> block).
+ */
+
+/* Local, offline font bundling — no network fetch at runtime (desktop requirement).
+   @fontsource ships woff2 + @font-face declarations for the exact weights we use. */
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/600.css";
+@import "@fontsource/jetbrains-mono/700.css";
+
+@import "./tokens.css";
+
+/* Box-sizing reset — matches the prototype's `*{box-sizing:border-box}`. */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  /* App background painted immediately so there is no flash before React mounts.
+     Which palette --bg-app resolves to is decided by the inline script in
+     index.html, which runs before this stylesheet is applied (B52). */
+  background: var(--bg-app);
+  color: var(--text-body);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  /* The app is a fixed single-window shell; internal regions scroll, not the page. */
+  overflow: hidden;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+}
+
+/* Links (used sparingly, e.g. error hints) use the accent blue. */
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--accent-hover);
+}
+
+/* Inputs/textareas drop the native focus ring — the design uses border color
+   changes for focus affordance instead. */
+input,
+textarea {
+  outline: none;
+}
+
+/* Custom scrollbars matching the prototype: thin, track-transparent, thumb the
+   default border color with a 2px app-background inset, brighter on hover. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--bg-app);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-linenum);
+}
+
+/* The ONLY animation in the app (per design): a 2s opacity pulse used on the
+   "live"/watch dots. */
+@keyframes livePulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
