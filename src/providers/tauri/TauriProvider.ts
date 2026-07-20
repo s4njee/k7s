@@ -24,6 +24,7 @@ import type {
   LogHandle,
   LogLine,
   LogOptions,
+  NodeShellHandle,
   NodeMetricsMap,
   PodMetricsMap,
   Prefs,
@@ -179,6 +180,18 @@ export class TauriProvider implements DataProvider {
 
   drainNode(node: string): Promise<void> {
     return invoke<void>("drain_node", { name: node });
+  }
+
+  async setWindowTheme(theme: "dark" | "light"): Promise<void> {
+    // Lazy-imported like the dialog plugin, so it isn't pulled into demo bundles.
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    // Cosmetic: a failure here leaves a mismatched titlebar, which is not worth
+    // surfacing as an error over the app content.
+    try {
+      await getCurrentWindow().setTheme(theme);
+    } catch {
+      /* older webview / platform without theme control */
+    }
   }
 
   // ---- node-exporter statistics (B27) ----
@@ -345,6 +358,43 @@ export class TauriProvider implements DataProvider {
         offOut();
         offClosed();
         void invoke("stop_shell", { streamId });
+      },
+    };
+  }
+
+  async startNodeShell(
+    node: string,
+    onOutput: (data: string) => void,
+    onClosed: (reason: string) => void,
+  ): Promise<NodeShellHandle> {
+    // This call is slow by nature: it creates the pod and waits for the kubelet to
+    // start it (image pull included). The backend surfaces *why* it's stuck rather
+    // than a bare timeout, so a rejection here is worth showing verbatim.
+    const info = await invoke<{ streamId: string; namespace: string; pod: string }>(
+      "start_node_shell",
+      { node },
+    );
+
+    const offOut = subscribe<{ data: string }>(`shell-out:${info.streamId}`, (p) =>
+      onOutput(p.data),
+    );
+    const offClosed = subscribe<string>(`shell-closed:${info.streamId}`, onClosed);
+
+    let stopped = false;
+    return {
+      namespace: info.namespace,
+      pod: info.pod,
+      input: (data: string) => void invoke("shell_input", { streamId: info.streamId, data }),
+      resize: (cols: number, rows: number) =>
+        void invoke("shell_resize", { streamId: info.streamId, cols, rows }),
+      stop: () => {
+        if (stopped) return;
+        stopped = true;
+        offOut();
+        offClosed();
+        // stop_node_shell, not stop_shell: this one also deletes the privileged
+        // pod. Leaving that to the generic stop would strand it on the node.
+        void invoke("stop_node_shell", { streamId: info.streamId, pod: info.pod });
       },
     };
   }

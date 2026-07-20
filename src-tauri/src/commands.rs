@@ -7,8 +7,8 @@ use crate::error::{AppError, AppResult};
 use crate::kube::client::{self, ClusterInfo, ContextInfo};
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
 use crate::kube::{
-    discovery, drain, exec, exporter, helm, logs, mappers, metrics, nodestats, portforward,
-    promql, properties, restart, watchers, ClientManager, ResourceKind,
+    discovery, drain, exec, exporter, helm, logs, mappers, metrics, nodeshell, nodestats,
+    portforward, promql, properties, restart, watchers, ClientManager, ResourceKind,
 };
 use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::core::v1::Event;
@@ -55,6 +55,11 @@ pub struct Prefs {
     pub log_buffer_cap: Option<u32>,
     /// Namespace selected on connect. Frontend-only; carried so it survives a save.
     pub default_namespace: Option<String>,
+    /// Colour palette ("dark"/"light"/"system"). Frontend-only; carried so it
+    /// survives a save (B52).
+    pub theme: Option<String>,
+    /// Container image for the node debug shell; None/empty uses the default (B53).
+    pub node_shell_image: Option<String>,
 }
 
 /// Read persisted prefs, or defaults when absent/unreadable.
@@ -851,6 +856,163 @@ pub async fn start_shell(
         .add_shell(id.clone(), ShellSession { task, input_tx, resize_tx })
         .await;
     Ok(id)
+}
+
+// --------------------------------------------------------------------------
+// Node debug shell (B53)
+// --------------------------------------------------------------------------
+
+/// What the frontend needs to drive and clean up a node shell session.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeShellInfo {
+    pub stream_id: String,
+    pub namespace: String,
+    /// Surfaced in the UI so the pod is never invisible: if cleanup somehow fails,
+    /// the user has the exact name to delete by hand.
+    pub pod: String,
+}
+
+/// How long to wait for the debug pod before giving up and explaining why.
+///
+/// Generous, because the first run on a node pulls the image over whatever link
+/// the node has. Bounded, because a NotReady node will never start it at all and
+/// waiting forever just looks like a hang.
+const NODE_SHELL_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// Wait for the debug pod to reach Running, or explain what it's stuck on.
+async fn await_debug_pod(api: &Api<k8s_openapi::api::core::v1::Pod>, name: &str) -> AppResult<()> {
+    let deadline = tokio::time::Instant::now() + NODE_SHELL_READY_TIMEOUT;
+    let mut last = String::from("the pod was never observed");
+    while tokio::time::Instant::now() < deadline {
+        let pod = api.get(name).await?;
+        let status = pod.status.unwrap_or_default();
+        let phase = status.phase.clone().unwrap_or_default();
+        if phase == "Running" {
+            return Ok(());
+        }
+        // A container waiting reason (ImagePullBackOff, CreateContainerError) is far
+        // more actionable than the phase, so prefer it when there is one.
+        let waiting = status
+            .container_statuses
+            .as_ref()
+            .and_then(|cs| cs.first())
+            .and_then(|c| c.state.as_ref())
+            .and_then(|s| s.waiting.as_ref())
+            .map(|w| {
+                (
+                    w.reason.clone().unwrap_or_default(),
+                    w.message.clone().unwrap_or_default(),
+                )
+            });
+        last = nodeshell::pending_reason(&phase, waiting.as_ref().map(|(r, m)| (r.as_str(), m.as_str())));
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    }
+    Err(AppError::Other(format!("timed out starting the debug pod: {last}")))
+}
+
+/// Delete a debug pod, best effort. Used by both the sweep and session teardown.
+async fn delete_debug_pod(api: &Api<k8s_openapi::api::core::v1::Pod>, name: &str) {
+    // Grace period 0: there is nothing to flush, and every second it lingers is a
+    // second a privileged pod is still on the node.
+    let dp = DeleteParams { grace_period_seconds: Some(0), ..Default::default() };
+    if let Err(e) = api.delete(name, &dp).await {
+        tracing::warn!("failed to delete debug pod {name}: {e}");
+    }
+}
+
+/// Open a root shell on a node's host OS (B53).
+///
+/// This creates a privileged pod — see kube/nodeshell.rs for what that grants and
+/// why each piece is needed. It is only ever called from an explicit user action.
+#[tauri::command]
+pub async fn start_node_shell(
+    node: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<NodeShellInfo> {
+    let client = require_client(&mgr).await?;
+    let manager: Arc<ClientManager> = (*mgr).clone();
+    let api: Api<k8s_openapi::api::core::v1::Pod> =
+        Api::namespaced(client.clone(), nodeshell::DEBUG_NAMESPACE);
+
+    // Sweep this node's leftovers first. A previous session that died without
+    // cleaning up would otherwise collide on the name or, worse, quietly leave a
+    // privileged pod running alongside the new one.
+    if let Ok(old) = api
+        .list(&ListParams::default().labels(&nodeshell::node_selector(&node)))
+        .await
+    {
+        for pod in old.items {
+            delete_debug_pod(&api, &pod.name_any()).await;
+        }
+    }
+
+    let seq = STREAM_SEQ.fetch_add(1, Ordering::Relaxed);
+    let pod_name = nodeshell::pod_name(&node, seq);
+    let app = manager.app();
+    let image = read_prefs(&app)
+        .node_shell_image
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| nodeshell::DEFAULT_IMAGE.to_string());
+
+    api.create(&PostParams::default(), &nodeshell::debug_pod_spec(&node, &image, &pod_name))
+        .await?;
+
+    // From here on the pod exists, so any failure must clean up after itself rather
+    // than leave a privileged pod behind on the strength of an error return.
+    if let Err(e) = await_debug_pod(&api, &pod_name).await {
+        delete_debug_pod(&api, &pod_name).await;
+        return Err(e);
+    }
+
+    let id = format!("nsh-{pod_name}");
+    let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>(64);
+    let (resize_tx, resize_rx) = mpsc::channel::<(u16, u16)>(8);
+    let id_for_task = id.clone();
+    let pod_for_task = pod_name.clone();
+    let task = tokio::spawn(async move {
+        exec::run_argv(
+            client,
+            app,
+            id_for_task,
+            nodeshell::DEBUG_NAMESPACE.to_string(),
+            pod_for_task,
+            "debug".to_string(),
+            nodeshell::nsenter_cmd(),
+            input_rx,
+            resize_rx,
+        )
+        .await;
+    });
+
+    manager.add_shell(id.clone(), ShellSession { task, input_tx, resize_tx }).await;
+    Ok(NodeShellInfo {
+        stream_id: id,
+        namespace: nodeshell::DEBUG_NAMESPACE.to_string(),
+        pod: pod_name,
+    })
+}
+
+/// Stop a node shell and delete its pod (idempotent).
+///
+/// Deliberately separate from `stop_shell`: that only aborts the pump task, and an
+/// aborted task cannot run async cleanup on the way out. Deleting here — outside
+/// the task — is what makes teardown actually reliable. The pod's
+/// `activeDeadlineSeconds` remains the backstop for the case where this never runs
+/// at all.
+#[tauri::command]
+pub async fn stop_node_shell(
+    stream_id: String,
+    pod: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<()> {
+    mgr.remove_shell(&stream_id).await;
+    if let Some(client) = mgr.client().await {
+        let api: Api<k8s_openapi::api::core::v1::Pod> =
+            Api::namespaced(client, nodeshell::DEBUG_NAMESPACE);
+        delete_debug_pod(&api, &pod).await;
+    }
+    Ok(())
 }
 
 /// Send keystrokes to a shell session.

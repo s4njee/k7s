@@ -1,0 +1,140 @@
+/*
+ * Shared action-menu styling (B39), used by the detail panel's "…" menu and the
+ * table's row context menu.
+ *
+ * These classes live in their own module rather than being imported from
+ * DetailPanel.module.css, because CSS Modules scope class names per file: a
+ * `styles.cancelBtn` reached through another module's `styles` object resolves to
+ * `undefined` and silently renders unstyled. That already happened once in this
+ * codebase (see the note in DetailPanel.module.css), so the shared component owns
+ * its own stylesheet.
+ *
+ * Positioning is deliberately *not* here. The two callers place their menus
+ * differently — one anchored under a button, one at the mouse cursor — so the
+ * surrounding element owns position and this owns only the contents.
+ */
+
+.menu {
+  min-width: 170px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-menu);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  overflow: hidden;
+  padding: 4px 0;
+}
+
+/* Count of what the menu will act on, when that's more than one row. Without it
+   a bulk menu looks identical to a single-row one. */
+.scope {
+  padding: 4px 12px 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-default);
+  margin-bottom: 4px;
+}
+
+.row {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.row:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+
+.danger {
+  color: var(--status-err);
+}
+
+.danger:hover {
+  color: var(--status-err);
+}
+
+/* Separates the destructive actions from the routine ones, so Delete is never
+   adjacent to the item above it by accident. */
+.separator {
+  height: 1px;
+  background: var(--border-default);
+  margin: 4px 0;
+}
+
+/* ---------- confirm sub-panel ---------- */
+
+.confirm {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 320px;
+}
+
+.confirmText {
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  /* A bulk confirmation enumerates names and can run long; wrapping beats a
+     dialog that clips the very list it exists to show. */
+  overflow-wrap: anywhere;
+}
+
+.confirmRow {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.cancelBtn {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+}
+
+.cancelBtn:hover {
+  border-color: var(--border-hover);
+}
+
+.applyBtn {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--bg-app);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.applyBtn:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.dangerBtn {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--bg-app);
+  background: var(--status-err);
+  border: 1px solid var(--status-err);
+}
+
+.dangerBtn:hover {
+  filter: brightness(1.1);
+}
+
+/* Applied to both confirm buttons while an action is in flight. The old menu
+   only disabled the Apply variant, so a Delete could be double-fired. */
+.applyBtn[aria-disabled="true"],
+.dangerBtn[aria-disabled="true"] {
+  opacity: 0.6;
+  pointer-events: none;
+}

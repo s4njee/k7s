@@ -101,6 +101,8 @@ export function useBootstrap(): void {
             statusIntervalSecs: prefs.statusIntervalSecs ?? undefined,
             defaultNamespace: prefs.defaultNamespace ?? undefined,
             shellCommand: prefs.shellCommand ?? undefined,
+            theme: prefs.theme ?? undefined,
+            nodeShellImage: prefs.nodeShellImage ?? undefined,
           });
           // Custom kinds aren't in KIND_META and aren't discovered yet at this
           // point, so accept any custom-looking id; if this cluster turns out not

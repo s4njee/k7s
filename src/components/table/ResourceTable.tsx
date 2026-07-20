@@ -21,6 +21,8 @@ import { sortRows } from "../../lib/sort";
 import { parseFilter, matchesFilter } from "../../lib/filter";
 import { rowWindow, scrollToShow, type RowWindow } from "../../lib/virtual";
 import type { Cell, NavTarget, NodeMetricsMap, PodMetricsMap, Row } from "../../providers/types";
+import { applyClick, pruneSelection, selectedInOrder, selectionForContextMenu } from "../../lib/selection";
+import { RowContextMenu, type ContextMenuAt } from "../actions/RowContextMenu";
 
 export function ResourceTable() {
   const nav = useStore((s) => s.nav);
@@ -37,6 +39,9 @@ export function ResourceTable() {
   const podRows = useStore((s) => s.rows.pods);
   const selectedUid = useStore((s) => s.selectedRow?.uid ?? null);
   const selectRow = useStore((s) => s.selectRow);
+  const selection = useStore((s) => s.selection);
+  const setSelection = useStore((s) => s.setSelection);
+  const clearSelection = useStore((s) => s.clearSelection);
   const navigateTo = useStore((s) => s.navigateTo);
   const customKinds = useStore((s) => s.customKinds);
 
@@ -68,16 +73,49 @@ export function ResourceTable() {
     [nav, eventTarget],
   );
 
+  /**
+   * The visible rows' uids, in display order.
+   *
+   * A ref because the ordered list is computed *below* (it depends on the filter,
+   * the metrics overlay, and the sort) while the click handler is defined above
+   * it, and because range selection needs the order at click time rather than at
+   * render time. Keyed by uid throughout — indices move under sorting and the
+   * 30-second age re-render.
+   */
+  const orderedUidsRef = useRef<string[]>([]);
+
+  /**
+   * Click a row. Modifiers extend the selection instead of replacing it (B39).
+   *
+   * `selectRow` deliberately still runs for a plain click — it also resets the
+   * detail panel's per-object state — but a modified click must *not*, or
+   * ⌘-clicking a second pod would swap the panel out from under the selection
+   * you were building.
+   */
   const onSelect = useCallback(
-    (row: Row) => {
+    (row: Row, mods?: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
       if (nav === "events") {
         const target = eventTarget(row);
         if (target) navigateTo(target);
         return;
       }
+      // ⌘ on macOS, Ctrl elsewhere. Mapped here, once, so lib/selection stays
+      // platform-agnostic.
+      const range = mods?.shiftKey ?? false;
+      const toggle = (mods?.metaKey ?? false) || (mods?.ctrlKey ?? false);
+      if (range || toggle) {
+        // Read the selection from the store rather than the closure. A handler
+        // closes over the selection as it was at *render* time, so two clicks
+        // landing before React re-renders would both extend from the older
+        // anchor — a shift-click could then select a range starting from a row
+        // you had already clicked past.
+        const current = useStore.getState().selection;
+        setSelection(applyClick(current, orderedUidsRef.current, row.uid, { range, toggle }));
+        return;
+      }
       selectRow(row);
     },
-    [nav, eventTarget, navigateTo, selectRow],
+    [nav, eventTarget, navigateTo, selectRow, setSelection],
   );
 
   // Namespace filter (cluster-scoped kinds ignore it), text filter, metrics overlay,
@@ -110,6 +148,44 @@ export function ResourceTable() {
     now,
     customKinds,
   ]);
+
+  const selectionSet = useMemo(() => new Set(selection.selected), [selection]);
+  const orderedUids = useMemo(() => rows.map((r) => r.uid), [rows]);
+  orderedUidsRef.current = orderedUids;
+
+  // Drop selected rows that are no longer visible (B39). Filtering, sorting and
+  // watch updates can hide rows the selection still names, and a bulk action must
+  // never act on something the user can no longer see it selected.
+  useEffect(() => {
+    const pruned = pruneSelection(selection, orderedUids);
+    // pruneSelection preserves identity when nothing changed, so this can't loop.
+    if (pruned !== selection) setSelection(pruned);
+  }, [orderedUids, selection, setSelection]);
+
+  // ---- row context menu (B39) ----
+  const [menuAt, setMenuAt] = useState<ContextMenuAt | null>(null);
+  const [menuError, setMenuError] = useState<string | null>(null);
+
+  /** The rows a context-menu action would apply to, in display order. */
+  const menuRows = useMemo(
+    () => selectedInOrder(selection, rows),
+    [selection, rows],
+  );
+
+  const onRowContextMenu = useCallback(
+    (e: React.MouseEvent, row: Row) => {
+      // Events navigate rather than act, so there is nothing to offer.
+      if (nav === "events") return;
+      e.preventDefault();
+      // Right-clicking outside the selection collapses to this row; inside it,
+      // the selection stands (see selectionForContextMenu). Read from the store
+      // for the same staleness reason as onSelect.
+      setSelection(selectionForContextMenu(useStore.getState().selection, row.uid));
+      setMenuError(null);
+      setMenuAt({ x: e.clientX, y: e.clientY });
+    },
+    [nav, setSelection],
+  );
 
   // Keyboard navigation: highlighted row index + `/`-to-focus the filter.
   const filterRef = useRef<HTMLInputElement>(null);
@@ -201,7 +277,12 @@ export function ResourceTable() {
           {win.padTop > 0 && <tr style={{ height: win.padTop }} />}
           {visible.map((row, i) => {
             const index = virtual ? win.start + i : i;
+            // Two distinct things (B39): the row whose detail panel is open, and
+            // the rows a bulk action would hit. They coincide for a plain click,
+            // but a ⌘-click adds to the selection without moving the panel — so a
+            // row can be in the selection without being the panel's row.
             const selected = row.uid === selectedUid;
+            const inSelection = selectionSet.has(row.uid);
             return (
               <tr
                 key={row.uid}
@@ -211,12 +292,14 @@ export function ResourceTable() {
                   virtual ? styles.rowFixed : "",
                   rowClickable(row) ? styles.rowClickable : "",
                   selected ? styles.rowSelected : "",
+                  inSelection && !selected ? styles.rowInSelection : "",
                   index === highlight ? styles.rowHighlight : "",
                 ].join(" ")}
                 // Height comes from the same constant the spacer math uses, so the
                 // two cannot drift apart. Natural height when not windowed.
                 style={virtual ? { height: ROW_HEIGHT } : undefined}
-                onClick={() => onSelect(row)}
+                onClick={(e) => onSelect(row, e)}
+                onContextMenu={(e) => onRowContextMenu(e, row)}
               >
                 {row.cells.map((cell, j) => (
                   <td key={j} className={styles.td} style={{ color: toneColor(cell.tone) }}>
@@ -231,6 +314,27 @@ export function ResourceTable() {
         </table>
         {rows.length === 0 && <div className={styles.empty}>no resources match filter</div>}
       </div>
+
+      {/* Bulk-action failures (B39). In the table rather than the detail panel,
+          because a bulk action can be run entirely from the row menu with no
+          panel open — reporting into the panel would silently swallow it. */}
+      {menuError && (
+        <div className={styles.actionError} onClick={() => setMenuError(null)} title="dismiss">
+          {menuError}
+        </div>
+      )}
+
+      {menuAt && menuRows.length > 0 && (
+        <RowContextMenu
+          at={menuAt}
+          kind={nav}
+          rows={menuRows}
+          onError={setMenuError}
+          scrollHost={scrollRef.current}
+          onClose={() => setMenuAt(null)}
+          onGone={clearSelection}
+        />
+      )}
     </div>
   );
 }

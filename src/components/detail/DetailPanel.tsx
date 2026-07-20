@@ -21,6 +21,7 @@ import { LogsTab } from "./LogsTab";
 import { PropertiesTab } from "./PropertiesTab";
 import { MetricsTab } from "./MetricsTab";
 import { ShellTab } from "./ShellTab";
+import { NodeShellTab } from "./NodeShellTab";
 import { YamlTab } from "./YamlTab";
 import { EventsTab } from "./EventsTab";
 import { ActionsMenu } from "./ActionsMenu";
@@ -55,8 +56,9 @@ export function DetailPanel() {
   // Custom kinds resolve their label from discovery, so this is a runtime lookup.
   const kindLabel = kindMeta(nav, customKinds)?.label ?? nav;
 
+  // data-surface="panel": in light mode the inspector is dark chrome (tokens.css).
   return (
-    <div className={styles.panel}>
+    <div className={styles.panel} data-surface="panel">
       <div className={styles.header}>
         <div className={styles.titleRow}>
           <span className={styles.statusDot} style={{ background: statusColor }} />
@@ -124,6 +126,9 @@ export function DetailPanel() {
       {/* Mounting is what starts the scraper, so this must mirror the tab list. */}
       {activeTab === "metrics" && nav === "nodes" && <MetricsTab />}
       {activeTab === "shell" && isPod && <ShellTab />}
+      {/* A node's shell is a privileged debug pod rather than a container exec
+          (B53), so it's a different component behind the same tab. */}
+      {activeTab === "shell" && nav === "nodes" && <NodeShellTab />}
       {activeTab === "yaml" && <YamlTab />}
       {activeTab === "events" && <EventsTab />}
     </div>

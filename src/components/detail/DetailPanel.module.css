@@ -80,145 +80,12 @@
   background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
-.actionsMenu {
+.actionsAnchor {
   position: absolute;
   right: 0;
   top: 28px;
   z-index: 60;
-  min-width: 150px;
-  background: var(--bg-control);
-  border: 1px solid var(--border-menu);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-menu);
-  overflow: hidden;
-  padding: 4px 0;
 }
-.actionsRow {
-  padding: 6px 12px;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-.actionsRow:hover {
-  background: var(--bg-hover-strong);
-  color: var(--text-primary);
-}
-.actionsDanger {
-  color: var(--status-err);
-}
-.actionsDanger:hover {
-  color: var(--status-err);
-}
-
-/* Confirm / scale sub-panels inside the menu. */
-.actionsConfirm {
-  padding: 8px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.actionsConfirmText {
-  font-size: 12px;
-  color: var(--text-primary);
-}
-.actionsConfirmRow {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
-}
-.deleteBtn {
-  padding: 4px 12px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--bg-app);
-  background: var(--status-err);
-}
-.deleteBtn:hover {
-  filter: brightness(1.1);
-}
-
-/* Cancel / Apply for the confirm sub-panels (Scale, Forward, Restart). These
- * live here rather than being borrowed from YamlTab's module — CSS Modules scope
- * class names per file, so a `styles.cancelBtn` from this module's `styles`
- * resolved to `undefined` until these existed. */
-.cancelBtn {
-  padding: 4px 12px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 11px;
-  color: var(--text-secondary);
-  border: 1px solid var(--border-default);
-}
-.cancelBtn:hover {
-  border-color: var(--border-hover);
-}
-.applyBtn {
-  padding: 4px 12px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--bg-app);
-  background: var(--accent);
-  border: 1px solid var(--accent);
-}
-.applyBtn:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-}
-.applyBtn[aria-disabled="true"] {
-  opacity: 0.6;
-  pointer-events: none;
-}
-
-/* Replica stepper. */
-.scaleRow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  justify-content: center;
-}
-.stepBtn {
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  border: 1px solid var(--border-control);
-  color: var(--text-primary);
-  font-size: 14px;
-  user-select: none;
-}
-.stepBtn:hover {
-  border-color: var(--border-hover);
-}
-.scaleValue {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--text-primary);
-  min-width: 24px;
-  text-align: center;
-}
-
-/* Port input for the forward action. */
-.portInput {
-  width: 100%;
-  background: var(--bg-terminal);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  color: var(--text-body);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 4px 8px;
-}
-.portInput:focus {
-  border-color: var(--border-hover);
-}
-
 /* Action error banner (below the title row). */
 .actionError {
   margin: 8px 0 0;
@@ -226,7 +93,7 @@
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--status-err);
-  background: rgba(247, 118, 142, 0.08);
+  background: color-mix(in srgb, var(--status-err) 12%, transparent);
   border-radius: var(--radius-sm);
   cursor: pointer;
   white-space: pre-wrap;

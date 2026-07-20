@@ -1,34 +1,27 @@
 /**
- * Plotly theming and formatting for the node metrics plots (B27).
+ * Plotly formatting for the node metrics plots (B27).
  *
- * Plotly can't read CSS variables (same constraint as xterm in ShellTab), so the
- * colours are mirrored from src/styles/tokens.css. If a token changes, change it
- * here too — these are the only hardcoded colours in the app, and they exist for
- * a reason rather than by accident.
+ * Plotly can't read CSS variables (the same constraint xterm has), so the colours
+ * are resolved from the live tokens by lib/theme.ts rather than mirrored as
+ * literals here. That mirror used to be the maintenance hazard this file warned
+ * about; since B52 there are two palettes, and a stale copy would have meant
+ * dark-themed plots sitting on a white panel.
+ *
+ * Resolved at call time, so a layout built under one palette is stale under the
+ * other — MetricsTab keys its plots on the resolved theme to force a rebuild.
  */
 
-/** Mirrors of the design tokens Plotly needs as literal values. */
-export const PLOT_COLORS = {
-  /** --bg-terminal — the plot surface, matching the logs/YAML panels. */
-  surface: "#0a0a0c",
-  /** --text-secondary — axis labels. */
-  axis: "#a4a4ae",
-  /** --text-faint — grid lines want to be quieter than the data. */
-  grid: "#26262b",
-  /** --accent */
-  accent: "#4d9fff",
-  /** --status-ok */
-  ok: "#9ece6a",
-  /** --status-warn */
-  warn: "#e0af68",
-  /** --status-err */
-  err: "#f7768e",
-  /** A fifth series colour: --accent-hover, for load15. */
-  accent2: "#7db8ff",
-} as const;
+import { plotColors } from "../../lib/theme";
 
-/** Plotly layout shared by every chart here. */
-export function baseLayout(title: string, height: number): Record<string, unknown> {
+export { plotColors };
+
+/** Plotly layout shared by every chart here. Pass `el` inside a dark panel surface. */
+export function baseLayout(
+  title: string,
+  height: number,
+  el?: Element | null,
+): Record<string, unknown> {
+  const PLOT_COLORS = plotColors(el);
   return {
     height,
     title: { text: title, font: { size: 11, color: PLOT_COLORS.axis }, x: 0, xanchor: "left" },

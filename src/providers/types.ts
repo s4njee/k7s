@@ -300,6 +300,10 @@ export interface Prefs {
   statusIntervalSecs?: number | null;
   defaultNamespace?: string | null;
   shellCommand?: string | null;
+  /** Colour palette: "dark" | "light" | "system" (B52). */
+  theme?: string | null;
+  /** Image for the node debug shell; empty uses the default (B53). */
+  nodeShellImage?: string | null;
 }
 
 /** Identifies a specific object for YAML/events/log commands. */
@@ -347,6 +351,19 @@ export interface ShellHandle {
   resize(cols: number, rows: number): void;
   /** End the session. */
   stop(): void;
+}
+
+/**
+ * A node debug shell session (B53) — a {@link ShellHandle} that also names the pod
+ * backing it.
+ *
+ * The pod name is surfaced deliberately: this feature creates a *privileged* pod on
+ * the node, and the UI shows exactly which one, so it is never something the app
+ * did invisibly. If teardown ever fails, that name is what the user needs.
+ */
+export interface NodeShellHandle extends ShellHandle {
+  readonly namespace: string;
+  readonly pod: string;
 }
 
 /** An active port-forward (B6). */
@@ -484,6 +501,33 @@ export interface DataProvider {
    * Resolves once cordoned — watch {@link onDrainProgress} for the rest.
    */
   drainNode(node: string): Promise<void>;
+
+  /**
+   * Tell the OS window which palette the app is using (B52), so the native
+   * titlebar and scrollbars match. CSS can't reach window chrome, and this is the
+   * only reason the frontend needs the window API — hence it going through the
+   * provider rather than importing Tauri into a hook, which would break demo mode
+   * in a plain browser. A no-op where there is no native window.
+   */
+  setWindowTheme(theme: "dark" | "light"): Promise<void>;
+
+  /**
+   * Open a root shell on a node's host OS (B53).
+   *
+   * Creates a privileged pod on that node and `nsenter`s into the host's
+   * namespaces — see src-tauri/src/kube/nodeshell.rs for exactly what that grants.
+   * Only ever call this from an explicit, confirmed user action; it is not
+   * something to do speculatively or on navigation.
+   *
+   * Resolves once the shell is attached, which can take a while on first use
+   * (the node pulls the image). Rejects with an explanation if the pod never
+   * starts — a NotReady node and a wrong-architecture image are the usual causes.
+   */
+  startNodeShell(
+    node: string,
+    onOutput: (data: string) => void,
+    onClosed: (reason: string) => void,
+  ): Promise<NodeShellHandle>;
 
   // ---- node-exporter statistics (B27) ----
   /**

@@ -22,6 +22,8 @@ import type {
 } from "./providers/types";
 import { KIND_ORDER } from "./lib/kinds";
 import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
+import { cachedTheme, prefersDark } from "./lib/theme";
+import { EMPTY_SELECTION, type SelectionState } from "./lib/selection";
 import type { SinceOption } from "./lib/logview";
 
 /**
@@ -82,6 +84,10 @@ export const NODE_SAMPLE_CAP = 240;
 function selectionPatch(row: Row) {
   return {
     selectedRow: row,
+    // A plain click is a single-row selection (B39): opening the detail panel for
+    // one object and leaving a stale multi-selection behind would mean the row
+    // menu acts on rows the panel isn't showing.
+    selection: { selected: [row.uid], anchor: row.uid } as SelectionState,
     // Pods open on Logs; every other kind lacks that tab, so YAML is the default.
     activeTab: (row.pod ? "logs" : "yaml") as DetailTab,
     yamlEditing: false,
@@ -113,7 +119,7 @@ function jumpPatch(current: { namespace: string }, kind: KindId, row?: Row) {
     sortDir: "asc" as const,
     paletteOpen: false,
   };
-  if (!row) return { ...base, selectedRow: null };
+  if (!row) return { ...base, selectedRow: null, selection: EMPTY_SELECTION };
 
   // A namespace filter that would hide the row moves to the row's own namespace.
   // Jumping somewhere and landing on an empty table because of a filter set ten
@@ -168,6 +174,22 @@ export interface AppState {
   customKinds: CustomKind[];
   /** User settings (B23). Persisted via prefs; the log cap applies live. */
   settings: Settings;
+  /**
+   * Multi-row selection for the current kind (B39).
+   *
+   * Uids, not rows: watch updates replace every Row object, and sorting/filtering
+   * moves indices. Cleared wherever `selectedRow` is, since it belongs to the kind
+   * and namespace being shown — a selection surviving a nav change would let a
+   * bulk action fire at objects from a table you have left.
+   */
+  selection: SelectionState;
+  /**
+   * Whether the OS currently wants dark (B52). Not persisted — it's a fact about
+   * the machine, read fresh at boot and updated by a media-query listener. It
+   * lives in the store rather than in a hook so anything that needs the *resolved*
+   * palette (the terminal, the plots) re-renders when the OS flips.
+   */
+  systemDark: boolean;
   /** Whether the settings panel is open. */
   settingsOpen: boolean;
   /** Whether the command palette is open (B28). */
@@ -249,6 +271,12 @@ export interface AppState {
   setNodeStatsError: (node: string, message: string) => void;
   /** Merge a settings change (already sanitised by the caller). */
   setSettings: (patch: Partial<Settings>) => void;
+  /** Record the OS colour-scheme preference (B52). */
+  setSystemDark: (dark: boolean) => void;
+  /** Replace the multi-row selection (B39). Computed by lib/selection.ts. */
+  setSelection: (selection: SelectionState) => void;
+  /** Drop the multi-row selection, leaving the detail panel alone. */
+  clearSelection: () => void;
   setSettingsOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
   /**
@@ -311,7 +339,13 @@ export const useStore = create<AppState>((set) => ({
 
   rows: emptyRows(),
   customKinds: [],
-  settings: DEFAULT_SETTINGS,
+  // Theme comes from the paint-time cache rather than the default, so the boot
+  // render agrees with what index.html already painted. Prefs overwrite it a
+  // moment later; without this the window would flash the default palette in
+  // between (B52).
+  settings: { ...DEFAULT_SETTINGS, theme: cachedTheme() },
+  selection: EMPTY_SELECTION,
+  systemDark: prefersDark(),
   settingsOpen: false,
   paletteOpen: false,
   podMetrics: {},
@@ -342,13 +376,15 @@ export const useStore = create<AppState>((set) => ({
     set({
       nav: kind,
       selectedRow: null,
+      selection: EMPTY_SELECTION,
       openMenu: null,
       tableFilter: "",
       sortCol: null,
       sortDir: "asc",
     }),
   // Changing namespace also clears selection (a pod may no longer be visible).
-  setNamespace: (ns) => set({ namespace: ns, openMenu: null, selectedRow: null }),
+  setNamespace: (ns) =>
+    set({ namespace: ns, openMenu: null, selectedRow: null, selection: EMPTY_SELECTION }),
   setTableFilter: (q) => set({ tableFilter: q }),
   toggleSort: (col) =>
     set((s) =>
@@ -419,6 +455,9 @@ export const useStore = create<AppState>((set) => ({
       return { settings, logBuffer };
     }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setSystemDark: (dark) => set({ systemDark: dark }),
+  setSelection: (selection) => set({ selection }),
+  clearSelection: () => set({ selection: EMPTY_SELECTION }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   jumpTo: (kind, row) => set((s) => jumpPatch(s, kind, row)),
   navigateTo: (target) =>
@@ -447,6 +486,7 @@ export const useStore = create<AppState>((set) => ({
       sortDir: "asc",
       paletteOpen: false,
       selectedRow: null,
+      selection: EMPTY_SELECTION,
       // Scope to the workload's namespace so only its pods show, and drop the
       // selector into the filter box as editable, removable text.
       namespace: namespace || s.namespace,
@@ -472,6 +512,7 @@ export const useStore = create<AppState>((set) => ({
       nodeSamples: {},
       nodeStatsErrors: {},
       selectedRow: null,
+      selection: EMPTY_SELECTION,
       logBuffer: [],
       clusterStatus: null,
       openMenu: null,

@@ -15,6 +15,7 @@ pub mod logs;
 pub mod manager;
 pub mod mappers;
 pub mod metrics;
+pub mod nodeshell;
 pub mod nodestats;
 pub mod portforward;
 pub mod promql;

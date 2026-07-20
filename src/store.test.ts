@@ -333,3 +333,68 @@ describe("seedNodeSamples (B38: Prometheus backfill)", () => {
     expect(useStore.getState().nodeSamples.freya.length).toBeLessThanOrEqual(240);
   });
 });
+
+describe("multi-row selection (B39)", () => {
+  const r = (name: string): Row => ({ uid: `uid-${name}`, name, namespace: "prod", cells: [] });
+
+  beforeEach(() => {
+    useStore.setState({
+      nav: "pods",
+      namespace: "all",
+      selectedRow: null,
+      selection: { selected: [], anchor: null },
+    });
+  });
+
+  it("setSelection replaces the selection", () => {
+    useStore.getState().setSelection({ selected: ["a", "b"], anchor: "a" });
+    expect(useStore.getState().selection.selected).toEqual(["a", "b"]);
+  });
+
+  /**
+   * Clicking a row opens its panel; leaving a stale multi-selection behind would
+   * mean the row menu acts on objects the panel isn't showing.
+   */
+  it("a plain row click collapses the selection to that row", () => {
+    useStore.getState().setSelection({ selected: ["x", "y"], anchor: "x" });
+    useStore.getState().selectRow(r("api"));
+    expect(useStore.getState().selection).toEqual({ selected: ["uid-api"], anchor: "uid-api" });
+  });
+
+  /**
+   * The invariant that matters: a selection is scoped to the table it was made
+   * in. Surviving a nav or namespace change would let a bulk delete fire at
+   * objects from a table the user has left.
+   */
+  it("is cleared everywhere the detail selection is", () => {
+    const armed = { selected: ["a", "b"], anchor: "a" };
+
+    useStore.getState().setSelection(armed);
+    useStore.getState().setNav("services");
+    expect(useStore.getState().selection.selected).toEqual([]);
+
+    useStore.getState().setSelection(armed);
+    useStore.getState().setNamespace("prod");
+    expect(useStore.getState().selection.selected).toEqual([]);
+
+    useStore.getState().setSelection(armed);
+    useStore.getState().viewPods("prod", "app=x");
+    expect(useStore.getState().selection.selected).toEqual([]);
+
+    useStore.getState().setSelection(armed);
+    useStore.getState().resetData();
+    expect(useStore.getState().selection.selected).toEqual([]);
+
+    useStore.getState().setSelection(armed);
+    useStore.getState().jumpTo("nodes");
+    expect(useStore.getState().selection.selected).toEqual([]);
+  });
+
+  it("clearSelection leaves the detail panel open", () => {
+    useStore.getState().selectRow(r("api"));
+    useStore.getState().setSelection({ selected: ["uid-api", "uid-b"], anchor: "uid-api" });
+    useStore.getState().clearSelection();
+    expect(useStore.getState().selection.selected).toEqual([]);
+    expect(useStore.getState().selectedRow?.name).toBe("api");
+  });
+});

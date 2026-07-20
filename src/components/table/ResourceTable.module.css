@@ -105,7 +105,7 @@
   padding-top: 0;
   padding-bottom: 0;
 }
-/* Row hover uses #17171a (the control background, per Design §3). */
+/* Row hover uses the control background, per Design §3. */
 .rowClickable {
   cursor: pointer;
 }
@@ -137,4 +137,29 @@
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-faint);
+}
+
+/* Rows included in a multi-row selection but not the one whose detail panel is
+   open (B39). Quieter than .rowSelected on purpose: the panel's row is still the
+   one you're reading, and two identical highlights would hide which that is.
+   Listed after .rowSelected and with the same specificity as .rowClickable:hover
+   so source order resolves the overlap predictably. */
+.rowInSelection {
+  background: var(--bg-nav-active);
+}
+.rowClickable.rowInSelection:hover {
+  background: var(--bg-hover-strong);
+}
+
+/* Bulk-action error banner. */
+.actionError {
+  flex: none;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--status-err);
+  background: color-mix(in srgb, var(--status-err) 12%, transparent);
+  border-top: 1px solid var(--border-row);
+  cursor: pointer;
+  white-space: pre-wrap;
 }

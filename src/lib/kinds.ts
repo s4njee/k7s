@@ -255,16 +255,19 @@ export const DETAIL_TABS: { id: DetailTabId; label: string }[] = [
  * Metrics arrived (B27) and Helm dropped Events (B26). Cycling would have landed
  * on tabs that weren't there.
  *
- * The rules: Logs and Shell need a running container, so they're pods-only.
- * Properties needs a backend gatherer. Metrics comes from a node's node-exporter.
- * A Helm release has no Kubernetes events of its own.
+ * The rules: Logs needs a running container, so it's pods-only. Shell is pods
+ * *or* nodes — a node's shell is a different mechanism (a privileged debug pod;
+ * see B53) but the same tab from the user's point of view. Properties needs a
+ * backend gatherer. Metrics comes from a node's node-exporter. A Helm release has
+ * no Kubernetes events of its own.
  */
 export function tabsFor(kind: KindId, isPod: boolean): DetailTabId[] {
   return DETAIL_TABS.filter((t) => {
     switch (t.id) {
       case "logs":
-      case "shell":
         return isPod;
+      case "shell":
+        return isPod || kind === "nodes";
       case "properties":
         return KINDS_WITH_PROPERTIES.has(kind);
       case "metrics":

@@ -9,6 +9,8 @@
  * is worse than briefly holding a value that gets clamped on blur.
  */
 
+import { asTheme, type Theme } from "./theme";
+
 /** Everything the settings panel controls. */
 export interface Settings {
   /** Lines the log view retains (the design default is 200). */
@@ -24,6 +26,16 @@ export interface Settings {
    * prefers bash and falls back to sh.
    */
   shellCommand: string;
+  /** Colour palette; "system" follows the OS (B52). */
+  theme: Theme;
+  /**
+   * Image for the node debug shell (B53). Empty uses the built-in default.
+   *
+   * Worth exposing because the constraints are real and cluster-specific: the
+   * image must be multi-arch on a mixed-arch cluster, must carry a full `nsenter`,
+   * and on an air-gapped cluster must come from a registry the nodes can reach.
+   */
+  nodeShellImage: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -32,6 +44,10 @@ export const DEFAULT_SETTINGS: Settings = {
   statusIntervalSecs: 10,
   defaultNamespace: "all",
   shellCommand: "",
+  // Following the OS is the least surprising default, and it's what the app did
+  // implicitly before there was a choice — for anyone on a dark desktop.
+  theme: "system",
+  nodeShellImage: "",
 };
 
 /**
@@ -45,6 +61,16 @@ export const LIMITS = {
   metricsIntervalSecs: { min: 5, max: 300 },
   statusIntervalSecs: { min: 5, max: 300 },
 } as const;
+
+/**
+ * What `sanitizeSettings` accepts: the same keys, but any value.
+ *
+ * Deliberately looser than `Partial<Settings>` — its callers are persisted JSON
+ * and half-typed form fields, neither of which is typed by construction. Claiming
+ * the input is already `Partial<Settings>` would put the cast at every call site
+ * instead of inside the one function whose job is to check.
+ */
+export type SettingsInput = Partial<Record<keyof Settings, unknown>>;
 
 /** Clamp a number into a range, falling back to `fallback` for junk input. */
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
@@ -60,7 +86,7 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
  * into usable settings. Every field falls back to its default independently, so
  * one bad value can't discard the rest.
  */
-export function sanitizeSettings(raw: Partial<Settings> | null | undefined): Settings {
+export function sanitizeSettings(raw: SettingsInput | null | undefined): Settings {
   const s = raw ?? {};
   return {
     logBufferCap: clampNumber(
@@ -86,5 +112,9 @@ export function sanitizeSettings(raw: Partial<Settings> | null | undefined): Set
         ? s.defaultNamespace.trim()
         : DEFAULT_SETTINGS.defaultNamespace,
     shellCommand: typeof s.shellCommand === "string" ? s.shellCommand.trim() : "",
+    // Not a clamp: an unknown string (older prefs, hand-edited file) has no
+    // nearest valid value, so it falls back to the default outright.
+    theme: asTheme(s.theme),
+    nodeShellImage: typeof s.nodeShellImage === "string" ? s.nodeShellImage.trim() : "",
   };
 }

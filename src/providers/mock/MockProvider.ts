@@ -32,6 +32,7 @@ import type {
   SavedLog,
   Unsub,
   YamlDiff,
+  NodeShellHandle,
 } from "../types";
 import { KIND_ORDER } from "../../lib/kinds";
 import { MOCK_CLUSTERS, MOCK_CUSTOM_KINDS, MOCK_PODS, buildCustomRows, buildKindRows } from "./data";
@@ -183,6 +184,8 @@ export class MockProvider implements DataProvider {
   async restartPod(_ref: ResourceRef): Promise<void> {}
   async restartRollout(_ref: ResourceRef): Promise<void> {}
   async setCordon(_node: string, _unschedulable: boolean): Promise<void> {}
+  /** No native window in demo mode — the browser tab owns its own chrome. */
+  async setWindowTheme(_theme: "dark" | "light"): Promise<void> {}
 
   /**
    * Simulate a drain (B20): tick evictions out over a couple of seconds so the
@@ -450,6 +453,38 @@ export class MockProvider implements DataProvider {
     return {
       input: (data: string) => {
         // Enter → newline + prompt; otherwise echo the keystroke.
+        onOutput(data === "\r" ? `\r\n${prompt}` : data);
+      },
+      resize: () => {},
+      stop: () => {},
+    };
+  }
+
+  /**
+   * Simulate a node debug shell (B53).
+   *
+   * Deliberately slow to "start": the real thing creates a pod and waits for the
+   * kubelet, which on a first run means an image pull. The demo would be
+   * misleading if it opened instantly, since the waiting state is a real part of
+   * the experience and has its own UI.
+   */
+  async startNodeShell(
+    node: string,
+    onOutput: (data: string) => void,
+    _onClosed: (reason: string) => void,
+  ): Promise<NodeShellHandle> {
+    const pod = `k7s-debug-${node}-1`;
+    await new Promise((r) => setTimeout(r, 1200));
+
+    const prompt = `\x1b[32mroot@${node}\x1b[0m:~# `;
+    onOutput(
+      `demo node shell — echoes input (no real node)\r\n` +
+        `\x1b[90mreal sessions run in pod ${pod}\x1b[0m\r\n${prompt}`,
+    );
+    return {
+      namespace: "default",
+      pod,
+      input: (data: string) => {
         onOutput(data === "\r" ? `\r\n${prompt}` : data);
       },
       resize: () => {},

@@ -28,7 +28,7 @@
   border: 1px solid var(--border-blue-action);
 }
 .editBtn:hover {
-  background: #12203a;
+  background: var(--bg-edit-hover);
 }
 
 /* Edit-mode "Cancel" (ghost) + "Apply" (primary). */
@@ -69,7 +69,7 @@
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--status-err);
-  background: rgba(247, 118, 142, 0.08);
+  background: color-mix(in srgb, var(--status-err) 12%, transparent);
   border-bottom: 1px solid var(--border-row);
   white-space: pre-wrap;
   word-break: break-word;

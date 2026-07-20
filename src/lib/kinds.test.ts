@@ -5,7 +5,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { isClusterScoped, isCustomKind, kindMeta, navIdForKind, KINDS_WITH_PROPERTIES } from "./kinds";
+import { isClusterScoped, isCustomKind, kindMeta, navIdForKind, KINDS_WITH_PROPERTIES,
+  tabsFor,
+} from "./kinds";
 import { mockProperties } from "../providers/mock/properties";
 import type { CustomKind } from "../providers/types";
 
@@ -211,5 +213,31 @@ describe("ServiceAccounts", () => {
   // So a pod's "service account" field links, instead of dead-ending.
   it("resolves the Kind", () => {
     expect(navIdForKind("ServiceAccount", "v1", CUSTOM)).toBe("serviceaccounts");
+  });
+});
+
+describe("tabsFor", () => {
+  /**
+   * Logs needs a container to read from; a node has none. Shell, by contrast, is
+   * offered for nodes because B53 gives it a different mechanism (a privileged
+   * debug pod) behind the same tab.
+   */
+  it("offers Shell but not Logs on a node", () => {
+    const tabs = tabsFor("nodes", false);
+    expect(tabs).toContain("shell");
+    expect(tabs).not.toContain("logs");
+  });
+
+  it("still offers both on a pod", () => {
+    const tabs = tabsFor("pods", true);
+    expect(tabs).toContain("shell");
+    expect(tabs).toContain("logs");
+  });
+
+  /** Nothing else grew a shell tab by accident. */
+  it("offers Shell nowhere else", () => {
+    for (const kind of ["deployments", "services", "configmaps", "helm", "namespaces"]) {
+      expect(tabsFor(kind, false), kind).not.toContain("shell");
+    }
   });
 });

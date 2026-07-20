@@ -10,18 +10,36 @@
  * Scraping runs only while this tab is mounted; see useNodeStats.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import styles from "./MetricsTab.module.css";
 import { useStore } from "../../store";
 import { useNodeStats } from "../../hooks/useNodeStats";
-import { baseLayout, humanBps, humanBytes, PLOT_COLORS, PLOT_CONFIG } from "./plot";
+import { baseLayout, humanBps, humanBytes, plotColors, PLOT_CONFIG } from "./plot";
+import { useResolvedTheme } from "../../hooks/useTheme";
+import { withAlpha } from "../../lib/theme";
 import type { NodeSample } from "../../providers/types";
+
+/**
+ * Plotly colours for the host's token surface. Re-resolves after mount (ref is
+ * null on the first render) and whenever the app palette flips — needed so
+ * light-mode dark panels don't hand plotly the document's light tokens.
+ */
+function useHostPlotColors(hostRef: RefObject<Element | null>) {
+  const theme = useResolvedTheme();
+  const [colors, setColors] = useState(() => plotColors());
+  useLayoutEffect(() => {
+    setColors(plotColors(hostRef.current));
+  }, [hostRef, theme]);
+  return colors;
+}
 
 export function MetricsTab() {
   const row = useStore((s) => s.selectedRow);
   const node = row?.name;
   const samples = useStore((s) => (node ? (s.nodeSamples[node] ?? EMPTY) : EMPTY));
   const error = useStore((s) => (node ? s.nodeStatsErrors[node] : undefined));
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const PLOT_COLORS = useHostPlotColors(wrapRef);
 
   // Scrape while this tab is open, and only while it's open.
   useNodeStats(node);
@@ -30,7 +48,7 @@ export function MetricsTab() {
 
   if (error) {
     return (
-      <div className={styles.wrap}>
+      <div className={styles.wrap} ref={wrapRef}>
         <div className={styles.state}>
           <div className={styles.stateTitle}>no metrics for {node}</div>
           <div className={styles.stateBody}>{error}</div>
@@ -44,7 +62,7 @@ export function MetricsTab() {
   // that looks broken.
   if (samples.length === 0) {
     return (
-      <div className={styles.wrap}>
+      <div className={styles.wrap} ref={wrapRef}>
         <div className={styles.state}>
           <div className={styles.stateTitle}>waiting for the first samples…</div>
           <div className={styles.stateBody}>
@@ -60,7 +78,7 @@ export function MetricsTab() {
   const latest = samples[samples.length - 1];
 
   return (
-    <div className={styles.wrap}>
+    <div className={styles.wrap} ref={wrapRef}>
       <Plot
         title={`CPU — ${latest.cpuPercent.toFixed(1)}% busy`}
         data={[
@@ -71,7 +89,7 @@ export function MetricsTab() {
             mode: "lines",
             line: { color: PLOT_COLORS.accent, width: 1.5, shape: "spline", smoothing: 0.4 },
             fill: "tozeroy",
-            fillcolor: "rgba(77,159,255,0.12)",
+            fillcolor: withAlpha(PLOT_COLORS.accent, 0.12),
             hovertemplate: "%{y:.1f}%<extra></extra>",
           },
         ]}
@@ -89,7 +107,7 @@ export function MetricsTab() {
             mode: "lines",
             line: { color: PLOT_COLORS.ok, width: 1.5 },
             fill: "tozeroy",
-            fillcolor: "rgba(158,206,106,0.12)",
+            fillcolor: withAlpha(PLOT_COLORS.ok, 0.12),
             hovertemplate: "%{y:.3s}B<extra></extra>",
           },
         ]}
@@ -147,13 +165,20 @@ export function MetricsTab() {
         }}
       />
 
-      <Filesystems sample={latest} />
+      <Filesystems sample={latest} colors={PLOT_COLORS} />
     </div>
   );
 }
 
 /** Current filesystem usage as a horizontal bar per mount. */
-function Filesystems({ sample }: { sample: NodeSample }) {
+function Filesystems({
+  sample,
+  colors: PLOT_COLORS,
+}: {
+  sample: NodeSample;
+  colors: ReturnType<typeof plotColors>;
+}) {
+
   if (sample.filesystems.length === 0) return null;
 
   // Fullest first: the one about to cause an incident belongs at the top, not
@@ -231,7 +256,8 @@ function Plot({
 
   useEffect(() => {
     let cancelled = false;
-    const layout = { ...baseLayout(title, height), ...layoutExtra };
+    // Resolve layout colours from the plot host so a dark panel surface wins.
+    const layout = { ...baseLayout(title, height, ref.current), ...layoutExtra };
     void loadPlotly().then((Plotly) => {
       // The tab can close while the chunk is in flight.
       if (cancelled || !ref.current) return;

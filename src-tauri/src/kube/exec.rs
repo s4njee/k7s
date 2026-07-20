@@ -45,7 +45,7 @@ const SHELL_CMD: [&str; 3] = [
 /// people type things like `env TERM=xterm bash -l`, and running that as a bare
 /// argv would look for a binary with spaces in its name. It also keeps the same
 /// shape as the default, whose whole job is to be a shell snippet.
-fn shell_cmd(override_cmd: &str) -> Vec<String> {
+pub fn shell_cmd(override_cmd: &str) -> Vec<String> {
     let trimmed = override_cmd.trim();
     if trimmed.is_empty() {
         return SHELL_CMD.iter().map(|s| s.to_string()).collect();
@@ -64,6 +64,38 @@ pub async fn run_shell(
     container: String,
     // The user's shell override, or empty for the default probe (B23).
     command: String,
+    input_rx: mpsc::Receiver<Vec<u8>>,
+    resize_rx: mpsc::Receiver<(u16, u16)>,
+) {
+    run_argv(
+        client,
+        app,
+        stream_id,
+        namespace,
+        pod,
+        container,
+        shell_cmd(&command),
+        input_rx,
+        resize_rx,
+    )
+    .await
+}
+
+/// Run an explicit argv until it exits or the task is aborted.
+///
+/// Split out from `run_shell` for the node debug shell (B53), whose command is an
+/// `nsenter` invocation rather than a shell snippet. Wrapping that in `sh -c`
+/// the way `shell_cmd` does would mean quoting a command line that itself ends in
+/// a quoted shell snippet — so it passes argv straight through instead.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_argv(
+    client: Client,
+    app: AppHandle,
+    stream_id: String,
+    namespace: String,
+    pod: String,
+    container: String,
+    argv: Vec<String>,
     mut input_rx: mpsc::Receiver<Vec<u8>>,
     mut resize_rx: mpsc::Receiver<(u16, u16)>,
 ) {
@@ -75,7 +107,7 @@ pub async fn run_shell(
         &namespace,
         &pod,
         &container,
-        &command,
+        argv,
         &mut input_rx,
         &mut resize_rx,
     )
@@ -95,7 +127,7 @@ async fn exec_pump(
     namespace: &str,
     pod: &str,
     container: &str,
-    command: &str,
+    argv: Vec<String>,
     input_rx: &mut mpsc::Receiver<Vec<u8>>,
     resize_rx: &mut mpsc::Receiver<(u16, u16)>,
 ) -> Result<String, AppError> {
@@ -108,7 +140,7 @@ async fn exec_pump(
         .container(container.to_string());
 
     let mut proc = api
-        .exec(pod, shell_cmd(command), &ap)
+        .exec(pod, argv, &ap)
         .await
         .map_err(|e| AppError::Kube(e.to_string()))?;
 

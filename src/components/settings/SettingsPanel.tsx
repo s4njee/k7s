@@ -14,6 +14,7 @@ import { useEffect } from "react";
 import styles from "./SettingsPanel.module.css";
 import { useStore } from "../../store";
 import { LIMITS, DEFAULT_SETTINGS, sanitizeSettings, type Settings } from "../../lib/settings";
+import { asTheme } from "../../lib/theme";
 
 export function SettingsPanel() {
   const open = useStore((s) => s.settingsOpen);
@@ -49,6 +50,20 @@ export function SettingsPanel() {
         </div>
 
         <div className={styles.body}>
+          {/* First, because it's the one setting whose effect you see while the
+              panel is still open. */}
+          <Row label="Theme" hint="“system” follows your desktop’s light/dark setting">
+            <select
+              className={styles.select}
+              value={settings.theme}
+              onChange={(e) => update({ theme: asTheme(e.target.value) })}
+            >
+              <option value="system">system</option>
+              <option value="dark">dark</option>
+              <option value="light">light</option>
+            </select>
+          </Row>
+
           <Row
             label="Log buffer"
             hint={`lines kept in the log view (${LIMITS.logBufferCap.min}–${LIMITS.logBufferCap.max}); applies immediately`}
@@ -106,6 +121,18 @@ export function SettingsPanel() {
               value={settings.shellCommand}
               onChange={(e) => update({ shellCommand: e.target.value })}
               placeholder="(auto: bash or sh)"
+            />
+          </Row>
+
+          <Row
+            label="Node shell image"
+            hint="blank uses nicolaka/netshoot; must be multi-arch on a mixed-arch cluster"
+          >
+            <input
+              className={styles.text}
+              value={settings.nodeShellImage}
+              onChange={(e) => update({ nodeShellImage: e.target.value })}
+              placeholder="(nicolaka/netshoot)"
             />
           </Row>
         </div>

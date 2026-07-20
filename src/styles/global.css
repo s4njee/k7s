@@ -25,8 +25,9 @@ html,
 body {
   margin: 0;
   padding: 0;
-  /* Dark app background painted immediately so there is no white flash before
-     React mounts (the Tauri window background is set to the same value). */
+  /* App background painted immediately so there is no flash before React mounts.
+     Which palette --bg-app resolves to is decided by the inline script in
+     index.html, which runs before this stylesheet is applied (B52). */
   background: var(--bg-app);
   color: var(--text-body);
   font-family: var(--font-ui);

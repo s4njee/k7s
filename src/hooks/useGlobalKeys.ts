@@ -41,6 +41,11 @@ export function useGlobalKeys(): void {
         // when focus has escaped the input.
         if (s.paletteOpen) s.setPaletteOpen(false);
         else if (s.openMenu) s.closeMenus();
+        // A multi-row selection outranks the filter and the panel (B39): it's
+        // the most recent thing you did, it's armed for a destructive action,
+        // and there is otherwise no keyboard way to stand it down.
+        // (An open row context menu consumes Escape itself, so it closes first.)
+        else if (s.selection.selected.length > 1) s.clearSelection();
         else if (s.tableFilter) s.setTableFilter("");
         else if (s.selectedRow) s.closeDetail();
         return;

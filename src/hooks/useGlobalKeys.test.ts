@@ -45,6 +45,7 @@ beforeEach(() => {
     openMenu: null,
     tableFilter: "",
     selectedRow: null,
+    selection: { selected: [], anchor: null },
     nav: "pods",
     activeTab: "logs",
   });
@@ -116,6 +117,30 @@ describe("Escape cascade", () => {
     press("Escape");
     expect(useStore.getState().openMenu).toBeNull();
     expect(useStore.getState().tableFilter).toBe("wiki");
+  });
+
+  /**
+   * A multi-selection is armed for a destructive action and has no other keyboard
+   * dismissal, so it unwinds before the filter and the panel.
+   */
+  it("clears a multi-row selection before the filter", () => {
+    useStore.setState({
+      tableFilter: "wiki",
+      selection: { selected: ["a", "b"], anchor: "a" },
+    });
+    press("Escape");
+    expect(useStore.getState().selection.selected).toEqual([]);
+    expect(useStore.getState().tableFilter).toBe("wiki");
+  });
+
+  /** One selected row is not a multi-selection; Escape behaves as it always did. */
+  it("does not treat a single selected row as a selection layer", () => {
+    useStore.setState({
+      tableFilter: "wiki",
+      selection: { selected: ["a"], anchor: "a" },
+    });
+    press("Escape");
+    expect(useStore.getState().tableFilter).toBe("");
   });
 
   it("then clears the filter", () => {

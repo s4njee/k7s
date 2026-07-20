@@ -14,38 +14,15 @@
  * tab's cycler index, so cycling log containers silently moved your shell.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import "@xterm/xterm/css/xterm.css";
+import { useEffect, useState } from "react";
 import styles from "./ShellTab.module.css";
 import { useStore } from "../../store";
 import { getProvider } from "../../providers";
+import { useTerminal } from "./useTerminal";
 import type { ShellHandle } from "../../providers/types";
-
-// xterm needs concrete colors (it can't read CSS variables); these mirror the
-// design tokens for the terminal surface.
-const TERM_THEME = {
-  background: "#0a0a0c",
-  foreground: "#d2d2d8",
-  cursor: "#4d9fff",
-  selectionBackground: "#23324a",
-  black: "#0a0a0c",
-  brightBlack: "#57575f",
-  red: "#f7768e",
-  green: "#9ece6a",
-  yellow: "#e0af68",
-  blue: "#4d9fff",
-  magenta: "#bb9af7",
-  cyan: "#7dcfff",
-  white: "#d2d2d8",
-};
 
 export function ShellTab() {
   const pod = useStore((s) => s.selectedRow);
-  const hostRef = useRef<HTMLDivElement>(null);
-  const termRef = useRef<Terminal | null>(null);
-  const handleRef = useRef<ShellHandle | null>(null);
 
   const containers = pod?.pod?.containers ?? [];
 
@@ -62,40 +39,10 @@ export function ShellTab() {
   // Bumping this re-runs the session effect against the same terminal.
   const [attempt, setAttempt] = useState(0);
 
-  // ---- the terminal: one per pod+container ----
-  useEffect(() => {
-    if (!hostRef.current || !container) return;
-
-    const term = new Terminal({
-      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-      fontSize: 12,
-      cursorBlink: true,
-      theme: TERM_THEME,
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(hostRef.current);
-    fit.fit();
-    termRef.current = term;
-
-    // Refit + report size when the panel resizes. Reads the session through a ref
-    // so a reconnect doesn't need to rebuild the observer.
-    const ro = new ResizeObserver(() => {
-      try {
-        fit.fit();
-        handleRef.current?.resize(term.cols, term.rows);
-      } catch {
-        /* element detached mid-resize */
-      }
-    });
-    ro.observe(hostRef.current);
-
-    return () => {
-      ro.disconnect();
-      term.dispose();
-      termRef.current = null;
-    };
-  }, [pod?.uid, container]);
+  // The terminal is rebuilt only when the target changes; a reconnect reuses it.
+  const { hostRef, termRef, sessionRef } = useTerminal(
+    pod && container ? `${pod.uid}:${container}` : null,
+  );
 
   // ---- the session: re-runs on reconnect, writing into the existing terminal ----
   useEffect(() => {
@@ -124,7 +71,7 @@ export function ShellTab() {
           return;
         }
         handle = h;
-        handleRef.current = h;
+        sessionRef.current = h;
         // Pipe keystrokes to the container and sync the initial size.
         dataSub = term.onData((d) => h.input(d));
         h.resize(term.cols, term.rows);
@@ -139,7 +86,7 @@ export function ShellTab() {
       cancelled = true;
       dataSub?.dispose();
       handle?.stop();
-      handleRef.current = null;
+      sessionRef.current = null;
     };
   }, [pod?.uid, container, attempt]);
 

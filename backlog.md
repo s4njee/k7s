@@ -208,14 +208,6 @@ webview/DOM; UI shows only a "copied ✓" flash. **Accept:** pasted value
 matches `kubectl get secret … | base64 -d`; the value never appears in Tauri
 event traffic; YAML/table remain redacted.
 
-### B39 — Bulk selection & row context menu
-**Do:** Shift/⌘-click multi-select in the table; right-click context menu
-mirroring the detail actions menu (delete on N pods with one confirm listing
-them; cordon on multiple nodes). Selection state per kind, cleared on nav; the
-confirm always enumerates what it's about to do. **Accept:** deleting 3
-selected pods of a scaled deployment issues 3 deletes and one confirm;
-context-menu and detail-panel actions share one implementation.
-
 ### B47 — CronJob and Job verbs
 *Why: the workload verbs shipped (scale, restart, drain) skip the batch kinds
 entirely, and both of their missing verbs are things kubectl makes annoyingly
@@ -284,8 +276,6 @@ that fails clippy is red.
 
 ## Parking lot (one-liners, not yet worth a number)
 
-- **Node debug shell** — Lens-style privileged nsenter pod; powerful, sharp
-  edges, needs its own safety design.
 - **App auto-update** — tauri-updater riding the B25 release pipeline; wants a
   signing identity first.
 - **RBAC-aware actions** — `SelfSubjectAccessReview` to grey out verbs the
@@ -296,8 +286,6 @@ that fails clippy is red.
   without k7s.
 - **Multi-cluster windows** — one connection per window via Tauri
   multi-window; the ClientManager-per-window boundary already almost allows it.
-- **Light theme** — tokens.css is the single source; a second palette is
-  mechanical but needs design taste applied.
 - **NetworkPolicies** — 7 on freya; a table is easy, but the *useful* version
   (which policies select this pod, in the pod panel) is a selector-matching
   join worth designing properly.
@@ -306,7 +294,7 @@ that fails clippy is red.
 
 ## Suggested order
 
-B30 → B31 → B44 (P0) → B32 → B34b → B45 → B46 (P1) → B36 → B37 → B39 → B47 →
+B30 → B31 → B44 (P0) → B32 → B34b → B45 → B46 (P1) → B36 → B37 → B47 →
 B48 → B49 → B50 → B51.
 Dependencies: B34b's live fixture wants B36's create (or a kubectl-made
 scratch Deployment); B44 and B50 reuse B32's problem derivation and B38's
@@ -319,6 +307,38 @@ promql plumbing respectively; B49 is where ServiceAccounts move out of Config.
 Newest first. One line each — the full records (design decisions, live
 verification, corrections of wrong premises) are in the git log and, for
 B28–B43, in the commit messages of `feat/backlog-qol`.
+
+### Backlog v4 (B39, B52–B53)
+
+- **B39 — Bulk selection & row context menu.** Shift/⌘-click multi-select and a
+  right-click menu. The substance is the shared action model (`lib/actions.ts`):
+  actions as data, so the detail panel and the row menu can't disagree about what
+  a kind allows. Each action declares `bulk` — scale and forward need a parameter,
+  drain streams per-node progress, so none of them appear for a selection.
+  Confirmations enumerate names, not just counts. Bulk runs use `allSettled` and
+  report partial failure per object. Selection is keyed by uid (rows are replaced
+  wholesale on every watch update) and pruned against the visible list.
+  *Two bugs found by driving the real UI: a stale-closure read made shift-click
+  extend from the wrong anchor, and a capture-phase scroll listener let the
+  auto-scrolling log pane close the menu instantly.*
+
+- **B53 — Node debug shell.** Privileged pod pinned with `nodeName` (bypasses the
+  scheduler, so cordoned/tainted nodes work), `nsenter` into PID 1's namespaces
+  for a real host shell. Safety design is the substance: `activeDeadlineSeconds`
+  as a server-side backstop that outlives an app crash, an orphan sweep by label
+  on every start, delete-on-close outside the aborted task, and an explicit
+  consent gate so tabbing past a node can't provision anything. Image is
+  configurable (multi-arch matters on mixed-arch clusters).
+  *`examples/nodeshell_check.rs` verifies admission by dry run; `--for-real` runs
+  the full create/nsenter/delete cycle.*
+
+- **B52 — Light theme.** Second palette in tokens.css under `[data-theme=light]`,
+  with tests that read the stylesheet and assert the two palettes define the same
+  token set — the failure mode is a *missing* declaration, which silently keeps
+  the dark value. xterm and plotly can't read CSS variables, so they resolve
+  tokens at runtime through `lib/theme.ts`. Applied via a store subscription
+  rather than an effect, because React runs child effects before parent ones and
+  the canvas widgets would otherwise read the previous palette.
 
 ### Backlog v3 (B28–B43)
 
@@ -348,7 +368,7 @@ B28–B43, in the commit messages of `feat/backlog-qol`.
   convention, `query_range` via the service proxy, timestamp-joined series,
   live-wins merge; unblocked by converting freya's scrape config to `role:
   node` SD. *Pod sparklines deferred → B44.*
-- **B37/B36/B39 — not done** (moved above).
+- **B37/B36 — not done** (moved above). *B39 shipped — see Backlog v4.*
 - **B35 — Helm release detail.** Overview / full revision history / values
   flattened with credential keys redacted in Rust.
 - **B34 — Restart** (pod delete-and-recreate with bare-pod refusal; workload

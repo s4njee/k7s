@@ -6,7 +6,7 @@
   position: fixed;
   inset: 0;
   z-index: 200; /* above the settings panel — ⌘K can be pressed over anything */
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--scrim);
   display: flex;
   /* Near the top, not centred: the list grows downward, and a box that shifts
      vertically as results appear is hard to aim at. */

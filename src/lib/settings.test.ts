@@ -78,3 +78,27 @@ describe("sanitizeSettings", () => {
     expect(s.shellCommand).toBe("");
   });
 });
+
+describe("theme and node-shell settings", () => {
+  /** Older prefs.json files predate both fields entirely. */
+  it("defaults both when absent", () => {
+    const s = sanitizeSettings({});
+    expect(s.theme).toBe("system");
+    expect(s.nodeShellImage).toBe("");
+  });
+
+  it("keeps a valid theme and rejects anything else", () => {
+    expect(sanitizeSettings({ theme: "light" }).theme).toBe("light");
+    expect(sanitizeSettings({ theme: "solarized" }).theme).toBe("system");
+    expect(sanitizeSettings({ theme: 7 }).theme).toBe("system");
+  });
+
+  /**
+   * The image is pasted by hand and goes straight into a pod spec, where a stray
+   * space is a pull failure rather than a validation error.
+   */
+  it("trims the node shell image", () => {
+    expect(sanitizeSettings({ nodeShellImage: "  alpine:3  " }).nodeShellImage).toBe("alpine:3");
+    expect(sanitizeSettings({ nodeShellImage: 12 }).nodeShellImage).toBe("");
+  });
+});
