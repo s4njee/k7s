@@ -37,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
             c(2),
             c(3),
             c(5),
-            &c(6).chars().take(70).collect::<String>()
+            c(6).chars().take(70).collect::<String>()
         );
     }
 
