@@ -573,7 +573,7 @@ async fn gather_helm(client: Client, namespace: &str, name: &str) -> AppResult<P
 /// and the History.
 fn build_helm_properties(mut releases: Vec<helm::Release>) -> Properties {
     // Newest revision first — the current release leads, history follows.
-    releases.sort_by(|a, b| b.revision.cmp(&a.revision));
+    releases.sort_by_key(|r| std::cmp::Reverse(r.revision));
     let current = &releases[0];
 
     let mut props = Properties::default();

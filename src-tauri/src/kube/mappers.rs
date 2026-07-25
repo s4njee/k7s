@@ -242,19 +242,13 @@ fn pod_resources(pod: &Pod) -> PodResources {
         let requests = ct.resources.as_ref().and_then(|r| r.requests.as_ref());
         let limits = ct.resources.as_ref().and_then(|r| r.limits.as_ref());
 
-        match requests.and_then(|m| m.get("cpu")) {
-            Some(q) => {
-                cpu_req += parse_cpu_millis(&q.0);
-                any_cpu_req = true;
-            }
-            None => {}
+        if let Some(q) = requests.and_then(|m| m.get("cpu")) {
+            cpu_req += parse_cpu_millis(&q.0);
+            any_cpu_req = true;
         }
-        match requests.and_then(|m| m.get("memory")) {
-            Some(q) => {
-                mem_req += parse_mem_bytes(&q.0);
-                any_mem_req = true;
-            }
-            None => {}
+        if let Some(q) = requests.and_then(|m| m.get("memory")) {
+            mem_req += parse_mem_bytes(&q.0);
+            any_mem_req = true;
         }
         match limits.and_then(|m| m.get("cpu")) {
             Some(q) => cpu_lim += parse_cpu_millis(&q.0),
