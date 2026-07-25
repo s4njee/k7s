@@ -30,6 +30,7 @@ export function useBootstrap(): void {
       setDrain,
       addNodeSample,
       setNodeStatsError,
+      addPodSample,
     } = useStore.getState();
 
     // Reconcile cluster-status into the connection lifecycle (Story 6.2): a live
@@ -70,6 +71,8 @@ export function useBootstrap(): void {
       // backend only emits for nodes whose Metrics tab is open.
       provider.onNodeStats(addNodeSample),
       provider.onNodeStatsError((e) => setNodeStatsError(e.node, e.message)),
+      // Per-pod samples, emitted only for the pod whose Metrics tab is open.
+      provider.onPodStats(addPodSample),
     ];
 
     // Discover contexts, restore saved preferences, then connect (B11).

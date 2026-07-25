@@ -1,0 +1,5 @@
+/* Shared Plotly chart host (B27). Plotly sizes itself to this element's width
+   via its `responsive` config. */
+.plot {
+  width: 100%;
+}

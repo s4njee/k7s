@@ -168,6 +168,25 @@ pub struct PodMeta {
     /// RFC3339 creation timestamp (formatted into an age in the detail header).
     pub creation_ts: String,
     pub status_tone: Tone,
+    /// Aggregate CPU/memory requests and limits, for the Metrics tab's overlay.
+    pub resources: PodResources,
+}
+
+/// A pod's total CPU/memory requests and limits, summed across its regular
+/// containers so the totals line up with the usage the metrics feed reports
+/// (which is likewise summed over the running containers, init excluded).
+///
+/// Units are millicores (CPU) and bytes (memory). `None` means unset — and for a
+/// limit specifically, that at least one container is uncapped, so the pod has no
+/// true ceiling to draw. Requests default to 0 for scheduling when omitted, so a
+/// request total is emitted whenever any container sets one.
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PodResources {
+    pub cpu_request_millis: Option<i64>,
+    pub cpu_limit_millis: Option<i64>,
+    pub mem_request_bytes: Option<i64>,
+    pub mem_limit_bytes: Option<i64>,
 }
 
 /// One row of a resource table. `cells` align 1:1 with the kind's column set

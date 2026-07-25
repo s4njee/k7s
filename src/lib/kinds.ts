@@ -258,8 +258,9 @@ export const DETAIL_TABS: { id: DetailTabId; label: string }[] = [
  * The rules: Logs needs a running container, so it's pods-only. Shell is pods
  * *or* nodes — a node's shell is a different mechanism (a privileged debug pod;
  * see B53) but the same tab from the user's point of view. Properties needs a
- * backend gatherer. Metrics comes from a node's node-exporter. A Helm release has
- * no Kubernetes events of its own.
+ * backend gatherer. Metrics is pods *or* nodes — a node's come from its
+ * node-exporter, a pod's from metrics.k8s.io — again the same tab either way. A
+ * Helm release has no Kubernetes events of its own.
  */
 export function tabsFor(kind: KindId, isPod: boolean): DetailTabId[] {
   return DETAIL_TABS.filter((t) => {
@@ -271,7 +272,7 @@ export function tabsFor(kind: KindId, isPod: boolean): DetailTabId[] {
       case "properties":
         return KINDS_WITH_PROPERTIES.has(kind);
       case "metrics":
-        return kind === "nodes";
+        return isPod || kind === "nodes";
       case "events":
         return kind !== "helm";
       default:

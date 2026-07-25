@@ -109,16 +109,31 @@ pub async fn build_client_from_file(path: &str, context: &str) -> AppResult<(Cli
 
 /// Best-effort path to kubectl's default kubeconfig: the first entry of
 /// $KUBECONFIG, else ~/.kube/config. Used to pre-point the import file dialog.
+///
+/// Both halves are platform-sensitive, and getting either wrong lands the dialog
+/// in the wrong directory rather than failing loudly. `KUBECONFIG` is a path
+/// *list* using the platform's separator — `;` on Windows, where `:` would also
+/// split the drive letter off `C:\Users\…`. And Windows has no `HOME`; kubectl
+/// itself reads `USERPROFILE` there.
 pub fn default_kubeconfig_path() -> String {
     if let Ok(kubeconfig) = std::env::var("KUBECONFIG") {
-        if let Some(first) = kubeconfig.split(':').find(|s| !s.is_empty()) {
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        if let Some(first) = kubeconfig.split(sep).find(|s| !s.is_empty()) {
             return first.to_string();
         }
     }
-    if let Ok(home) = std::env::var("HOME") {
-        return format!("{home}/.kube/config");
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+    if home.is_empty() {
+        return String::new();
     }
-    String::new()
+    // Join through PathBuf so the result uses the platform's own separator.
+    std::path::Path::new(&home)
+        .join(".kube")
+        .join("config")
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Build a Kubernetes client for a specific kubeconfig context.

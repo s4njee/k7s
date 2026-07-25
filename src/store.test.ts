@@ -4,9 +4,17 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { useStore, LOG_BUFFER_CAP } from "./store";
+import { useStore, LOG_BUFFER_CAP, POD_SAMPLE_CAP } from "./store";
 import { DEFAULT_SETTINGS } from "./lib/settings";
-import type { LogLine, NodeSample, Row } from "./providers/types";
+import type { LogLine, NodeSample, PodResources, PodSample, Row } from "./providers/types";
+
+/** No requests/limits — fixtures don't exercise the Metrics overlay. */
+const NO_RESOURCES: PodResources = {
+  cpuRequestMillis: null,
+  cpuLimitMillis: null,
+  memRequestBytes: null,
+  memLimitBytes: null,
+};
 
 // Reset to a clean slate before each test (Zustand store is a singleton).
 beforeEach(() => {
@@ -39,6 +47,7 @@ describe("jumpTo (B28)", () => {
       restarts: 0,
       creationTs: "",
       statusTone: "ok",
+      resources: NO_RESOURCES,
     },
   });
 
@@ -126,6 +135,7 @@ const podRow = (name: string): Row => ({
     restarts: 0,
     creationTs: "",
     statusTone: "ok",
+    resources: NO_RESOURCES,
   },
 });
 
@@ -281,6 +291,36 @@ describe("viewPods (B33: workload → pods)", () => {
     expect(s.namespace).toBe("wiki");
     expect(s.tableFilter).toBe("app=wiki");
     expect(s.selectedRow).toBeNull();
+  });
+});
+
+describe("addPodSample", () => {
+  const sample = (ts: number, cpu = 10): PodSample => ({ ts, cpuMillis: cpu, memBytes: ts });
+
+  beforeEach(() => useStore.setState({ podSamples: {} }));
+
+  it("appends samples per pod, oldest first", () => {
+    const key = "prod/api-0";
+    useStore.getState().addPodSample(key, sample(1000));
+    useStore.getState().addPodSample(key, sample(2000));
+    expect(useStore.getState().podSamples[key].map((s) => s.ts)).toEqual([1000, 2000]);
+  });
+
+  it("keeps each pod's series independent", () => {
+    useStore.getState().addPodSample("prod/a", sample(1));
+    useStore.getState().addPodSample("prod/b", sample(2));
+    expect(useStore.getState().podSamples["prod/a"].map((s) => s.ts)).toEqual([1]);
+    expect(useStore.getState().podSamples["prod/b"].map((s) => s.ts)).toEqual([2]);
+  });
+
+  it("caps the series at POD_SAMPLE_CAP, dropping the oldest", () => {
+    const key = "prod/busy";
+    for (let i = 0; i < POD_SAMPLE_CAP + 25; i++) useStore.getState().addPodSample(key, sample(i));
+    const got = useStore.getState().podSamples[key];
+    expect(got.length).toBe(POD_SAMPLE_CAP);
+    // The window keeps the newest points; the oldest 25 fell off the front.
+    expect(got[0].ts).toBe(25);
+    expect(got[got.length - 1].ts).toBe(POD_SAMPLE_CAP + 24);
   });
 });
 
