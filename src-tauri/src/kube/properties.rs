@@ -1019,11 +1019,14 @@ async fn gather_volumes(
     out
 }
 
-/// The object a ConfigMap/Secret-backed volume mounts, with a link to it (B40).
+/// The source detail behind a volume: *which* object, host path, or NFS export it
+/// mounts. `volume_kind` only classifies ("ConfigMap", "HostPath", "NFS"), which
+/// leaves the panel saying a pod mounts *a* HostPath without saying which — and
+/// that path is the thing you opened the panel to find.
 ///
-/// `volume_kind` only classifies ("ConfigMap"), which leaves the panel saying a
-/// pod mounts *a* ConfigMap without saying which — and both kinds are listed, so
-/// the name is one click from being useful.
+/// ConfigMap/Secret sources are listed kinds, so they link through (B40); the rest
+/// (a host directory, an NFS server, a CSI driver) aren't cluster objects, so they
+/// are shown as plain text with no nav target.
 fn volume_source(
     v: &k8s_openapi::api::core::v1::Volume,
     namespace: &str,
@@ -1045,6 +1048,20 @@ fn volume_source(
     {
         let nav = NavTarget::namespaced("secrets", namespace, name.clone());
         return (name, Some(nav));
+    }
+    // A hostPath mounts a directory on the node — the path is the whole point.
+    if let Some(hp) = v.host_path.as_ref().filter(|hp| !hp.path.is_empty()) {
+        return (hp.path.clone(), None);
+    }
+    // An NFS mount is identified by "server:/export", as `mount` writes it.
+    if let Some(nfs) = v.nfs.as_ref() {
+        if !nfs.server.is_empty() || !nfs.path.is_empty() {
+            return (format!("{}:{}", nfs.server, nfs.path), None);
+        }
+    }
+    // A CSI ephemeral volume: the driver is what says who backs it.
+    if let Some(csi) = v.csi.as_ref().filter(|csi| !csi.driver.is_empty()) {
+        return (csi.driver.clone(), None);
     }
     (DASH.to_string(), None)
 }
@@ -1828,6 +1845,37 @@ mod tests {
         assert_eq!(builtin_nav_id("Endpoints"), None);
         assert_eq!(builtin_nav_id("PriorityClass"), None);
         assert_eq!(builtin_nav_id("FooBar"), None);
+    }
+
+    /// Inline volume sources resolve to the detail that identifies them: a
+    /// ConfigMap links through, while a host path / NFS export / CSI driver is
+    /// plain text (they aren't cluster objects to navigate to). Before this, every
+    /// non-ConfigMap/Secret volume showed a bare em dash for its source.
+    #[test]
+    fn volume_source_names_inline_backings() {
+        use serde_json::json;
+        let vol = |body: serde_json::Value| -> k8s_openapi::api::core::v1::Volume {
+            serde_json::from_value(body).unwrap()
+        };
+
+        let (src, nav) = volume_source(&vol(json!({ "name": "cfg", "configMap": { "name": "app-config" } })), "prod");
+        assert_eq!(src, "app-config");
+        assert!(nav.is_some(), "a ConfigMap is a listed kind, so it links");
+
+        let (src, nav) = volume_source(&vol(json!({ "name": "data", "hostPath": { "path": "/var/lib/data" } })), "prod");
+        assert_eq!(src, "/var/lib/data");
+        assert!(nav.is_none(), "a host directory is not a cluster object");
+
+        let (src, _) = volume_source(&vol(json!({ "name": "exports", "nfs": { "server": "nfs01", "path": "/exports/prod" } })), "prod");
+        assert_eq!(src, "nfs01:/exports/prod", "shown as mount writes it");
+
+        let (src, _) = volume_source(&vol(json!({ "name": "vault", "csi": { "driver": "secrets-store.csi.k8s.io" } })), "prod");
+        assert_eq!(src, "secrets-store.csi.k8s.io");
+
+        // Nothing to name (e.g. an emptyDir) still falls back to the em dash.
+        let (src, nav) = volume_source(&vol(json!({ "name": "scratch", "emptyDir": {} })), "prod");
+        assert_eq!(src, DASH);
+        assert!(nav.is_none());
     }
 
     /// Replica readiness: all → green, some → amber, none → red.

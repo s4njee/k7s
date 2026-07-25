@@ -22,6 +22,7 @@ import type {
   LogOptions,
   NodeMetricsMap,
   PodMetricsMap,
+  PodSample,
   Prefs,
   Properties,
   CustomKind,
@@ -35,7 +36,14 @@ import type {
   NodeShellHandle,
 } from "../types";
 import { KIND_ORDER } from "../../lib/kinds";
-import { MOCK_CLUSTERS, MOCK_CUSTOM_KINDS, MOCK_PODS, buildCustomRows, buildKindRows } from "./data";
+import {
+  MOCK_CLUSTERS,
+  MOCK_CUSTOM_KINDS,
+  MOCK_PODS,
+  buildCustomRows,
+  buildKindRows,
+  mockPodUsage,
+} from "./data";
 import { makeLogLine, seedLogLines } from "./logs";
 import { yamlForPodName, yamlForGeneric } from "./yaml";
 import { eventsForPodName } from "./events";
@@ -81,8 +89,11 @@ export class MockProvider implements DataProvider {
   private drainCbs = new Set<(p: DrainProgress) => void>();
   private nodeStatsCbs = new Set<(node: string, s: NodeSample) => void>();
   private nodeStatsErrCbs = new Set<(e: NodeStatsError) => void>();
+  private podStatsCbs = new Set<(key: string, s: PodSample) => void>();
   /** Live synthetic series per node (B27), cleared by unwatchNodeStats. */
   private nodeTimers = new Map<string, ReturnType<typeof setInterval>>();
+  /** Live synthetic per-pod series, cleared by unwatchPodStats. */
+  private podTimers = new Map<string, ReturnType<typeof setInterval>>();
 
   // ---- one-shot commands ----
 
@@ -401,6 +412,51 @@ export class MockProvider implements DataProvider {
     if (t !== undefined) {
       clearInterval(t);
       this.nodeTimers.delete(node);
+    }
+  }
+
+  // ---- per-pod statistics ----
+  //
+  // Demo mode has no metrics-server, so it synthesises a plausible CPU/memory
+  // series on the same cadence a pod's Metrics tab would see from the real feed,
+  // letting the tab be worked on without a cluster.
+
+  onPodStats(cb: (key: string, s: PodSample) => void): Unsub {
+    this.podStatsCbs.add(cb);
+    return () => {
+      this.podStatsCbs.delete(cb);
+    };
+  }
+
+  async watchPodStats(key: string): Promise<void> {
+    if (this.podTimers.has(key)) return;
+
+    // Centre the walk on the pod's declared usage so it hovers near its request
+    // and under its limit — the overlay lines (derived from the same usage in
+    // mockPodResources) then read as a coherent picture rather than noise.
+    const base = mockPodUsage(key);
+    const baseCpu = base && base.cpuMillis > 0 ? base.cpuMillis : 40;
+    const baseMem = base && base.memBytes > 0 ? base.memBytes : 96 * 1024 * 1024;
+    let cpu = baseCpu;
+    let mem = baseMem;
+
+    const tick = () => {
+      // Bounds sit below 2x base, keeping usage under the 2x-base limit line.
+      cpu = clamp(cpu + (Math.random() - 0.5) * baseCpu * 0.18, Math.max(1, baseCpu * 0.4), baseCpu * 2.1);
+      mem = clamp(mem + (Math.random() - 0.5) * baseMem * 0.12, baseMem * 0.5, baseMem * 2.0);
+      const sample: PodSample = { ts: Date.now(), cpuMillis: Math.round(cpu), memBytes: Math.round(mem) };
+      this.podStatsCbs.forEach((cb) => cb(key, sample));
+    };
+    // First point promptly so the tab isn't empty while you wait.
+    setTimeout(tick, 200);
+    this.podTimers.set(key, setInterval(tick, NODE_STATS_TICK_MS));
+  }
+
+  async unwatchPodStats(key: string): Promise<void> {
+    const t = this.podTimers.get(key);
+    if (t !== undefined) {
+      clearInterval(t);
+      this.podTimers.delete(key);
     }
   }
 

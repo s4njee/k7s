@@ -7,7 +7,8 @@
 //! Secondary. CPU/MEM for pods and CPU/MEMORY for nodes are "—" placeholders that
 //! the frontend overlays from the separate metrics feed.
 
-use super::dto::{Cell, InvolvedRef, PodMeta, Row, Tone};
+use super::dto::{Cell, InvolvedRef, PodMeta, PodResources, Row, Tone};
+use super::metrics::{parse_cpu_millis, parse_mem_bytes};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
@@ -143,6 +144,7 @@ pub fn map_pod(pod: &Pod) -> Row {
             restarts,
             creation_ts: creation_rfc3339(pod),
             status_tone: tone,
+            resources: pod_resources(pod),
         }),
         // Labels drive the "view pods" label-selector filter (B33).
         labels: pod.metadata.labels.clone(),
@@ -214,6 +216,62 @@ fn pod_restarts(pod: &Pod) -> i32 {
         .and_then(|s| s.container_statuses.as_ref())
         .map(|cs| cs.iter().map(|c| c.restart_count).sum())
         .unwrap_or(0)
+}
+
+/// Sum a pod's regular containers' CPU/memory requests and limits into pod totals
+/// (see [`PodResources`] for the None semantics). Init containers are excluded so
+/// the totals compare like-for-like against the usage the metrics feed reports.
+fn pod_resources(pod: &Pod) -> PodResources {
+    let containers = match pod.spec.as_ref() {
+        Some(s) => &s.containers,
+        None => return PodResources::default(),
+    };
+    if containers.is_empty() {
+        return PodResources::default();
+    }
+
+    // A request total is meaningful once any container sets one; a limit total is
+    // a true pod ceiling only when *every* container caps that resource, so an
+    // uncapped container drops the whole limit to None.
+    let (mut cpu_req, mut any_cpu_req) = (0i64, false);
+    let (mut mem_req, mut any_mem_req) = (0i64, false);
+    let (mut cpu_lim, mut all_cpu_lim) = (0i64, true);
+    let (mut mem_lim, mut all_mem_lim) = (0i64, true);
+
+    for ct in containers {
+        let requests = ct.resources.as_ref().and_then(|r| r.requests.as_ref());
+        let limits = ct.resources.as_ref().and_then(|r| r.limits.as_ref());
+
+        match requests.and_then(|m| m.get("cpu")) {
+            Some(q) => {
+                cpu_req += parse_cpu_millis(&q.0);
+                any_cpu_req = true;
+            }
+            None => {}
+        }
+        match requests.and_then(|m| m.get("memory")) {
+            Some(q) => {
+                mem_req += parse_mem_bytes(&q.0);
+                any_mem_req = true;
+            }
+            None => {}
+        }
+        match limits.and_then(|m| m.get("cpu")) {
+            Some(q) => cpu_lim += parse_cpu_millis(&q.0),
+            None => all_cpu_lim = false,
+        }
+        match limits.and_then(|m| m.get("memory")) {
+            Some(q) => mem_lim += parse_mem_bytes(&q.0),
+            None => all_mem_lim = false,
+        }
+    }
+
+    PodResources {
+        cpu_request_millis: any_cpu_req.then_some(cpu_req),
+        cpu_limit_millis: all_cpu_lim.then_some(cpu_lim),
+        mem_request_bytes: any_mem_req.then_some(mem_req),
+        mem_limit_bytes: all_mem_lim.then_some(mem_lim),
+    }
 }
 
 /// Deployments: NAME, NAMESPACE, READY, UP-TO-DATE, AVAILABLE, AGE.
@@ -955,6 +1013,63 @@ mod tests {
         assert_eq!(row.cells[4].text, "—", "CPU is a placeholder");
         assert_eq!(row.cells[5].text, "—", "MEM is a placeholder");
         assert_eq!(row.cells[7].tone, Tone::Warn);
+    }
+
+    /// Pod resources sum across the regular containers, so the Metrics overlay
+    /// lines up with the (likewise summed) usage feed.
+    #[test]
+    fn pod_resources_sum_across_containers() {
+        let pod: Pod = serde_json::from_value(json!({
+            "metadata": { "name": "two", "namespace": "prod", "uid": "r1" },
+            "spec": { "containers": [
+                { "name": "app", "resources": {
+                    "requests": { "cpu": "250m", "memory": "256Mi" },
+                    "limits": { "cpu": "500m", "memory": "512Mi" } } },
+                { "name": "side", "resources": {
+                    "requests": { "cpu": "100m", "memory": "64Mi" },
+                    "limits": { "cpu": "200m", "memory": "128Mi" } } }
+            ]}
+        })).unwrap();
+        let r = map_pod(&pod).pod.unwrap().resources;
+        assert_eq!(r.cpu_request_millis, Some(350));
+        assert_eq!(r.cpu_limit_millis, Some(700));
+        assert_eq!(r.mem_request_bytes, Some((256 + 64) * 1024 * 1024));
+        assert_eq!(r.mem_limit_bytes, Some((512 + 128) * 1024 * 1024));
+    }
+
+    /// One uncapped container makes the pod uncapped: the limit total drops to
+    /// None (no ceiling line), while the request total still sums what's set.
+    #[test]
+    fn pod_resources_uncapped_container_has_no_limit() {
+        let pod: Pod = serde_json::from_value(json!({
+            "metadata": { "name": "mixed", "namespace": "prod", "uid": "r2" },
+            "spec": { "containers": [
+                { "name": "app", "resources": {
+                    "requests": { "cpu": "250m" },
+                    "limits": { "cpu": "500m" } } },
+                { "name": "side", "resources": { "requests": { "cpu": "100m" } } }
+            ]}
+        })).unwrap();
+        let r = map_pod(&pod).pod.unwrap().resources;
+        assert_eq!(r.cpu_request_millis, Some(350), "requests still sum");
+        assert_eq!(r.cpu_limit_millis, None, "an uncapped container means no ceiling");
+        assert_eq!(r.mem_request_bytes, None, "no memory requests set");
+        assert_eq!(r.mem_limit_bytes, None);
+    }
+
+    /// A pod with no resources at all reports all-None rather than zeros, so the
+    /// overlay draws nothing instead of a misleading line at zero.
+    #[test]
+    fn pod_resources_absent_are_none() {
+        let pod: Pod = serde_json::from_value(json!({
+            "metadata": { "name": "bare", "namespace": "prod", "uid": "r3" },
+            "spec": { "containers": [{ "name": "app" }] }
+        })).unwrap();
+        let r = map_pod(&pod).pod.unwrap().resources;
+        assert_eq!(r.cpu_request_millis, None);
+        assert_eq!(r.cpu_limit_millis, None);
+        assert_eq!(r.mem_request_bytes, None);
+        assert_eq!(r.mem_limit_bytes, None);
     }
 
     /// A degraded Deployment (0/1) colors the READY cell amber.

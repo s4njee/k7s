@@ -27,6 +27,7 @@ import type {
   NodeShellHandle,
   NodeMetricsMap,
   PodMetricsMap,
+  PodSample,
   Prefs,
   Properties,
   CustomKind,
@@ -68,6 +69,16 @@ function subscribe<T>(event: string, handler: (payload: T) => void): Unsub {
 }
 
 export class TauriProvider implements DataProvider {
+  // ---- pod-stats fanout (see watchPodStats / onPodStats) ----
+  //
+  // A pod's Metrics tab is fed by filtering the cluster-wide `pod-metrics` event
+  // down to the pods being watched, rather than a dedicated backend stream: the
+  // poller is already running, so this is a pure client-side fanout.
+  private watchedPods = new Set<string>();
+  private podStatsCbs = new Set<(key: string, sample: PodSample) => void>();
+  /** Lazily attached on the first onPodStats subscription; lives for the app. */
+  private podMetricsFanout: Unsub | null = null;
+
   // ---- one-shot commands ----
 
   listContexts(): Promise<ContextInfo[]> {
@@ -208,6 +219,18 @@ export class TauriProvider implements DataProvider {
     return invoke<void>("unwatch_node_stats", { node });
   }
 
+  // ---- per-pod statistics ----
+
+  async watchPodStats(key: string): Promise<void> {
+    // No backend call: the metrics poller already runs cluster-wide. This just
+    // marks the pod so the fanout forwards its samples.
+    this.watchedPods.add(key);
+  }
+
+  async unwatchPodStats(key: string): Promise<void> {
+    this.watchedPods.delete(key);
+  }
+
   loadPrefs(): Promise<Prefs | null> {
     return invoke<Prefs | null>("load_prefs");
   }
@@ -264,6 +287,25 @@ export class TauriProvider implements DataProvider {
 
   onNodeStatsError(cb: (err: NodeStatsError) => void): Unsub {
     return subscribe<NodeStatsError>("node-stats-error", cb);
+  }
+
+  onPodStats(cb: (key: string, sample: PodSample) => void): Unsub {
+    this.podStatsCbs.add(cb);
+    // Attach the shared `pod-metrics` fanout on first use. The backend doesn't
+    // timestamp samples, so each poll is stamped with its arrival time here.
+    this.podMetricsFanout ??= subscribe<PodMetricsMap>("pod-metrics", (map) => {
+      if (this.watchedPods.size === 0) return;
+      const ts = Date.now();
+      for (const key of this.watchedPods) {
+        const m = map[key];
+        if (!m) continue;
+        const sample: PodSample = { ts, cpuMillis: m.cpuMillis, memBytes: m.memBytes };
+        for (const fn of this.podStatsCbs) fn(key, sample);
+      }
+    });
+    return () => {
+      this.podStatsCbs.delete(cb);
+    };
   }
 
   // ---- log streaming ----

@@ -10,28 +10,14 @@
  * Scraping runs only while this tab is mounted; see useNodeStats.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useRef } from "react";
 import styles from "./MetricsTab.module.css";
 import { useStore } from "../../store";
 import { useNodeStats } from "../../hooks/useNodeStats";
-import { baseLayout, humanBps, humanBytes, plotColors, PLOT_CONFIG } from "./plot";
-import { useResolvedTheme } from "../../hooks/useTheme";
+import { humanBps, humanBytes, plotColors } from "./plot";
+import { Plot, useHostPlotColors } from "./PlotChart";
 import { withAlpha } from "../../lib/theme";
 import type { NodeSample } from "../../providers/types";
-
-/**
- * Plotly colours for the host's token surface. Re-resolves after mount (ref is
- * null on the first render) and whenever the app palette flips — needed so
- * light-mode dark panels don't hand plotly the document's light tokens.
- */
-function useHostPlotColors(hostRef: RefObject<Element | null>) {
-  const theme = useResolvedTheme();
-  const [colors, setColors] = useState(() => plotColors());
-  useLayoutEffect(() => {
-    setColors(plotColors(hostRef.current));
-  }, [hostRef, theme]);
-  return colors;
-}
 
 export function MetricsTab() {
   const row = useStore((s) => s.selectedRow);
@@ -218,66 +204,6 @@ function Filesystems({
       }}
     />
   );
-}
-
-/**
- * Plotly, loaded on first use.
- *
- * The library is ~1.1MB — more than half the app's bundle — and only this tab
- * needs it, so it's a dynamic import that vite splits into its own chunk. Someone
- * who never opens a node's Metrics tab never downloads or parses it. The promise
- * is cached at module scope so five charts on one tab share one load.
- */
-let plotlyPromise: Promise<typeof import("plotly.js-basic-dist-min")> | null = null;
-function loadPlotly() {
-  plotlyPromise ??= import("plotly.js-basic-dist-min");
-  return plotlyPromise;
-}
-
-/**
- * One Plotly chart.
- *
- * `Plotly.react` rather than `newPlot`: it diffs against what's already drawn, so
- * a new point every poll updates the existing traces instead of tearing the plot
- * down and rebuilding it — which would flicker and lose any hover.
- */
-function Plot({
-  title,
-  data,
-  layoutExtra,
-  height = 150,
-}: {
-  title: string;
-  data: unknown[];
-  layoutExtra?: Record<string, unknown>;
-  height?: number;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    // Resolve layout colours from the plot host so a dark panel surface wins.
-    const layout = { ...baseLayout(title, height, ref.current), ...layoutExtra };
-    void loadPlotly().then((Plotly) => {
-      // The tab can close while the chunk is in flight.
-      if (cancelled || !ref.current) return;
-      void Plotly.react(ref.current, data as never, layout as never, PLOT_CONFIG as never);
-    });
-    return () => {
-      cancelled = true;
-    };
-  });
-
-  // Purge on unmount only: Plotly attaches listeners and DOM that leak if the
-  // node is simply dropped.
-  useEffect(() => {
-    const el = ref.current;
-    return () => {
-      if (el) void loadPlotly().then((Plotly) => Plotly.purge(el));
-    };
-  }, []);
-
-  return <div className={styles.plot} ref={ref} />;
 }
 
 /** "42%" for a used/total pair. */

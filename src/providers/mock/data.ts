@@ -8,7 +8,7 @@
  * the prototype's exact per-cell coloring (tone) and status-dot rules.
  */
 
-import type { Cell, CustomKind, Row, PodMeta, Tone } from "../types";
+import type { Cell, CustomKind, Row, PodMeta, PodResources, Tone } from "../types";
 import { KIND_META, type ResourceKind } from "../../lib/kinds";
 import { parseCpuMillis, parseMemBytes } from "../../lib/format";
 
@@ -140,6 +140,34 @@ export function statusTone(status: string): Tone {
   return "err";
 }
 
+/**
+ * Synthesise plausible requests/limits for a demo pod from its current usage:
+ * request a touch above what it's using, limit at double that. Real clusters get
+ * these from the pod spec (see map_pod); demo mode has no spec, so the Metrics
+ * overlay needs something coherent to draw against the synthetic usage series.
+ */
+export function mockPodResources(cpu: string, mem: string): PodResources {
+  const cpuUse = parseCpuMillis(cpu) ?? 0;
+  const memUse = parseMemBytes(mem) ?? 0;
+  // A pod with no usage yet (Pending) still gets modest defaults so its tab isn't
+  // a bare chart the moment it's opened.
+  const cpuReq = Math.max(50, Math.round(cpuUse * 1.3));
+  const memReq = Math.max(64 * 1024 * 1024, Math.round(memUse * 1.25));
+  return {
+    cpuRequestMillis: cpuReq,
+    cpuLimitMillis: cpuReq * 2,
+    memRequestBytes: memReq,
+    memLimitBytes: Math.round(memReq * 1.8),
+  };
+}
+
+/** Parsed current usage for a demo pod by "ns/name" — seeds the metrics walk. */
+export function mockPodUsage(key: string): { cpuMillis: number; memBytes: number } | undefined {
+  const p = MOCK_PODS.find((x) => `${x.ns}/${x.name}` === key);
+  if (!p) return undefined;
+  return { cpuMillis: parseCpuMillis(p.cpu) ?? 0, memBytes: parseMemBytes(p.mem) ?? 0 };
+}
+
 /** Build the Pods table rows with the prototype's exact per-cell coloring. */
 export function buildPodRows(): Row[] {
   return stressPods(MOCK_PODS).map((p) => {
@@ -153,6 +181,7 @@ export function buildPodRows(): Row[] {
       restarts: p.restarts,
       creationTs: p.age, // demo mode shows the literal age; no live ISO needed
       statusTone: statusTone(p.status),
+      resources: mockPodResources(p.cpu, p.mem),
     };
     const cells: Cell[] = [
       { text: p.name, tone: "primary" },

@@ -104,6 +104,19 @@ export interface Cell {
   nav?: NavTarget;
 }
 
+/**
+ * A pod's total CPU/memory requests and limits, summed across its regular
+ * containers (init excluded) to match the usage the metrics feed reports. Units
+ * are millicores (CPU) and bytes (memory). `null` means unset — and for a limit,
+ * that a container is uncapped, so the Metrics tab draws no ceiling line.
+ */
+export interface PodResources {
+  cpuRequestMillis: number | null;
+  cpuLimitMillis: number | null;
+  memRequestBytes: number | null;
+  memLimitBytes: number | null;
+}
+
 /** Extra fields carried only by pod rows, used to drive the detail panel. */
 export interface PodMeta {
   node: string;
@@ -115,6 +128,8 @@ export interface PodMeta {
   creationTs: string;
   /** Tone for the status word / header dot. */
   statusTone: Tone;
+  /** Aggregate requests/limits, for the Metrics tab's overlay lines. */
+  resources: PodResources;
 }
 
 /** The object an Event is about, for click-through navigation (B33). */
@@ -211,6 +226,20 @@ export interface PodMetrics {
   memBytes: number;
 }
 export type PodMetricsMap = Record<string, PodMetrics>;
+
+/**
+ * One point in a pod's live usage series, accumulated while its Metrics tab is
+ * open. Unlike a node's NodeSample (scraped from node-exporter), these come from
+ * the same `metrics.k8s.io` feed that drives the pod list — summed across the
+ * pod's containers — so a single point is already a real reading, not a rate that
+ * needs two scrapes to compute.
+ */
+export interface PodSample {
+  /** Epoch milliseconds — the x axis. */
+  ts: number;
+  cpuMillis: number;
+  memBytes: number;
+}
 
 /** Per-node usage percentages, keyed by node name. */
 export interface NodeMetrics {
@@ -545,6 +574,16 @@ export interface DataProvider {
   /** Stop scraping a node (idempotent). */
   unwatchNodeStats(node: string): Promise<void>;
 
+  /**
+   * Start feeding per-pod usage samples for the pod keyed "namespace/name",
+   * emitted through `onPodStats`. Unlike a node, this needs no scraper — the
+   * cluster-wide metrics poller is already running — so this only marks the pod
+   * as one whose samples should be forwarded. Safe to call twice.
+   */
+  watchPodStats(key: string): Promise<void>;
+  /** Stop forwarding a pod's samples (idempotent). */
+  unwatchPodStats(key: string): Promise<void>;
+
   // ---- persisted preferences (B11) ----
   /** Load persisted UI preferences, or null if none / not supported (demo). */
   loadPrefs(): Promise<Prefs | null>;
@@ -574,6 +613,8 @@ export interface DataProvider {
   onNodeStats(cb: (node: string, sample: NodeSample) => void): Unsub;
   /** Why a watched node has no samples (B27). */
   onNodeStatsError(cb: (err: NodeStatsError) => void): Unsub;
+  /** Per-pod usage samples for pods whose Metrics tab is open, keyed "ns/name". */
+  onPodStats(cb: (key: string, sample: PodSample) => void): Unsub;
 
   // ---- log streaming ----
   startLogs(

@@ -240,4 +240,16 @@ describe("tabsFor", () => {
       expect(tabsFor(kind, false), kind).not.toContain("shell");
     }
   });
+
+  /**
+   * Metrics is offered for pods (metrics.k8s.io) as well as nodes (node-exporter),
+   * but for nothing else — a Deployment has no single usage series to plot.
+   */
+  it("offers Metrics on pods and nodes only", () => {
+    expect(tabsFor("pods", true)).toContain("metrics");
+    expect(tabsFor("nodes", false)).toContain("metrics");
+    for (const kind of ["deployments", "services", "configmaps", "helm"]) {
+      expect(tabsFor(kind, false), kind).not.toContain("metrics");
+    }
+  });
 });

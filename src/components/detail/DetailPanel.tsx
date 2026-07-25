@@ -20,6 +20,7 @@ import { drainErrors, drainSummary, drainTone, pdbBlocked } from "../../lib/drai
 import { LogsTab } from "./LogsTab";
 import { PropertiesTab } from "./PropertiesTab";
 import { MetricsTab } from "./MetricsTab";
+import { PodMetricsTab } from "./PodMetricsTab";
 import { ShellTab } from "./ShellTab";
 import { NodeShellTab } from "./NodeShellTab";
 import { YamlTab } from "./YamlTab";
@@ -123,8 +124,10 @@ export function DetailPanel() {
       {activeTab === "logs" && isPod && <LogsTab />}
       {/* Mirrors the tab list above: Properties is no longer pod-only (B18). */}
       {activeTab === "properties" && KINDS_WITH_PROPERTIES.has(nav) && <PropertiesTab />}
-      {/* Mounting is what starts the scraper, so this must mirror the tab list. */}
+      {/* Mounting is what starts the scraper, so this must mirror the tab list. A
+          node's Metrics come from its node-exporter; a pod's from metrics.k8s.io. */}
       {activeTab === "metrics" && nav === "nodes" && <MetricsTab />}
+      {activeTab === "metrics" && isPod && <PodMetricsTab />}
       {activeTab === "shell" && isPod && <ShellTab />}
       {/* A node's shell is a privileged debug pod rather than a container exec
           (B53), so it's a different component behind the same tab. */}

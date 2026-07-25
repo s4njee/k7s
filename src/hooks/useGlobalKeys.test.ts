@@ -28,6 +28,12 @@ const row = (name: string, pod = false): Row => ({
           restarts: 0,
           creationTs: "",
           statusTone: "ok" as const,
+          resources: {
+            cpuRequestMillis: null,
+            cpuLimitMillis: null,
+            memRequestBytes: null,
+            memLimitBytes: null,
+          },
         },
       }
     : {}),

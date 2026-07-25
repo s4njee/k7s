@@ -18,6 +18,7 @@ import type {
   NavTarget,
   NodeMetricsMap,
   PodMetricsMap,
+  PodSample,
   Row,
 } from "./providers/types";
 import { KIND_ORDER } from "./lib/kinds";
@@ -75,6 +76,9 @@ const EMPTY_ROWS: Row[] = [];
  * a tab left open all day.
  */
 export const NODE_SAMPLE_CAP = 240;
+
+/** Points kept per pod's series — same reasoning and cadence as NODE_SAMPLE_CAP. */
+export const POD_SAMPLE_CAP = 240;
 
 /**
  * The state change that *is* selecting a row: open the panel on a sensible tab
@@ -212,6 +216,12 @@ export interface AppState {
   nodeSamples: Record<string, NodeSample[]>;
   /** Why a node has no samples (no exporter, forward failed), keyed by node. */
   nodeStatsErrors: Record<string, string>;
+  /**
+   * Per-pod usage samples, keyed "namespace/name", oldest first. Live-only like
+   * nodeSamples: the series starts when you open a pod's Metrics tab and fills
+   * from the metrics poller — there is no per-pod history to backfill.
+   */
+  podSamples: Record<string, PodSample[]>;
 
   // ---------- detail panel ----------
   /** Selected row (null → panel closed). Pods also get a Logs tab. */
@@ -269,6 +279,8 @@ export interface AppState {
   /** Append a sample to a node's series, capped at NODE_SAMPLE_CAP. */
   addNodeSample: (node: string, sample: NodeSample) => void;
   setNodeStatsError: (node: string, message: string) => void;
+  /** Append a sample to a pod's series, capped at POD_SAMPLE_CAP. */
+  addPodSample: (key: string, sample: PodSample) => void;
   /** Merge a settings change (already sanitised by the caller). */
   setSettings: (patch: Partial<Settings>) => void;
   /** Record the OS colour-scheme preference (B52). */
@@ -354,6 +366,7 @@ export const useStore = create<AppState>((set) => ({
   drains: {},
   nodeSamples: {},
   nodeStatsErrors: {},
+  podSamples: {},
 
   selectedRow: null,
   activeTab: "logs",
@@ -443,6 +456,16 @@ export const useStore = create<AppState>((set) => ({
     }),
   setNodeStatsError: (node, message) =>
     set((s) => ({ nodeStatsErrors: { ...s.nodeStatsErrors, [node]: message } })),
+  addPodSample: (key, sample) =>
+    set((s) => {
+      const next = (s.podSamples[key] ?? []).concat(sample);
+      return {
+        podSamples: {
+          ...s.podSamples,
+          [key]: next.length > POD_SAMPLE_CAP ? next.slice(-POD_SAMPLE_CAP) : next,
+        },
+      };
+    }),
   setSettings: (patch) =>
     set((s) => {
       const settings = { ...s.settings, ...patch };
@@ -511,6 +534,8 @@ export const useStore = create<AppState>((set) => ({
       // and the backend has dropped their scrapers (B27).
       nodeSamples: {},
       nodeStatsErrors: {},
+      // Pod samples belong to the old connection too — a reconnect starts fresh.
+      podSamples: {},
       selectedRow: null,
       selection: EMPTY_SELECTION,
       logBuffer: [],
