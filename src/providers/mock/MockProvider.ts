@@ -214,6 +214,12 @@ export class MockProvider implements DataProvider {
   async scaleResource(_ref: ResourceRef, _replicas: number): Promise<void> {}
   async restartPod(_ref: ResourceRef): Promise<void> {}
   async restartRollout(_ref: ResourceRef): Promise<void> {}
+
+  async undoRollout(_ref: ResourceRef, revision: number): Promise<number> {
+    // Demo mode has no real Deployment to patch; claim the rollback succeeded so
+    // the confirm flow and properties refresh are exercised end to end.
+    return revision;
+  }
   async setCordon(_node: string, _unschedulable: boolean): Promise<void> {}
   /** No native window in demo mode — the browser tab owns its own chrome. */
   async setWindowTheme(_theme: "dark" | "light"): Promise<void> {}

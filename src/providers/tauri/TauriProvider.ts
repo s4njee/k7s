@@ -190,6 +190,14 @@ export class TauriProvider implements DataProvider {
     });
   }
 
+  undoRollout(ref: ResourceRef, revision: number): Promise<number> {
+    return invoke<number>("undo_rollout", {
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+      revision,
+    });
+  }
+
   setCordon(node: string, unschedulable: boolean): Promise<void> {
     return invoke<void>("set_cordon", { name: node, unschedulable });
   }

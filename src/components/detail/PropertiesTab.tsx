@@ -16,6 +16,7 @@ import { useStore } from "../../store";
 import { getProvider } from "../../providers";
 import { useNow } from "../../hooks/useNow";
 import { formatAge } from "../../lib/format";
+import { rollbackable } from "../../lib/rollback";
 import { toneColor } from "../../lib/tone";
 import type { Cell, Field, NavTarget, Properties, Section } from "../../providers/types";
 
@@ -24,6 +25,9 @@ export function PropertiesTab() {
   const kind = useStore((s) => s.nav);
   const [props, setProps] = useState<Properties | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by a rollout undo so the ReplicaSets table refreshes to the new
+  // revision the controller is about to create.
+  const [refreshKey, setRefreshKey] = useState(0);
   const now = useNow();
 
   useEffect(() => {
@@ -42,22 +46,48 @@ export function PropertiesTab() {
     return () => {
       cancelled = true;
     };
-  }, [row?.uid, row?.namespace, row?.name, kind]);
+  }, [row?.uid, row?.namespace, row?.name, kind, refreshKey]);
 
   if (error) return <div className={styles.state}>{error}</div>;
   if (!props) return <div className={styles.state}>loading properties…</div>;
 
+  // Only a Deployment's properties carry a ReplicaSets table, so the rollback
+  // action (B34b) is keyed on the selected row being a Deployment.
+  const rollout =
+    kind === "deployments" && row
+      ? {
+          namespace: row.namespace ?? "",
+          name: row.name,
+          onChanged: () => setRefreshKey((k) => k + 1),
+        }
+      : undefined;
+
   return (
     <div className={styles.wrap}>
       {props.sections.map((s) => (
-        <SectionView key={s.title} section={s} now={now} />
+        <SectionView key={s.title} section={s} now={now} rollout={rollout} />
       ))}
     </div>
   );
 }
 
+/** The Deployment a rollback action targets, plus how to refresh after one. */
+interface RolloutRef {
+  namespace: string;
+  name: string;
+  onChanged: () => void;
+}
+
 /** One section: header (with a row count for tables) plus its body. */
-function SectionView({ section, now }: { section: Section; now: number }) {
+function SectionView({
+  section,
+  now,
+  rollout,
+}: {
+  section: Section;
+  now: number;
+  rollout?: RolloutRef;
+}) {
   const { body } = section;
   return (
     <div className={styles.section}>
@@ -78,6 +108,10 @@ function SectionView({ section, now }: { section: Section; now: number }) {
       {body.type === "table" &&
         (body.rows.length === 0 ? (
           <div className={styles.empty}>{section.emptyNote}</div>
+        ) : section.title === "ReplicaSets" && rollout ? (
+          // B34b: the Deployment's ReplicaSets table gets a per-row rollback
+          // action for every revision except the one being rolled out.
+          <ReplicaSetsTable columns={body.columns} rows={body.rows} now={now} rollout={rollout} />
         ) : (
           <div className={styles.tableScroll}>
             <table className={styles.table}>
@@ -146,6 +180,126 @@ function NavLink({ target, children }: { target: NavTarget; children: React.Reac
       onClick={() => navigateTo(target)}
     >
       {children}
+    </button>
+  );
+}
+
+/**
+ * The Deployment's ReplicaSets table with a per-row rollback action (B34b).
+ * The current revision (the highest, the one being rolled out) gets no action;
+ * every older revision can be rolled back to, which copies its pod template back
+ * onto the Deployment.
+ */
+function ReplicaSetsTable({
+  columns,
+  rows,
+  now,
+  rollout,
+}: {
+  columns: string[];
+  rows: Cell[][];
+  now: number;
+  rollout: RolloutRef;
+}) {
+  const revisions = rows.map((r) => Number(r[1]?.text)).filter((n) => Number.isFinite(n));
+
+  return (
+    <div className={styles.tableScroll}>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            {columns.map((h) => (
+              <th key={h} className={styles.th}>
+                {h}
+              </th>
+            ))}
+            <th className={`${styles.th} ${styles.thAction}`}>ACTION</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((cells, i) => {
+            const revision = Number(cells[1]?.text);
+            const isCurrent = !rollbackable(revisions, revision);
+            return (
+              <tr key={i}>
+                {cells.map((cell, j) => (
+                  <td
+                    className={[
+                      styles.td,
+                      j === 0 ? styles.tdName : "",
+                      wraps(cell) ? styles.tdWrap : "",
+                    ].join(" ")}
+                    key={j}
+                    style={{ color: toneColor(cell.tone) }}
+                  >
+                    {cell.nav ? (
+                      <NavLink target={cell.nav}>{cellText(cell, now)}</NavLink>
+                    ) : (
+                      cellText(cell, now)
+                    )}
+                  </td>
+                ))}
+                <td className={styles.td}>
+                  {isCurrent ? (
+                    <span className={styles.rollbackCurrent}>—</span>
+                  ) : (
+                    <RollbackButton revision={revision} rollout={rollout} />
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * The "Roll back to revision N…" action: a button that unfolds a red confirm
+ * naming the revision, then runs the undo and refreshes the properties.
+ */
+function RollbackButton({ revision, rollout }: { revision: number; rollout: RolloutRef }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const doRollback = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await getProvider().undoRollout(
+        { kind: "deployments", namespace: rollout.namespace, name: rollout.name },
+        revision,
+      );
+      // The refresh re-fetches properties, which unmounts this button — the
+      // table now shows the controller's new revision in progress.
+      rollout.onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+      setConfirming(false);
+    }
+  };
+
+  if (confirming) {
+    return (
+      <span className={styles.rollbackConfirm}>
+        <span className={styles.rollbackQuestion}>Roll back to revision {revision}?</span>
+        <button className={styles.rollbackGo} onClick={doRollback} disabled={busy}>
+          {busy ? "…" : "roll back"}
+        </button>
+        <button className={styles.rollbackCancel} onClick={() => setConfirming(false)}>
+          cancel
+        </button>
+        {error && <span className={styles.rollbackError}>{error}</span>}
+      </span>
+    );
+  }
+
+  return (
+    <button className={styles.rollback} onClick={() => setConfirming(true)}>
+      roll back to rev {revision}…
     </button>
   );
 }

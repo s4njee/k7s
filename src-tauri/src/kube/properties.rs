@@ -1203,49 +1203,29 @@ async fn gather_deployment(client: Client, namespace: &str, name: &str) -> AppRe
     // ---- owned ReplicaSets ----
     // Ownership is by uid, not name: a deleted-and-recreated Deployment reuses the
     // name, and matching on it would adopt the old generation's ReplicaSets.
-    let rs_rows = match Api::<ReplicaSet>::namespaced(client.clone(), namespace)
-        .list(&ListParams::default())
-        .await
-    {
-        Ok(list) => {
-            let mut owned: Vec<ReplicaSet> = list
-                .items
-                .into_iter()
-                .filter(|rs| {
-                    rs.metadata
-                        .owner_references
-                        .iter()
-                        .flatten()
-                        .any(|o| Some(&o.uid) == dep.metadata.uid.as_ref())
-                })
-                .collect();
-            // Newest revision first — that's the one being rolled out.
-            owned.sort_by_key(|rs| std::cmp::Reverse(revision_of(rs)));
-            owned
-                .iter()
-                .map(|rs| {
-                    let s = rs.status.clone().unwrap_or_default();
-                    let want = rs.spec.as_ref().and_then(|sp| sp.replicas).unwrap_or(0);
-                    let rs_ready = s.ready_replicas.unwrap_or(0);
-                    vec![
-                        // ReplicaSets are a listed kind now (B40), so a revision
-                        // row opens the generation it names.
-                        Cell::link(
-                            rs.name_any(),
-                            Tone::Primary,
-                            Some(NavTarget::namespaced("replicasets", namespace, rs.name_any())),
-                        ),
-                        c(revision_of(rs).map(|r| r.to_string()).unwrap_or_else(|| DASH.into())),
-                        c(want.to_string()),
-                        c(s.replicas.to_string()),
-                        Cell::new(rs_ready.to_string(), ready_tone(rs_ready, want)),
-                        Cell::age(rs.creation_timestamp().map(|t| t.0.to_rfc3339())),
-                    ]
-                })
-                .collect()
-        }
-        Err(_) => Vec::new(), // RBAC/transient: degrade to an empty section
-    };
+    let owned = owned_replicasets(&client, namespace, dep.metadata.uid.as_deref().unwrap_or_default()).await;
+    let rs_rows = owned
+        .iter()
+        .map(|rs| {
+            let s = rs.status.clone().unwrap_or_default();
+            let want = rs.spec.as_ref().and_then(|sp| sp.replicas).unwrap_or(0);
+            let rs_ready = s.ready_replicas.unwrap_or(0);
+            vec![
+                // ReplicaSets are a listed kind now (B40), so a revision
+                // row opens the generation it names.
+                Cell::link(
+                    rs.name_any(),
+                    Tone::Primary,
+                    Some(NavTarget::namespaced("replicasets", namespace, rs.name_any())),
+                ),
+                c(revision_of(rs).map(|r| r.to_string()).unwrap_or_else(|| DASH.into())),
+                c(want.to_string()),
+                c(s.replicas.to_string()),
+                Cell::new(rs_ready.to_string(), ready_tone(rs_ready, want)),
+                Cell::age(rs.creation_timestamp().map(|t| t.0.to_rfc3339())),
+            ]
+        })
+        .collect();
     props.push_table(
         "ReplicaSets",
         Some("no replica sets (or none readable)"),
@@ -1274,13 +1254,47 @@ async fn gather_deployment(client: Client, namespace: &str, name: &str) -> AppRe
 }
 
 /// A ReplicaSet's rollout revision, from the annotation the Deployment controller
-/// stamps on it.
-fn revision_of(rs: &ReplicaSet) -> Option<i64> {
+/// stamps on it. Shared with rollout undo (B34b), which resolves a ReplicaSet by
+/// the same revision the properties panel shows.
+pub(crate) fn revision_of(rs: &ReplicaSet) -> Option<i64> {
     rs.metadata
         .annotations
         .as_ref()
         .and_then(|a| a.get("deployment.kubernetes.io/revision"))
         .and_then(|v| v.parse().ok())
+}
+
+/// A Deployment's owned ReplicaSets (matched by owner *uid*, not name — a
+/// deleted-and-recreated Deployment reuses its name, and matching on it would
+/// adopt the old generation's ReplicaSets), newest revision first. Shared by the
+/// properties panel and rollout undo (B34b).
+pub(crate) async fn owned_replicasets(
+    client: &Client,
+    namespace: &str,
+    uid: &str,
+) -> Vec<ReplicaSet> {
+    match Api::<ReplicaSet>::namespaced(client.clone(), namespace)
+        .list(&ListParams::default())
+        .await
+    {
+        Ok(list) => {
+            let mut owned: Vec<ReplicaSet> = list
+                .items
+                .into_iter()
+                .filter(|rs| {
+                    rs.metadata
+                        .owner_references
+                        .iter()
+                        .flatten()
+                        .any(|o| o.uid.as_str() == uid)
+                })
+                .collect();
+            // Newest revision first — that's the one being rolled out.
+            owned.sort_by_key(|rs| std::cmp::Reverse(revision_of(rs)));
+            owned
+        }
+        Err(_) => Vec::new(), // RBAC/transient: degrade to an empty list
+    }
 }
 
 /// Render an IntOrString ("25%" or "1").

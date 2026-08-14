@@ -91,6 +91,81 @@
 .tdName {
   color: var(--text-primary);
 }
+
+/* ---------- ReplicaSets rollback action (B34b) ---------- */
+
+.thAction {
+  text-align: right;
+}
+/* The current revision's placeholder — nothing to offer, deliberately quiet. */
+.rollbackCurrent {
+  color: var(--text-faint);
+}
+.rollback {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-decoration-color: var(--border-control);
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+.rollback:hover {
+  color: var(--text-primary);
+  text-decoration-color: var(--text-muted);
+}
+/* The inline confirm: a red question naming the revision, then go/cancel. */
+.rollbackConfirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.rollbackQuestion {
+  color: var(--status-err);
+  font-weight: 600;
+}
+.rollbackGo {
+  background: var(--bg-control);
+  border: 1px solid var(--status-err);
+  border-radius: var(--radius-sm);
+  color: var(--status-err);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.rollbackGo:hover {
+  background: var(--status-err);
+  color: var(--bg-app);
+}
+.rollbackGo:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.rollbackCancel {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-decoration-color: var(--border-control);
+  text-underline-offset: 2px;
+}
+.rollbackCancel:hover {
+  color: var(--text-primary);
+}
+.rollbackError {
+  color: var(--status-err);
+  font-size: 10px;
+}
 /* Long values (images, mount paths, condition messages) wrap rather than blow out
    the panel — applied per value, not per column (see `wraps` in PropertiesTab).
    `anywhere` breaks at spaces first and only splits a token when it has no other

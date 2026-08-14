@@ -18,13 +18,10 @@ use kube::{Client, ResourceExt};
 async fn main() -> anyhow::Result<()> {
     let client = Client::try_default().await?;
 
-    // Pick a real object of each kind rather than hard-coding names.
+    // Pick a real object of each kind rather than hard-coding names (B45).
     let pod = first_named::<Pod>(&client).await;
     let dep = first_named::<Deployment>(&client).await;
-    let svc = Api::<Service>::namespaced(client.clone(), "argocd")
-        .get_opt("argocd-server")
-        .await?
-        .map(|s| ("argocd".to_string(), s.name_any()));
+    let svc = first_named::<Service>(&client).await;
     let sts = first_named::<StatefulSet>(&client).await;
     let node = Api::<Node>::all(client.clone())
         .list(&ListParams::default().limit(1))

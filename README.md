@@ -210,7 +210,10 @@ pointing at an `optional: true` Secret that didn't exist, a `previous`-container
 log read that returns *identical* bytes to the live one while a container sits in
 backoff, and an Ingress backend port that's a *name* rather than a number.
 
-> The harnesses name the hosts and namespaces of the small self-hosted cluster
-> this was built against, so they'll need adjusting for yours. The ones that
-> discover their own fixtures (`storage_check`, `related_links_check`,
-> `helm_props_check`, `promql_check`) run anywhere as-is.
+> The harnesses are **discovery-based**: they find their own fixtures at runtime
+> (the most-restarted pod for crash-loop cases, any pod with declared ports, the
+> cluster's Services, whatever CRDs and Helm releases exist) rather than naming
+> hosts or namespaces, so they run against any cluster — freya, a kind cluster
+> from `dev/cluster/up.sh`, or anything else. A cluster with no suitable fixture
+> prints an explicit "no fixture for X, skipping" and exits cleanly rather than
+> failing, so a fresh cluster is never a red herring.

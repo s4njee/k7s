@@ -143,11 +143,12 @@ revision N…" per-row in the properties ReplicaSets table for non-current
 revisions, with a red confirm naming the revision.
 
 **Accept:**
-- [ ] Unit test pins the template-copy (fixture Deployment + two RS revisions
+- [x] Unit test pins the template-copy (fixture Deployment + two RS revisions
       → patch equals the old template).
 - [ ] Live, against a scratch Deployment (B36's create, or kubectl-made):
       restart cycles a new RS revision; undo returns to the prior template.
-- [ ] Rows for the *current* revision don't offer the action.
+      *(needs a live cluster check)*
+- [x] Rows for the *current* revision don't offer the action.
 
 ### B45 — Discovery-based live harnesses
 *Why: six of the `examples/*_check.rs` harnesses hardcode freya's namespaces
@@ -164,10 +165,10 @@ to a skip-with-message when a cluster has no suitable fixture rather than
 failing. Document the pattern in the README's verification section.
 
 **Accept:**
-- [ ] Every harness runs green against freya with no edits.
-- [ ] Every harness runs against the kind fixture cluster (`dev/cluster/up.sh`)
+- [x] Every harness runs green against freya with no edits.
+- [x] Every harness runs against the kind fixture cluster (`dev/cluster/up.sh`)
       and either passes or prints an explicit "no fixture for X, skipping".
-- [ ] No harness names a namespace or pod that isn't discovered at runtime.
+- [x] No harness names a namespace or pod that isn't discovered at runtime.
 
 ### B46 — The remaining reference gaps
 *Why: the audit trail from B40–B43. What's left is small and enumerable, and
@@ -383,7 +384,10 @@ B28–B43, in the commit messages of `feat/backlog-qol`.
   flattened with credential keys redacted in Rust.
 - **B34 — Restart** (pod delete-and-recreate with bare-pod refusal; workload
   rollout-restart via `restartedAt` patch, validated server-side by dry run).
-  *Undo half → B34b.*
+- **B34b — Rollout undo.** The safety net restart never had: `undo_rollout`
+  copies a target ReplicaSet's pod template back onto the Deployment (owner-uid
+  + revision-annotation logic shared with properties); the ReplicaSets table
+  offers a red-confirmed "roll back to revision N…" on every non-current row.
 - **B33 — Related-resource navigation.** Owner links resolving through
   ReplicaSets; workload → pods via label-selector filter syntax
   (`lib/filter.ts`); clickable events via Kind+group → nav id resolution.
@@ -391,6 +395,11 @@ B28–B43, in the commit messages of `feat/backlog-qol`.
   bad/pending/terminating pods, degraded workloads, failed jobs and Warning
   events over the store's rows; navigable rows, sidebar badge toned by severity.
   *B30/B31/B44 shipped — see their backlog items above.*
+- **B45 — Discovery-based live harnesses.** The six harnesses that named freya's
+  hosts (`live_check`, `crd_check`, `properties_check`, `logs_check`,
+  `helm_check`, `svc_forward_check`) now discover their own fixtures and skip
+  with an explicit message when a cluster has none — verified green against both
+  freya and the `dev/cluster/up.sh` kind cluster.
 - **B29 — Crash-loop debugging.** `previous` reads (terminate, never follow),
   since-windows, save-to-file written in Rust (13k lines / 4.8MB past the
   200-line ring buffer). Backlog premise about `previous` corrected in the

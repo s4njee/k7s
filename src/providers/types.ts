@@ -573,6 +573,12 @@ export interface DataProvider {
    * rollout restart` template-annotation patch, rolled through the update strategy.
    */
   restartRollout(ref: ResourceRef): Promise<void>;
+  /**
+   * Roll a Deployment back to a prior ReplicaSet revision (B34b): copy that
+   * revision's pod template back onto the Deployment, so the controller rolls to
+   * that generation again. Resolves to the revision rolled back to.
+   */
+  undoRollout(ref: ResourceRef, revision: number): Promise<number>;
   /** Cordon or uncordon a node. */
   setCordon(node: string, unschedulable: boolean): Promise<void>;
   /**

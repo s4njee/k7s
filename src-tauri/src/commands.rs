@@ -11,6 +11,7 @@ use crate::kube::{
     portforward, promql, properties, restart, watchers, ClientManager, ResourceKind,
 };
 use tokio::sync::{mpsc, oneshot};
+use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::Event;
 use kube::api::{
     Api, ApiResource, DeleteParams, DynamicObject, ListParams, Patch, PatchParams, PostParams,
@@ -586,6 +587,32 @@ pub async fn restart_rollout(
     let patch = Patch::Merge(restart::restart_patch(&now));
     api.patch(&name, &PatchParams::default(), &patch).await?;
     Ok(())
+}
+
+/// Undo a Deployment rollout (B34b): copy the ReplicaSet at `revision`'s pod
+/// template back onto the Deployment, so the controller rolls to that revision's
+/// pods again. The safety net restart (B34) never had.
+///
+/// The target ReplicaSet is found the same way the properties panel lists them —
+/// owned by uid, resolved by the `deployment.kubernetes.io/revision` annotation —
+/// and the copy is a single merge patch on `spec.template`.
+#[tauri::command]
+pub async fn undo_rollout(
+    namespace: String,
+    name: String,
+    revision: i64,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<i64> {
+    let client = require_client(&mgr).await?;
+    let api: Api<Deployment> = Api::namespaced(client.clone(), &namespace);
+    let dep = api.get(&name).await?;
+    let uid = dep.metadata.uid.as_deref().unwrap_or_default();
+    let owned = properties::owned_replicasets(&client, &namespace, uid).await;
+    let patch = restart::undo_patch_for_revision(&owned, revision).ok_or_else(|| {
+        AppError::Other(format!("no ReplicaSet at revision {revision} for {namespace}/{name}"))
+    })?;
+    api.patch(&name, &PatchParams::default(), &Patch::Merge(patch)).await?;
+    Ok(revision)
 }
 
 /// Start watching a custom (CRD-backed) kind (B15), if it isn't already watched.

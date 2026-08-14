@@ -6,6 +6,10 @@
 //! Lists discovered custom kinds, lists objects of a few of them through the same
 //! DynamicObject API the lazy watchers use, then drives a real reflector-backed
 //! watcher for one kind and prints the rows exactly as the table would show them.
+//!
+//! Discovery-based (B45): fixtures are whatever CRDs the cluster has. A cluster
+//! with no CRDs — or none that hold objects — prints an explicit skip rather
+//! than failing, so the harness runs on a fresh kind cluster too.
 
 use futures::StreamExt;
 use k7s_lib::kube::{discovery, mappers};
@@ -30,21 +34,35 @@ async fn main() -> anyhow::Result<()> {
             if k.namespaced { "namespaced" } else { "cluster" }
         );
     }
+    if kinds.is_empty() {
+        println!("\nno custom kinds on this cluster, skipping");
+        return Ok(());
+    }
 
-    // Spot-check the kinds the backlog names, plus whatever else is present.
-    println!("\n--- listing objects via DynamicObject ---");
-    for k in kinds.iter().filter(|k| {
-        k.id.starts_with("argoproj.io/applications")
-            || k.id.starts_with("traefik")
-            || k.id.starts_with("helm.cattle.io")
-    }) {
+    // List each kind's objects so the spot-check below and the reflector watch
+    // below can pick kinds that actually hold something. Cluster-wide either way
+    // — the watchers list across all namespaces and let the frontend's namespace
+    // filter narrow it.
+    let mut with_objects: Vec<(String, usize)> = Vec::new();
+    for k in &kinds {
         let ar = k.api_resource();
-        // Cluster-wide either way — the watchers list across all namespaces and
-        // let the frontend's namespace filter narrow it.
+        let api: Api<DynamicObject> = Api::all_with(client.clone(), &ar);
+        match api.list(&ListParams::default()).await {
+            Ok(list) => with_objects.push((k.id.clone(), list.items.len())),
+            // RBAC can deny listing a specific kind; it isn't a reason to fail.
+            Err(e) => println!("{}: ERROR listing: {e}", k.id),
+        }
+    }
+
+    // Spot-check the kinds that hold objects (whatever they are).
+    println!("\n--- listing objects via DynamicObject ---");
+    for (id, _) in with_objects.iter().take(3) {
+        let k = kinds.iter().find(|k| &k.id == id).unwrap();
+        let ar = k.api_resource();
         let api: Api<DynamicObject> = Api::all_with(client.clone(), &ar);
         match api.list(&ListParams::default()).await {
             Ok(list) => {
-                println!("{}: {} objects", k.id, list.items.len());
+                println!("{id}: {} objects", list.items.len());
                 for o in list.items.iter().take(3) {
                     println!(
                         "    {}/{}",
@@ -53,16 +71,18 @@ async fn main() -> anyhow::Result<()> {
                     );
                 }
             }
-            Err(e) => println!("{}: ERROR {e}", k.id),
+            Err(e) => println!("{id}: ERROR {e}"),
         }
     }
 
-    // Drive the same reflector-backed dynamic watcher the app spawns lazily, and
-    // map its store through map_dynamic — this is what the table renders.
-    let target = kinds
-        .iter()
-        .find(|k| k.id == "argoproj.io/applications")
-        .expect("freya has Argo CD Applications");
+    // Drive the same reflector-backed dynamic watcher the app spawns lazily, on
+    // the first kind that actually holds objects, and map its store through
+    // map_dynamic — this is what the table renders.
+    let Some((target_id, _)) = with_objects.first() else {
+        println!("\nno custom kind holds objects on this cluster, skipping the watcher");
+        return Ok(());
+    };
+    let target = kinds.iter().find(|k| &k.id == target_id).unwrap();
     println!("\n--- watching {} via reflector ---", target.id);
 
     let ar = target.api_resource();
@@ -103,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
         let c: Vec<&str> = r.cells.iter().map(|c| c.text.as_str()).collect();
         println!("    {c:?}");
     }
-    assert!(!rows.is_empty(), "expected the reflector to see live Applications");
+    assert!(!rows.is_empty(), "the reflector must see the objects the list found");
     println!("\nDynamic watcher OK.");
     Ok(())
 }

@@ -86,6 +86,7 @@ pub fn run() {
             commands::set_cordon,
             commands::restart_pod,
             commands::restart_rollout,
+            commands::undo_rollout,
             commands::drain_node,
             commands::get_events,
             commands::get_properties,
