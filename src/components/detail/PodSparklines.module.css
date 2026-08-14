@@ -1,0 +1,36 @@
+/* Pod detail-header sparklines (B44): a row of two compact CPU/MEM histories
+   beneath the pod's meta line. Only rendered when Prometheus has history, so
+   these rules only ever apply when there's something to draw. */
+
+.row {
+  display: flex;
+  gap: 26px;
+  margin: -6px 0 10px;
+  padding-left: 18px;
+}
+
+.cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.label {
+  color: var(--text-faint);
+}
+
+.value {
+  color: var(--text-secondary);
+}
+
+.spark {
+  display: block;
+}

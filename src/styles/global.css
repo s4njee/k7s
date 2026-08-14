@@ -86,3 +86,14 @@ textarea {
     opacity: 0.25;
   }
 }
+
+/* Reduced motion (appearance setting): when the user asks, collapse animations
+   and transitions to a single instant. Applied globally — the design has one
+   animation today, but a future one should honour the same preference. */
+:root[data-reduced-motion="true"] *,
+:root[data-reduced-motion="true"] *::before,
+:root[data-reduced-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}

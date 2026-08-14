@@ -1,8 +1,9 @@
 /**
- * Applying the colour palette and keeping it in sync (B52).
+ * Applying the appearance — the colour palette plus the font/accent/motion
+ * knobs — and keeping it in sync (B52).
  *
  * The apply deliberately happens *outside* React, via a store subscription set up
- * by `startThemeSync`. It used to be a `useEffect` in the app root, which is
+ * by `startAppearanceSync`. It used to be a `useEffect` in the app root, which is
  * subtly wrong: React runs child effects before parent effects, so a component
  * that reads tokens as literals (MetricsTab, ShellTab) would run its own effect
  * against the *previous* palette and render one frame of dark plots on a white
@@ -15,6 +16,13 @@ import { useEffect } from "react";
 import { useStore } from "../store";
 import { getProvider } from "../providers";
 import {
+  applyAccent,
+  applyReducedMotion,
+  applyUiFont,
+  type Accent,
+  type UiFont,
+} from "../lib/appearance";
+import {
   applyTheme,
   cacheTheme,
   onSystemThemeChange,
@@ -23,19 +31,38 @@ import {
 } from "../lib/theme";
 
 /**
- * Start applying the palette. Call once, before the first render.
+ * Start applying the appearance: the colour palette plus the font, accent and
+ * motion knobs. Call once, before the first render.
  *
  * Returns an unsubscribe, which nothing uses in the app (the subscription lives
  * as long as the document) but which keeps this testable.
  */
-export function startThemeSync(): () => void {
-  let last: ResolvedTheme | null = null;
+export function startAppearanceSync(): () => void {
+  let lastTheme: ResolvedTheme | null = null;
+  let lastFont: UiFont | null = null;
+  let lastAccent: Accent | null = null;
+  let lastMotion: boolean | null = null;
   const apply = () => {
     const s = useStore.getState();
     const resolved = resolveTheme(s.settings.theme, s.systemDark);
-    if (resolved === last) return;
-    last = resolved;
-    applyTheme(resolved);
+    if (resolved !== lastTheme) {
+      lastTheme = resolved;
+      applyTheme(resolved);
+    }
+    // Font/accent/motion are simple data-attribute switches; each fires only on
+    // change, so a settings edit applies once, not on every store update.
+    if (s.settings.uiFont !== lastFont) {
+      lastFont = s.settings.uiFont;
+      applyUiFont(s.settings.uiFont);
+    }
+    if (s.settings.accent !== lastAccent) {
+      lastAccent = s.settings.accent;
+      applyAccent(s.settings.accent);
+    }
+    if (s.settings.reduceMotion !== lastMotion) {
+      lastMotion = s.settings.reduceMotion;
+      applyReducedMotion(s.settings.reduceMotion);
+    }
   };
   apply();
   return useStore.subscribe(apply);

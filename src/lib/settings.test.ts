@@ -102,3 +102,29 @@ describe("theme and node-shell settings", () => {
     expect(sanitizeSettings({ nodeShellImage: 12 }).nodeShellImage).toBe("");
   });
 });
+
+describe("appearance settings (font / accent / motion)", () => {
+  it("defaults all three when absent", () => {
+    const s = sanitizeSettings({});
+    expect(s.uiFont).toBe("mono");
+    expect(s.accent).toBe("blue");
+    expect(s.reduceMotion).toBe(false);
+  });
+
+  it("keeps a valid font and rejects anything else", () => {
+    expect(sanitizeSettings({ uiFont: "sans" }).uiFont).toBe("sans");
+    expect(sanitizeSettings({ uiFont: "helvetica" }).uiFont).toBe("mono");
+    expect(sanitizeSettings({ uiFont: 3 }).uiFont).toBe("mono");
+  });
+
+  it("keeps a valid accent and rejects anything else", () => {
+    expect(sanitizeSettings({ accent: "green" }).accent).toBe("green");
+    expect(sanitizeSettings({ accent: "teal" }).accent).toBe("blue");
+    expect(sanitizeSettings({ accent: {} }).accent).toBe("blue");
+  });
+
+  it("only accepts a boolean for reduce motion", () => {
+    expect(sanitizeSettings({ reduceMotion: true }).reduceMotion).toBe(true);
+    expect(sanitizeSettings({ reduceMotion: "yes" }).reduceMotion).toBe(false);
+  });
+});

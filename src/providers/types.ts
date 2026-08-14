@@ -353,6 +353,12 @@ export interface Prefs {
   shellCommand?: string | null;
   /** Colour palette: "dark" | "light" | "system" (B52). */
   theme?: string | null;
+  /** UI font: "mono" | "sans". */
+  uiFont?: string | null;
+  /** Accent colour: "blue" | "green" | "purple" | "orange". */
+  accent?: string | null;
+  /** Disable the pulsing "live" dot and other motion. */
+  reduceMotion?: boolean | null;
   /** Image for the node debug shell; empty uses the default (B53). */
   nodeShellImage?: string | null;
 }
@@ -468,6 +474,16 @@ export interface Filesystem {
  * One node-exporter sample, rates already computed by the backend (B27).
  * The frontend only plots these.
  */
+/** One backfilled CPU/MEM point for a pod's detail-header sparkline (B44). */
+export interface PodPoint {
+  /** Epoch milliseconds — the x axis. */
+  ts: number;
+  /** CPU usage rate, summed across the pod's containers, in millicores. */
+  cpuMillis: number;
+  /** Memory working set, summed across the pod's containers, in bytes. */
+  memBytes: number;
+}
+
 export interface NodeSample {
   /** Epoch milliseconds — the x axis. */
   ts: number;
@@ -597,6 +613,14 @@ export interface DataProvider {
    * normal no-history case, not a failure, and the live scraper covers it.
    */
   nodeHistory(node: string): Promise<NodeSample[]>;
+
+  /**
+   * Backfill a pod's CPU/MEM history for the detail-header sparklines (B44),
+   * newest last. Two range queries max, fired when the pod is opened. Resolves
+   * to an empty list when the cluster has no Prometheus — the header then
+   * renders exactly as before, with nothing surfaced as an error.
+   */
+  podHistory(namespace: string, name: string): Promise<PodPoint[]>;
   watchNodeStats(node: string): Promise<void>;
   /** Stop scraping a node (idempotent). */
   unwatchNodeStats(node: string): Promise<void>;
@@ -627,6 +651,11 @@ export interface DataProvider {
   unwatchCustomKind(id: string): Promise<void>;
 
   // ---- push subscriptions (return an unsubscribe fn) ----
+  /**
+   * The native File > Settings… menu item was chosen. Fires once per click; the
+   * app opens its settings dialog on it. No payload.
+   */
+  onOpenSettings(cb: () => void): Unsub;
   onResourceUpdate(cb: (kind: KindId, rows: Row[]) => void): Unsub;
   /** CRD-backed kinds discovered on connect; re-emitted on every connect. */
   onCustomKinds(cb: (kinds: CustomKind[]) => void): Unsub;

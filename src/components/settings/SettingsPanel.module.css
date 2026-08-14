@@ -58,6 +58,24 @@
   padding: 4px 14px 10px;
 }
 
+/* ---------- sections ---------- */
+
+.section {
+  padding-top: 8px;
+}
+.section + .section {
+  margin-top: 6px;
+  border-top: 1px solid var(--border-row);
+}
+.sectionTitle {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding-bottom: 2px;
+}
+
 .row {
   display: flex;
   align-items: center;
@@ -65,7 +83,9 @@
   padding: 10px 0;
   border-bottom: 1px solid var(--border-row);
 }
-.row:last-child {
+/* The last row of a section drops its divider; the section border above takes
+   over as the separator. */
+.section .row:last-child {
   border-bottom: none;
 }
 
@@ -124,6 +144,71 @@
 }
 .text::placeholder {
   color: var(--text-faint);
+}
+
+/* UI font: a two-button segmented control. */
+.seg {
+  flex: none;
+  display: flex;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.segBtn {
+  background: var(--bg-control);
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.segBtn + .segBtn {
+  border-left: 1px solid var(--border-control);
+}
+.segActive {
+  background: var(--bg-selected-row);
+  color: var(--accent);
+}
+
+/* Accent colour: a row of hue swatches. */
+.swatches {
+  flex: none;
+  display: flex;
+  gap: 7px;
+}
+.swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border-control);
+  cursor: pointer;
+  padding: 0;
+}
+.swatch:hover {
+  border-color: var(--border-hover);
+}
+.swatchActive {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
+/* Reduce motion: an on/off toggle. */
+.toggle {
+  flex: none;
+  min-width: 44px;
+  text-align: center;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-control);
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.toggleOn {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* ---------- footer ---------- */

@@ -20,7 +20,7 @@ use crate::error::AppResult;
 use k8s_openapi::api::core::v1::Service;
 use kube::api::{Api, ListParams};
 use kube::{Client, ResourceExt};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Interfaces excluded from the network totals: virtual devices carry the same
@@ -271,6 +271,85 @@ pub async fn node_history(
     Ok(assemble(series))
 }
 
+// ---------------------------------------------------------------------------
+// Pod history (B44)
+// ---------------------------------------------------------------------------
+
+/// One CPU/MEM point of a pod's backfilled history, for the detail-header
+/// sparklines. `cpu_millis` is a rate in millicores, `mem_bytes` a working set.
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PodPoint {
+    /// Epoch millis, matching the node history's timestamps.
+    pub ts: i64,
+    pub cpu_millis: f64,
+    pub mem_bytes: f64,
+}
+
+/// The two range queries behind a pod's sparklines (B44).
+///
+/// Both sum over the pod's containers; `container!=""` drops the cgroup-level
+/// aggregates, whose empty container name would otherwise drag the pause
+/// container into the total. The rate window is the same 2m as the node charts,
+/// wide enough that a single missed scrape doesn't punch a hole in the line.
+fn pod_queries(namespace: &str, pod: &str) -> [(&'static str, String); 2] {
+    let sel = format!("namespace=\"{namespace}\",pod=\"{pod}\",container!=\"\"");
+    [
+        (
+            "cpu_millis",
+            format!("sum(rate(container_cpu_usage_seconds_total{{{sel}}}[2m])) * 1000"),
+        ),
+        (
+            "mem_bytes",
+            format!("sum(container_memory_working_set_bytes{{{sel}}})"),
+        ),
+    ]
+}
+
+/// Assemble per-timestamp CPU/MEM points, keyed by time rather than zipped by
+/// position — the same gap-immune join the node history uses.
+fn assemble_pod(series: Vec<(&'static str, Vec<(i64, f64)>)>) -> Vec<PodPoint> {
+    let mut by_ts: BTreeMap<i64, PodPoint> = BTreeMap::new();
+    for (name, points) in series {
+        for (ts, v) in points {
+            let p = by_ts.entry(ts).or_default();
+            p.ts = ts;
+            match name {
+                "cpu_millis" => p.cpu_millis = v,
+                "mem_bytes" => p.mem_bytes = v,
+                _ => {}
+            }
+        }
+    }
+    by_ts.into_values().collect()
+}
+
+/// Backfill a pod's CPU/MEM history from Prometheus: the last `window_secs`,
+/// sampled every `step_secs`. Exactly two range queries.
+///
+/// Empty is a normal answer, not an error: a cluster without Prometheus (or a
+/// pod cadvisor hasn't scraped) simply shows no sparklines, exactly as before.
+pub async fn pod_history(
+    client: &Client,
+    svc: &PromService,
+    namespace: &str,
+    pod: &str,
+    now_secs: i64,
+    window_secs: i64,
+    step_secs: i64,
+) -> AppResult<Vec<PodPoint>> {
+    let start = now_secs - window_secs;
+    let mut series = Vec::new();
+    for (name, q) in pod_queries(namespace, pod) {
+        // One failing query shouldn't lose the whole history.
+        let points = range(client, svc, &q, start, now_secs, step_secs)
+            .await
+            .unwrap_or_default();
+        series.push((name, points));
+    }
+    Ok(assemble_pod(series))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,5 +464,49 @@ mod tests {
         let rx = &qs.iter().find(|(k, _)| *k == "rx").unwrap().1;
         assert!(rx.contains("device!~"), "rx must exclude virtual interfaces");
         assert!(rx.contains("veth"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Pod history (B44)
+    // -----------------------------------------------------------------------
+
+    /// Exactly two queries — one per sparkline — both scoped to the pod's own
+    /// namespace and name, and both excluding the cgroup aggregate so the pause
+    /// container can't leak into the total.
+    #[test]
+    fn pod_queries_fire_one_per_metric() {
+        let qs = pod_queries("prod", "valkyrie");
+        assert_eq!(qs.len(), 2);
+        let names: Vec<&str> = qs.iter().map(|(n, _)| *n).collect();
+        let exprs: Vec<&str> = qs.iter().map(|(_, q)| q.as_str()).collect();
+        assert_eq!(names, ["cpu_millis", "mem_bytes"]);
+
+        for q in &exprs {
+            assert!(q.contains("namespace=\"prod\""), "{q}");
+            assert!(q.contains("pod=\"valkyrie\""), "{q}");
+            assert!(q.contains("container!=\"\""), "the pause/cgroup aggregate must be excluded: {q}");
+        }
+
+        let cpu = &exprs[0];
+        assert!(cpu.contains("rate(container_cpu_usage_seconds_total{"), "{cpu}");
+        assert!(cpu.contains("[2m]"), "rate needs a window: {cpu}");
+        assert!(cpu.contains("* 1000"), "cpu must end in millicores: {cpu}");
+        let mem = &exprs[1];
+        assert!(mem.contains("sum(container_memory_working_set_bytes{"), "mem must be a working set: {mem}");
+    }
+
+    /// CPU and MEM points join on timestamp, not position — a gap in one series
+    /// must not shift the other's values onto the wrong time.
+    #[test]
+    fn pod_history_joins_on_timestamp() {
+        let out = assemble_pod(vec![
+            ("cpu_millis", vec![(1_000, 200.0), (2_000, 300.0)]),
+            // mem is missing the middle point.
+            ("mem_bytes", vec![(1_000, 5.0), (3_000, 6.0)]),
+        ]);
+        assert_eq!(out.len(), 3);
+        assert_eq!((out[0].cpu_millis, out[0].mem_bytes), (200.0, 5.0));
+        assert_eq!((out[1].cpu_millis, out[1].mem_bytes), (300.0, 0.0), "gap leaves a default, not a shift");
+        assert_eq!((out[2].cpu_millis, out[2].mem_bytes), (0.0, 6.0), "the later mem value stays on its own timestamp");
     }
 }

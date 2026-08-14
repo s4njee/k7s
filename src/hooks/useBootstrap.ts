@@ -55,6 +55,8 @@ export function useBootstrap(): void {
 
     // Wire every push channel to its store setter. Each returns an unsubscribe fn.
     const unsubs = [
+      // The native File > Settings… item opens the dialog.
+      provider.onOpenSettings(() => useStore.getState().setSettingsOpen(true)),
       provider.onResourceUpdate(setRows),
       provider.onPodMetrics(setPodMetrics),
       provider.onNodeMetrics(setNodeMetrics),
@@ -105,6 +107,9 @@ export function useBootstrap(): void {
             defaultNamespace: prefs.defaultNamespace ?? undefined,
             shellCommand: prefs.shellCommand ?? undefined,
             theme: prefs.theme ?? undefined,
+            uiFont: prefs.uiFont ?? undefined,
+            accent: prefs.accent ?? undefined,
+            reduceMotion: prefs.reduceMotion ?? undefined,
             nodeShellImage: prefs.nodeShellImage ?? undefined,
           });
           // Custom kinds aren't in KIND_META and aren't discovered yet at this

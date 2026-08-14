@@ -9,6 +9,7 @@
  * is worse than briefly holding a value that gets clamped on blur.
  */
 
+import { asAccent, asUiFont, type Accent, type UiFont } from "./appearance";
 import { asTheme, type Theme } from "./theme";
 
 /** Everything the settings panel controls. */
@@ -28,6 +29,12 @@ export interface Settings {
   shellCommand: string;
   /** Colour palette; "system" follows the OS (B52). */
   theme: Theme;
+  /** The app's UI font; "mono" is the design, "sans" re-values the fonts. */
+  uiFont: UiFont;
+  /** Accent hue across every surface (active indicators, focus, links). */
+  accent: Accent;
+  /** Disable the pulsing "live" dot and other motion. */
+  reduceMotion: boolean;
   /**
    * Image for the node debug shell (B53). Empty uses the built-in default.
    *
@@ -47,6 +54,11 @@ export const DEFAULT_SETTINGS: Settings = {
   // Following the OS is the least surprising default, and it's what the app did
   // implicitly before there was a choice — for anyone on a dark desktop.
   theme: "system",
+  // The design is monospace and blue-accented; both are the "off" position so a
+  // fresh install looks exactly like the prototype.
+  uiFont: "mono",
+  accent: "blue",
+  reduceMotion: false,
   nodeShellImage: "",
 };
 
@@ -115,6 +127,9 @@ export function sanitizeSettings(raw: SettingsInput | null | undefined): Setting
     // Not a clamp: an unknown string (older prefs, hand-edited file) has no
     // nearest valid value, so it falls back to the default outright.
     theme: asTheme(s.theme),
+    uiFont: asUiFont(s.uiFont),
+    accent: asAccent(s.accent),
+    reduceMotion: typeof s.reduceMotion === "boolean" ? s.reduceMotion : DEFAULT_SETTINGS.reduceMotion,
     nodeShellImage: typeof s.nodeShellImage === "string" ? s.nodeShellImage.trim() : "",
   };
 }

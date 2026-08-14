@@ -176,3 +176,29 @@ describe("tokens.css palettes", () => {
     expect(missing).toEqual([]);
   });
 });
+
+/**
+ * The appearance knobs (font + accent) live in tokens.css as attribute-scoped
+ * rules. A removed rule wouldn't break anything — it would just silently keep
+ * the default, and the settings panel would appear to do nothing. These guards
+ * exist so that "settings stopped working" is a test failure, not a mystery.
+ */
+describe("tokens.css appearance knobs", () => {
+  it("defines the sans font override and an accent preset per option", () => {
+    expect(CSS).toMatch(/:root\[data-ui-font="sans"\]/);
+    for (const hue of ["green", "purple", "orange"]) {
+      expect(CSS, hue).toMatch(new RegExp(`:root\\[data-accent="${hue}"\\]`));
+      // Light backgrounds need a darker accent than dark ones (same reason the
+      // base palettes re-pick accent contrast).
+      expect(CSS, `${hue} light`).toMatch(
+        new RegExp(`\\[data-theme="light"\\]\\[data-accent="${hue}"\\]`),
+      );
+    }
+  });
+
+  /** The plot/xterm bridge reads --accent and needs #hex it can mix (withAlpha). */
+  it("gives the accent presets literal hex values", () => {
+    const green = CSS.slice(CSS.indexOf(':root[data-accent="green"]'));
+    expect(green.match(/--accent:\s*(#[0-9a-f]{6}|[^;]+)/i)?.[1]).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+});

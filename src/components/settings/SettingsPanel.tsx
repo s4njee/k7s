@@ -7,14 +7,25 @@
  * lib/settings.ts), so a half-typed field can't reach a ring buffer or a poll loop.
  *
  * Settings that can't take effect until the next connect say so, rather than
- * quietly doing nothing.
+ * quietly doing nothing. The appearance settings (theme, font, accent, motion)
+ * apply the moment they change — the panel is grouped so the ones you can watch
+ * happen while you're here are first.
  */
 
 import { useEffect } from "react";
 import styles from "./SettingsPanel.module.css";
 import { useStore } from "../../store";
 import { LIMITS, DEFAULT_SETTINGS, sanitizeSettings, type Settings } from "../../lib/settings";
+import { ACCENTS, UI_FONTS, type Accent } from "../../lib/appearance";
 import { asTheme } from "../../lib/theme";
+
+/** The swatch colour shown for each accent option (the dark-palette value). */
+const ACCENT_SWATCH: Record<Accent, string> = {
+  blue: "#4d9fff",
+  green: "#34b37c",
+  purple: "#b18cff",
+  orange: "#ff9d4d",
+};
 
 export function SettingsPanel() {
   const open = useStore((s) => s.settingsOpen);
@@ -50,91 +61,139 @@ export function SettingsPanel() {
         </div>
 
         <div className={styles.body}>
-          {/* First, because it's the one setting whose effect you see while the
-              panel is still open. */}
-          <Row label="Theme" hint="“system” follows your desktop’s light/dark setting">
-            <select
-              className={styles.select}
-              value={settings.theme}
-              onChange={(e) => update({ theme: asTheme(e.target.value) })}
+          {/* ---- Appearance: everything here applies the moment it changes,
+               and its effects are visible behind the panel. ---- */}
+          <Section title="Appearance">
+            <Row label="Theme" hint="“system” follows your desktop’s light/dark setting">
+              <select
+                className={styles.select}
+                value={settings.theme}
+                onChange={(e) => update({ theme: asTheme(e.target.value) })}
+              >
+                <option value="system">system</option>
+                <option value="dark">dark</option>
+                <option value="light">light</option>
+              </select>
+            </Row>
+
+            <Row label="UI font" hint="monospace is the design; sans serif re-sets the whole app">
+              <div className={styles.seg}>
+                {UI_FONTS.map((f) => (
+                  <button
+                    key={f}
+                    className={`${styles.segBtn} ${settings.uiFont === f ? styles.segActive : ""}`}
+                    onClick={() => update({ uiFont: f })}
+                  >
+                    {f === "mono" ? "monospace" : "sans serif"}
+                  </button>
+                ))}
+              </div>
+            </Row>
+
+            <Row label="Accent color" hint="active indicators, links, focus — in both themes">
+              <div className={styles.swatches}>
+                {ACCENTS.map((a) => (
+                  <button
+                    key={a}
+                    className={`${styles.swatch} ${settings.accent === a ? styles.swatchActive : ""}`}
+                    style={{ background: ACCENT_SWATCH[a] }}
+                    onClick={() => update({ accent: a })}
+                    title={a}
+                    aria-pressed={settings.accent === a}
+                  />
+                ))}
+              </div>
+            </Row>
+
+            <Row label="Reduce motion" hint="stops the pulsing “live” dot and other motion">
+              <div
+                className={`${styles.toggle} ${settings.reduceMotion ? styles.toggleOn : ""}`}
+                onClick={() => update({ reduceMotion: !settings.reduceMotion })}
+                role="switch"
+                aria-checked={settings.reduceMotion}
+              >
+                {settings.reduceMotion ? "off" : "on"}
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="Logs">
+            <Row
+              label="Log buffer"
+              hint={`lines kept in the log view (${LIMITS.logBufferCap.min}–${LIMITS.logBufferCap.max}); applies immediately`}
             >
-              <option value="system">system</option>
-              <option value="dark">dark</option>
-              <option value="light">light</option>
-            </select>
-          </Row>
+              <input
+                className={styles.number}
+                type="number"
+                min={LIMITS.logBufferCap.min}
+                max={LIMITS.logBufferCap.max}
+                value={settings.logBufferCap}
+                onChange={(e) => update({ logBufferCap: Number(e.target.value) })}
+              />
+            </Row>
+          </Section>
 
-          <Row
-            label="Log buffer"
-            hint={`lines kept in the log view (${LIMITS.logBufferCap.min}–${LIMITS.logBufferCap.max}); applies immediately`}
-          >
-            <input
-              className={styles.number}
-              type="number"
-              min={LIMITS.logBufferCap.min}
-              max={LIMITS.logBufferCap.max}
-              value={settings.logBufferCap}
-              onChange={(e) => update({ logBufferCap: Number(e.target.value) })}
-            />
-          </Row>
+          <Section title="Cluster">
+            <Row
+              label="Metrics poll"
+              hint={`seconds between CPU/MEM polls${connected ? " — applies on next connect" : ""}`}
+            >
+              <input
+                className={styles.number}
+                type="number"
+                min={LIMITS.metricsIntervalSecs.min}
+                max={LIMITS.metricsIntervalSecs.max}
+                value={settings.metricsIntervalSecs}
+                onChange={(e) => update({ metricsIntervalSecs: Number(e.target.value) })}
+              />
+            </Row>
 
-          <Row
-            label="Metrics poll"
-            hint={`seconds between CPU/MEM polls${connected ? " — applies on next connect" : ""}`}
-          >
-            <input
-              className={styles.number}
-              type="number"
-              min={LIMITS.metricsIntervalSecs.min}
-              max={LIMITS.metricsIntervalSecs.max}
-              value={settings.metricsIntervalSecs}
-              onChange={(e) => update({ metricsIntervalSecs: Number(e.target.value) })}
-            />
-          </Row>
+            <Row
+              label="Status poll"
+              hint={`seconds between cluster-status polls${connected ? " — applies on next connect" : ""}`}
+            >
+              <input
+                className={styles.number}
+                type="number"
+                min={LIMITS.statusIntervalSecs.min}
+                max={LIMITS.statusIntervalSecs.max}
+                value={settings.statusIntervalSecs}
+                onChange={(e) => update({ statusIntervalSecs: Number(e.target.value) })}
+              />
+            </Row>
 
-          <Row
-            label="Status poll"
-            hint={`seconds between cluster-status polls${connected ? " — applies on next connect" : ""}`}
-          >
-            <input
-              className={styles.number}
-              type="number"
-              min={LIMITS.statusIntervalSecs.min}
-              max={LIMITS.statusIntervalSecs.max}
-              value={settings.statusIntervalSecs}
-              onChange={(e) => update({ statusIntervalSecs: Number(e.target.value) })}
-            />
-          </Row>
+            <Row label="Default namespace" hint="selected on connect; “all” for no filter">
+              <input
+                className={styles.text}
+                value={settings.defaultNamespace}
+                onChange={(e) => update({ defaultNamespace: e.target.value })}
+                placeholder="all"
+              />
+            </Row>
+          </Section>
 
-          <Row label="Default namespace" hint="selected on connect; “all” for no filter">
-            <input
-              className={styles.text}
-              value={settings.defaultNamespace}
-              onChange={(e) => update({ defaultNamespace: e.target.value })}
-              placeholder="all"
-            />
-          </Row>
+          <Section title="Shell">
+            <Row label="Shell command" hint="blank uses bash if present, else sh; applies to the next shell">
+              <input
+                className={styles.text}
+                value={settings.shellCommand}
+                onChange={(e) => update({ shellCommand: e.target.value })}
+                placeholder="(auto: bash or sh)"
+              />
+            </Row>
 
-          <Row label="Shell command" hint="blank uses bash if present, else sh; applies to the next shell">
-            <input
-              className={styles.text}
-              value={settings.shellCommand}
-              onChange={(e) => update({ shellCommand: e.target.value })}
-              placeholder="(auto: bash or sh)"
-            />
-          </Row>
-
-          <Row
-            label="Node shell image"
-            hint="blank uses nicolaka/netshoot; must be multi-arch on a mixed-arch cluster"
-          >
-            <input
-              className={styles.text}
-              value={settings.nodeShellImage}
-              onChange={(e) => update({ nodeShellImage: e.target.value })}
-              placeholder="(nicolaka/netshoot)"
-            />
-          </Row>
+            <Row
+              label="Node shell image"
+              hint="blank uses nicolaka/netshoot; must be multi-arch on a mixed-arch cluster"
+            >
+              <input
+                className={styles.text}
+                value={settings.nodeShellImage}
+                onChange={(e) => update({ nodeShellImage: e.target.value })}
+                placeholder="(nicolaka/netshoot)"
+              />
+            </Row>
+          </Section>
         </div>
 
         <div className={styles.footer}>
@@ -144,6 +203,16 @@ export function SettingsPanel() {
           </span>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** A labelled group of settings, with a heading in the body. */
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className={styles.section}>
+      <div className={styles.sectionTitle}>{title}</div>
+      {children}
     </div>
   );
 }

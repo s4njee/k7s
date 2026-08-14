@@ -248,3 +248,61 @@
   --bg-edit-hover: #12203a;
   --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
+
+/*
+ * Appearance knobs (font + accent). These react to attributes on <html> set by
+ * src/lib/appearance.ts; the base palettes above stay untouched, and these rules
+ * are additive overrides that only engage when the user picks a non-default look.
+ *
+ * Fonts are shared between palettes on purpose (theme.test.ts exempts --font-*),
+ * so one rule flips both font tokens to the sans stack for a sans UI.
+ */
+:root[data-ui-font="sans"] {
+  --font-mono: var(--font-ui);
+}
+
+/*
+ * Accent presets. Each needs a value per surface: the dark/main value, a darker
+ * one for light backgrounds (the same reason the base palettes re-pick accent
+ * contrast), and the always-dark panels in light mode. Literal hex everywhere so
+ * the plot/xterm bridge — which reads --accent and needs a #hex it can mix —
+ * keeps working under any accent.
+ */
+:root[data-accent="green"] {
+  --accent: #34b37c;
+  --accent-hover: #5ccf9b;
+}
+[data-theme="light"][data-accent="green"] {
+  --accent: #177a50;
+  --accent-hover: #125e3d;
+}
+:root[data-accent="green"] [data-surface="panel"] {
+  --accent: #34b37c;
+  --accent-hover: #5ccf9b;
+}
+
+:root[data-accent="purple"] {
+  --accent: #b18cff;
+  --accent-hover: #c9a9ff;
+}
+[data-theme="light"][data-accent="purple"] {
+  --accent: #6d4bd6;
+  --accent-hover: #5739ad;
+}
+:root[data-accent="purple"] [data-surface="panel"] {
+  --accent: #b18cff;
+  --accent-hover: #c9a9ff;
+}
+
+:root[data-accent="orange"] {
+  --accent: #ff9d4d;
+  --accent-hover: #ffb87a;
+}
+[data-theme="light"][data-accent="orange"] {
+  --accent: #c26616;
+  --accent-hover: #994f0f;
+}
+:root[data-accent="orange"] [data-surface="panel"] {
+  --accent: #ff9d4d;
+  --accent-hover: #ffb87a;
+}

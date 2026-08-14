@@ -14,8 +14,20 @@ pub use error::{AppError, AppResult};
 
 use kube::ClientManager;
 use std::sync::Arc;
-// Brings `.manage()` into scope for the App in the setup hook.
-use tauri::Manager;
+use tauri::menu::MenuItemBuilder;
+// macOS keeps the standard menu and only appends to its File submenu; the other
+// platforms build a File menu from scratch, so each branch needs its own types.
+#[cfg(target_os = "macos")]
+use tauri::menu::{Menu, MenuItemKind};
+#[cfg(not(target_os = "macos"))]
+use tauri::menu::{MenuBuilder, SubmenuBuilder};
+// Brings `.manage()` into scope for the App in the setup hook, and `.emit()`
+// into scope for the menu handler.
+use tauri::{Emitter, Manager};
+
+/// Tauri event emitted when the native File > Settings… item is chosen; the
+/// frontend opens its settings dialog on it.
+const SETTINGS_OPEN_EVENT: &str = "settings-open";
 
 /// Build and run the Tauri application.
 ///
@@ -48,6 +60,13 @@ pub fn run() {
             let manager = Arc::new(ClientManager::new(app.handle().clone()));
             app.manage(manager);
             save_window_state_on_sigterm(app.handle().clone());
+            // File > Settings…, which opens the settings dialog via an event.
+            setup_menu(app)?;
+            app.on_menu_event(|app, event| {
+                if event.id() == "file-settings" {
+                    let _ = app.emit(SETTINGS_OPEN_EVENT, ());
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -72,6 +91,7 @@ pub fn run() {
             commands::get_properties,
             commands::watch_custom_kind,
             commands::node_history,
+            commands::pod_history,
             commands::watch_node_stats,
             commands::unwatch_node_stats,
             commands::unwatch_custom_kind,
@@ -93,6 +113,47 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running k7s application");
+}
+
+/// Install the native app menu.
+///
+/// macOS's default menu already has a File submenu (with Close Window), so the
+/// "Settings…" item is appended to it — leaving the app, Edit, View and Window
+/// menus intact, so Cmd+Q / Cmd+C and friends keep working. On Windows/Linux
+/// there is no menu at all, so this creates a File menu of its own with
+/// Settings… and Quit. Choosing the item emits [`SETTINGS_OPEN_EVENT`].
+fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
+    let settings = MenuItemBuilder::with_id("file-settings", "Settings…")
+        // Cmd+, on macOS, Ctrl+, elsewhere — the conventional preferences key.
+        .accelerator("CmdOrCtrl+,")
+        .build(app)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let menu = Menu::default(app.handle())?;
+        for item in menu.items()? {
+            if let MenuItemKind::Submenu(file) = item {
+                if file.text()? == "File" {
+                    file.append(&settings)?;
+                    break;
+                }
+            }
+        }
+        app.set_menu(menu)?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let file = SubmenuBuilder::with_id(app, "file", "File", true)
+            .item(&settings)
+            .separator()
+            .quit()
+            .build()?;
+        let menu = MenuBuilder::new(app).item(&file).build()?;
+        app.set_menu(menu)?;
+    }
+
+    Ok(())
 }
 
 /// Save window geometry when the process is asked to terminate (B22).

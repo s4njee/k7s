@@ -18,6 +18,7 @@ import { toneColor } from "../../lib/tone";
 import { DETAIL_TABS, hasLogs, kindMeta, KINDS_WITH_PROPERTIES, tabsFor } from "../../lib/kinds";
 import { drainErrors, drainSummary, drainTone, pdbBlocked } from "../../lib/drain";
 import { LogsTab } from "./LogsTab";
+import { PodSparklines } from "./PodSparklines";
 import { PropertiesTab } from "./PropertiesTab";
 import { MetricsTab } from "./MetricsTab";
 import { PodMetricsTab } from "./PodMetricsTab";
@@ -109,6 +110,10 @@ export function DetailPanel() {
             )}
           </div>
         )}
+
+        {/* B44: backfilled CPU/MEM history in the pod header, from Prometheus.
+            Renders nothing (and fires no queries) on a cluster without it. */}
+        {isPod && <PodSparklines namespace={row.namespace ?? ""} name={row.name} />}
 
         <div className={styles.tabs}>
           {tabs.map((t) => (

@@ -58,6 +58,13 @@ pub struct Prefs {
     /// Colour palette ("dark"/"light"/"system"). Frontend-only; carried so it
     /// survives a save (B52).
     pub theme: Option<String>,
+    /// UI font ("mono"/"sans"). Frontend-only; carried so it survives a save.
+    pub ui_font: Option<String>,
+    /// Accent colour ("blue"/"green"/"purple"/"orange"). Frontend-only; carried
+    /// so it survives a save.
+    pub accent: Option<String>,
+    /// Disable the pulsing "live" dot and other motion. Frontend-only.
+    pub reduce_motion: Option<bool>,
     /// Container image for the node debug shell; None/empty uses the default (B53).
     pub node_shell_image: Option<String>,
 }
@@ -652,6 +659,28 @@ pub async fn node_history(
     // An hour at 30s is 120 points — enough to open with a populated chart
     // without crowding out the live samples that follow (the series is capped).
     promql::node_history(&client, &svc, &node, now, 3600, 30).await
+}
+
+/// Backfill a pod's CPU/MEM history for the detail-header sparklines (B44),
+/// or empty when the cluster has no Prometheus we recognise.
+///
+/// Empty is a normal answer, not an error: a cluster without Prometheus renders
+/// the panel exactly as before, and nothing surfaces as a failure. Two range
+/// queries max — one per sparkline — fired when the pod is opened.
+#[tauri::command]
+pub async fn pod_history(
+    namespace: String,
+    pod: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<Vec<promql::PodPoint>> {
+    let client = require_client(&mgr).await?;
+    let Some(svc) = promql::discover(&client).await else {
+        return Ok(Vec::new());
+    };
+    let now = chrono::Utc::now().timestamp();
+    // Half an hour at 30s is 60 points — a compact sparkline's worth, cheaper
+    // than the node charts' hour since it sits in the always-open header.
+    promql::pod_history(&client, &svc, &namespace, &pod, now, 1800, 30).await
 }
 
 /// Start scraping a node's node-exporter for plots (B27), if not already running.

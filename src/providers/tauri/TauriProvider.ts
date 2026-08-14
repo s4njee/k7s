@@ -17,6 +17,7 @@ import type {
   DataProvider,
   DrainProgress,
   NodeSample,
+  PodPoint,
   NodeStatsError,
   EventItem,
   ForwardInfo,
@@ -215,6 +216,10 @@ export class TauriProvider implements DataProvider {
     return invoke<NodeSample[]>("node_history", { node });
   }
 
+  podHistory(namespace: string, name: string): Promise<PodPoint[]> {
+    return invoke<PodPoint[]>("pod_history", { namespace, name });
+  }
+
   watchNodeStats(node: string): Promise<void> {
     return invoke<void>("watch_node_stats", { node });
   }
@@ -253,6 +258,11 @@ export class TauriProvider implements DataProvider {
 
   unwatchCustomKind(id: string): Promise<void> {
     return invoke("unwatch_custom_kind", { kind: id });
+  }
+
+  onOpenSettings(cb: () => void): Unsub {
+    // Emitted by the native File > Settings… menu item (see src-tauri setup_menu).
+    return subscribe<unknown>("settings-open", () => cb());
   }
 
   onCustomKinds(cb: (kinds: CustomKind[]) => void): Unsub {

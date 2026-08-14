@@ -101,9 +101,9 @@ error.
 **Accept:**
 - [ ] A freya pod shows CPU/MEM sparklines with plausible values (cross-check
       one against `kubectl top pod` when metrics-server is fixed, else against
-      Prometheus directly).
+      Prometheus directly). *(needs a live freya check — implementation is in)*
 - [ ] A cluster without Prometheus renders the panel exactly as today.
-- [ ] Opening a pod fires a bounded number of queries (≤2 range queries), and
+- [x] Opening a pod fires a bounded number of queries (≤2 range queries), and
       closing cancels any in flight.
 
 ## P1 — next
@@ -388,7 +388,9 @@ B28–B43, in the commit messages of `feat/backlog-qol`.
   (`lib/filter.ts`); clickable events via Kind+group → nav id resolution.
 - **B32 — not done** (moved above). *B30 shipped — CRD printer columns
   (jsonpath.rs subset, evaluated live by `map_dynamic`). B31 shipped — workload
-  log bundles (selector-resolved per-pod pumps, re-resolved on a 15s tick).*
+  log bundles (selector-resolved per-pod pumps, re-resolved on a 15s tick).
+  B44 shipped — pod CPU/MEM sparklines in the detail header (promql
+  `pod_history`, 2 range queries, degrade-to-nothing without Prometheus).*
 - **B29 — Crash-loop debugging.** `previous` reads (terminate, never follow),
   since-windows, save-to-file written in Rust (13k lines / 4.8MB past the
   200-line ring buffer). Backlog premise about `previous` corrected in the

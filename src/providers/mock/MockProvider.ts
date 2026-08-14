@@ -22,6 +22,7 @@ import type {
   LogOptions,
   NodeMetricsMap,
   PodMetricsMap,
+  PodPoint,
   PodSample,
   Prefs,
   Properties,
@@ -273,6 +274,11 @@ export class MockProvider implements DataProvider {
   // Demo mode mirrors the real lazy-watch contract: no rows exist for a custom
   // kind until it's watched, and they arrive via the same resource-update path.
 
+  onOpenSettings(): Unsub {
+    // Demo mode runs in a plain browser page with no native menu to click.
+    return () => {};
+  }
+
   onCustomKinds(cb: (kinds: CustomKind[]) => void): Unsub {
     this.customKindCbs.add(cb);
     queueMicrotask(() => cb(MOCK_CUSTOM_KINDS));
@@ -373,6 +379,34 @@ export class MockProvider implements DataProvider {
         load15: load * 0.8,
         // Backfilled points carry no filesystems: the UI reads those as current.
         filesystems: [],
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Synthesise half an hour of CPU/MEM history (B44) so demo mode shows the
+   * header sparklines populated. The walk ends near the pod's current mock
+   * usage, so the history reads plausibly into what the Metrics tab shows now.
+   * A pod demo data has no usage for gets no history either.
+   */
+  async podHistory(namespace: string, name: string): Promise<PodPoint[]> {
+    const current = mockPodUsage(`${namespace}/${name}`);
+    if (!current) return [];
+    const step = 30_000;
+    const points = 60;
+    const now = Date.now();
+    const out: PodPoint[] = [];
+    for (let i = points; i > 0; i--) {
+      // Oldest point is ~half of current usage; the target rises to current as
+      // we approach now, with a little noise so it reads like a live machine.
+      const f = (points - i) / (points - 1);
+      const targetCpu = current.cpuMillis * (0.5 + 0.5 * f);
+      const targetMem = current.memBytes * (0.55 + 0.45 * f);
+      out.push({
+        ts: now - i * step,
+        cpuMillis: Math.max(0, targetCpu + (Math.random() - 0.5) * current.cpuMillis * 0.08),
+        memBytes: Math.max(0, targetMem + (Math.random() - 0.5) * current.memBytes * 0.04),
       });
     }
     return out;
