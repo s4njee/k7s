@@ -43,6 +43,7 @@ import {
   buildCustomRows,
   buildKindRows,
   mockPodUsage,
+  workloadPods,
 } from "./data";
 import { makeLogLine, seedLogLines } from "./logs";
 import { yamlForPodName, yamlForGeneric } from "./yaml";
@@ -120,6 +121,24 @@ export class MockProvider implements DataProvider {
       current: false,
     };
     return { contexts: [...base, imported], path: "/mock/team-cluster.kubeconfig" };
+  }
+
+  async exportContextKubeconfig(context: string): Promise<string> {
+    return [
+      "apiVersion: v1",
+      "kind: Config",
+      `current-context: ${context}`,
+      "clusters:",
+      `- name: ${context}`,
+      "  cluster: { server: https://mock.local:6443 }",
+      "contexts:",
+      `- name: ${context}`,
+      `  context: { cluster: ${context}, user: ${context} }`,
+      "users:",
+      `- name: ${context}`,
+      "  user: { token: mock-token }",
+      "",
+    ].join("\n");
   }
 
   async restoreImports(_paths: string[]): Promise<string[]> {
@@ -493,6 +512,34 @@ export class MockProvider implements DataProvider {
     // Demo mode is a browser page: no filesystem, and no native dialog to pick a
     // path with. Reporting "cancelled" is the honest answer — the button does
     // nothing rather than claiming to have written a file that doesn't exist.
+    return null;
+  }
+
+  // ---- workload log bundle (B31) ----
+  // Demo mirror of the backend bundle: one line per pod per tick, each tagged
+  // with its pod, so the Logs tab can show the interleaving + distinct prefixes.
+
+  async startWorkloadLogs(
+    ref: ResourceRef,
+    _opts: LogOptions,
+    onLines: (lines: LogLine[]) => void,
+    _onClosed: (reason: string) => void,
+  ): Promise<LogHandle> {
+    const pods = workloadPods(ref.name);
+    // Seed a little history per pod, then tick a line from each.
+    onLines(pods.flatMap((pod) => seedLogLines(pod, 6).map((l) => ({ ...l, pod }))));
+    const timer = setInterval(() => {
+      onLines(pods.map((pod) => ({ ...makeLogLine(pod), pod })));
+    }, LOG_TICK_MS);
+    return {
+      stop() {
+        clearInterval(timer);
+      },
+    };
+  }
+
+  async saveWorkloadLogs(): Promise<SavedLog | null> {
+    // Same as saveLogs: demo mode has no filesystem to write to.
     return null;
   }
 

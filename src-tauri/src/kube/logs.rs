@@ -8,12 +8,15 @@
 use super::events;
 use crate::error::{AppError, AppResult};
 use chrono::{DateTime, Utc};
+use futures::{AsyncBufReadExt, StreamExt};
+use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::core::v1::Pod;
-use kube::api::{Api, LogParams};
+use kube::api::{Api, ListParams, LogParams};
 use kube::Client;
 use serde::Serialize;
-use futures::{AsyncBufReadExt, StreamExt};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use tauri::{AppHandle, Emitter};
+use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 
 /// Flush cadence for batched log lines.
@@ -31,6 +34,11 @@ pub struct LogLine {
     /// streaming all containers of a pod (B7) so the UI can tag each line.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub container: String,
+    /// Source pod name. Empty for a single-pod stream; set by the workload log
+    /// bundle (B31) so the UI can tag which of the workload's pods a line came
+    /// from.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub pod: String,
 }
 
 /// Batch payload for a `log-line:{id}` event.
@@ -223,6 +231,260 @@ async fn stream_all(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Workload log bundle (B31)
+// ---------------------------------------------------------------------------
+
+/// How often the workload's pod set is re-resolved, so scale-ups join the
+/// stream and pods that left drop out (ster n-style, one level up from B7).
+const POD_RESOLVE: Duration = Duration::from_secs(15);
+
+/// Follow every pod of a workload (Deployment/StatefulSet/DaemonSet), one log
+/// pump per pod, interleaved into a single stream id. The pod set re-resolves
+/// on a slow tick; each line carries its `pod` (and `container`) so the UI can
+/// tag it. Emits `log-line:{id}` and a final `log-closed:{id}`.
+pub async fn run_workload_log_stream(
+    client: Client,
+    app: AppHandle,
+    stream_id: String,
+    kind: String,
+    namespace: String,
+    name: String,
+    opts: LogStreamOptions,
+) {
+    let closed_event = format!("{}{}", events::LOG_CLOSED_PREFIX, stream_id);
+    let result = workload_stream(client, &app, &stream_id, &kind, &namespace, &name, opts).await;
+    match result {
+        Ok(reason) => {
+            let _ = app.emit(&closed_event, reason);
+        }
+        Err(e) => {
+            // Surface the API error as the close reason so the UI can show it.
+            let _ = app.emit(&closed_event, e.to_string());
+        }
+    }
+}
+
+/// The supervisor: resolve the selector, keep one pump per matching pod running,
+/// and multiplex every line into the stream's event. The stream lives until the
+/// manager aborts the task (tab close / disconnect); a pod set that shrinks to
+/// zero just leaves the stream following an empty set.
+async fn workload_stream(
+    client: Client,
+    app: &AppHandle,
+    stream_id: &str,
+    kind: &str,
+    namespace: &str,
+    name: &str,
+    opts: LogStreamOptions,
+) -> AppResult<String> {
+    let selector = match workload_selector(client.clone(), kind, namespace, name).await? {
+        Some(s) => s,
+        // A workload that selects nothing has no pods to stream; ending with a
+        // reason beats hanging on an empty stream.
+        None => return Ok("workload has no pod selector".to_string()),
+    };
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<LogLine>(256);
+    let mut pumps: HashMap<String, JoinHandle<()>> = HashMap::new();
+    let line_event = format!("{}{}", events::LOG_LINE_PREFIX, stream_id);
+    let mut batch: Vec<LogLine> = Vec::new();
+    let mut flush = interval(FLUSH);
+    let mut resolve = interval(POD_RESOLVE);
+
+    // Seed the set before the first tick so the stream is live immediately.
+    sync_pods(&client, namespace, &selector, &mut pumps, &tx, &opts).await;
+
+    loop {
+        tokio::select! {
+            // Scale-ups join and gone pods drop, on the slow tick.
+            _ = resolve.tick() => {
+                sync_pods(&client, namespace, &selector, &mut pumps, &tx, &opts).await;
+            }
+            got = rx.recv() => match got {
+                Some(line) => batch.push(line),
+                // Unreachable while the supervisor holds tx, but if every sender
+                // is somehow gone the stream should end rather than hang.
+                None => {
+                    flush_batch(app, &line_event, &mut batch);
+                    return Ok("all pod streams ended".to_string());
+                }
+            },
+            _ = flush.tick() => flush_batch(app, &line_event, &mut batch),
+        }
+    }
+}
+
+/// Re-resolve the workload's pod set: abort pumps for pods that left, spawn
+/// pumps for pods that joined. Best-effort — a transient list failure just
+/// means the set refreshes on the next tick.
+async fn sync_pods(
+    client: &Client,
+    namespace: &str,
+    selector: &str,
+    pumps: &mut HashMap<String, JoinHandle<()>>,
+    tx: &tokio::sync::mpsc::Sender<LogLine>,
+    opts: &LogStreamOptions,
+) {
+    let Ok(pods) = list_matching_pods(client.clone(), namespace, selector).await else {
+        return;
+    };
+    let current: HashSet<String> = pods.iter().cloned().collect();
+    // A pod that left the set drops its pump. Its log stream would end on its
+    // own once the pod dies, but a pump for a *replaced* pod could hang, so the
+    // abort is what guarantees a gone pod's prefix stops within a tick.
+    pumps.retain(|pod, handle| {
+        if current.contains(pod) {
+            true
+        } else {
+            handle.abort();
+            false
+        }
+    });
+    for pod in &pods {
+        if !pumps.contains_key(pod) {
+            let api: Api<Pod> = Api::namespaced(client.clone(), namespace);
+            let tx = tx.clone();
+            let pod_name = pod.clone();
+            let opts = opts.clone();
+            pumps.insert(
+                pod.clone(),
+                tokio::spawn(async move {
+                    let _ = pump_pod(api, tx, &pod_name, &opts).await;
+                }),
+            );
+        }
+    }
+}
+
+/// The names of the pods a label selector matches, in the namespace.
+async fn list_matching_pods(client: Client, namespace: &str, selector: &str) -> AppResult<Vec<String>> {
+    let api: Api<Pod> = Api::namespaced(client, namespace);
+    let list = api.list(&ListParams::default().labels(selector)).await?;
+    Ok(list.items.into_iter().filter_map(|p| p.metadata.name).collect())
+}
+
+/// One pod's logs, interleaved across its containers, each line tagged with the
+/// pod and the container. A pod that died between resolution and pump start is
+/// a silent no-op — the next resolve tick drops it from the set.
+async fn pump_pod(
+    api: Api<Pod>,
+    tx: tokio::sync::mpsc::Sender<LogLine>,
+    pod: &str,
+    opts: &LogStreamOptions,
+) -> AppResult<()> {
+    let pod_obj = match api.get(pod).await {
+        Ok(p) => p,
+        Err(_) => return Ok(()),
+    };
+    let containers: Vec<String> = pod_obj
+        .spec
+        .map(|s| s.containers.into_iter().map(|c| c.name).collect())
+        .unwrap_or_default();
+    if containers.is_empty() {
+        return Ok(());
+    }
+
+    let mut readers = tokio::task::JoinSet::new();
+    for container in containers {
+        let api = api.clone();
+        let lp = log_params(&container, opts);
+        let tx = tx.clone();
+        let pod_name = pod.to_string();
+        let container_name = container.clone();
+        readers.spawn(async move {
+            if let Ok(reader) = api.log_stream(&pod_name, &lp).await {
+                let mut lines = reader.lines();
+                while let Some(Ok(raw)) = lines.next().await {
+                    let mut line = parse_log_line(&raw);
+                    line.container = container_name.clone();
+                    line.pod = pod_name.clone();
+                    if tx.send(line).await.is_err() {
+                        break; // bundle gone
+                    }
+                }
+            }
+        });
+    }
+    while readers.join_next().await.is_some() {}
+    Ok(())
+}
+
+/// The pod label selector of a workload, as the `k=v,k2=v2` string a ListParams
+/// takes, or None when the workload selects nothing (no `matchLabels`).
+async fn workload_selector(
+    client: Client,
+    kind: &str,
+    namespace: &str,
+    name: &str,
+) -> AppResult<Option<String>> {
+    let labels = match kind {
+        "deployments" => {
+            let api: Api<Deployment> = Api::namespaced(client, namespace);
+            api.get(name).await?.spec.and_then(|s| s.selector.match_labels)
+        }
+        "statefulsets" => {
+            let api: Api<StatefulSet> = Api::namespaced(client, namespace);
+            api.get(name).await?.spec.and_then(|s| s.selector.match_labels)
+        }
+        "daemonsets" => {
+            let api: Api<DaemonSet> = Api::namespaced(client, namespace);
+            api.get(name).await?.spec.and_then(|s| s.selector.match_labels)
+        }
+        other => return Err(AppError::Other(format!("not a loggable workload: {other}"))),
+    };
+    Ok(labels.map(|m| selector_str(&m)))
+}
+
+/// `{app: wiki, tier: web}` → `"app=wiki,tier=web"`, the form a label selector
+/// takes. Iteration order is deterministic (BTreeMap).
+fn selector_str(map: &BTreeMap<String, String>) -> String {
+    map.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(",")
+}
+
+/// Read the full logs of every pod a workload selects, labelled by pod and
+/// container — the save path for a workload stream (B31), mirroring how
+/// `export_logs` labels a pod's containers. No tail cap and no follow: this is
+/// the whole log, written once.
+pub async fn export_workload_text(
+    client: Client,
+    kind: &str,
+    namespace: &str,
+    name: &str,
+    since_seconds: Option<i64>,
+) -> AppResult<String> {
+    let selector = match workload_selector(client.clone(), kind, namespace, name).await? {
+        Some(s) => s,
+        None => return Err(AppError::Other("workload has no pod selector".to_string())),
+    };
+    let pods = list_matching_pods(client.clone(), namespace, &selector).await?;
+    let api: Api<Pod> = Api::namespaced(client, namespace);
+    let opts = LogStreamOptions { tail: None, since_time: None, since_seconds, previous: false };
+
+    let mut out = String::new();
+    for pod in &pods {
+        let pod_obj = match api.get(pod).await {
+            Ok(p) => p,
+            Err(_) => continue, // gone mid-export
+        };
+        let containers: Vec<String> = pod_obj
+            .spec
+            .map(|s| s.containers.into_iter().map(|c| c.name).collect())
+            .unwrap_or_default();
+        for container in containers {
+            let mut lp = log_params(&container, &opts);
+            lp.follow = false;
+            let text = api.logs(pod, &lp).await.map_err(|e| AppError::Kube(e.to_string()))?;
+            out.push_str(&format!("===== pod: {pod} / container: {container} =====\n"));
+            out.push_str(&text);
+            if !text.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Emit and clear the batch if non-empty.
 fn flush_batch(app: &AppHandle, line_event: &str, batch: &mut Vec<LogLine>) {
     if !batch.is_empty() {
@@ -243,7 +505,7 @@ pub fn parse_log_line(raw: &str) -> LogLine {
         },
         None => (String::new(), raw),
     };
-    LogLine { ts, level: detect_level(msg), msg: msg.to_string(), container: String::new() }
+    LogLine { ts, level: detect_level(msg), msg: msg.to_string(), container: String::new(), pod: String::new() }
 }
 
 /// Detect a log level from the message: a JSON `"level"` field first, then a
@@ -439,5 +701,38 @@ mod tests {
         let lp = log_params("app", &LogStreamOptions { since_time: Some("nonsense".into()), ..Default::default() });
         assert!(lp.since_time.is_none());
         assert!(lp.follow);
+    }
+
+    // ---- workload log bundle (B31) ----
+
+    /// A selector map becomes the `k=v,k2=v2` string a ListParams wants,
+    /// deterministically ordered.
+    #[test]
+    fn selector_map_to_string() {
+        let mut m = BTreeMap::new();
+        m.insert("app".to_string(), "wiki".to_string());
+        m.insert("tier".to_string(), "web".to_string());
+        assert_eq!(selector_str(&m), "app=wiki,tier=web");
+    }
+
+    /// An empty selector map is an empty selector string (selects nothing).
+    #[test]
+    fn empty_selector_map_is_empty_string() {
+        assert_eq!(selector_str(&BTreeMap::new()), "");
+    }
+
+    /// A parsed line has no pod until the workload pump tags one; the pod field
+    /// serializes away when empty, like container before it.
+    #[test]
+    fn pod_field_skips_when_empty() {
+        let line = parse_log_line("2026-07-15T13:04:05Z hello");
+        assert_eq!(line.pod, "");
+        let json = serde_json::to_value(&line).unwrap();
+        assert!(json.get("pod").is_none());
+        assert!(json.get("container").is_none());
+
+        let tagged = LogLine { pod: "wiki-abc123-x1y2".into(), ..line };
+        let json = serde_json::to_value(&tagged).unwrap();
+        assert_eq!(json["pod"], "wiki-abc123-x1y2");
     }
 }

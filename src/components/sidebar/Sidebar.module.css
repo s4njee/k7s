@@ -108,6 +108,7 @@
 }
 .menuName {
   flex: 1;
+  min-width: 0;
   font-size: 12.5px;
   color: var(--text-primary);
 }
@@ -115,6 +116,24 @@
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-muted);
+}
+/* Show this context as a QR sequence for mk7s on a phone (M9). */
+.qrBtn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.qrBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* Divider between the context list and the import action. */

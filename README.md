@@ -44,7 +44,7 @@ one. Filesystems are sorted fullest-first.*
 
 ## Features
 
-- **Cluster switcher** fed by your kubeconfig contexts; switching tears down and rebuilds all live streams. **Import kubeconfig** adds contexts from any kubeconfig file via a native file picker (defaulted to kubectl's `~/.kube/config`), and they connect via their source file.
+- **Cluster switcher** fed by your kubeconfig contexts; switching tears down and rebuilds all live streams. **Import kubeconfig** adds contexts from any kubeconfig file via a native file picker (defaulted to kubectl's `~/.kube/config`), and they connect via their source file. **▣** on a context row shows a cycling QR of that context so **mk7s** on a phone can scan it in (M9).
 - **22 resource kinds** watched live across Workloads, Network, Config, Storage and Cluster — plus any **CRDs** the cluster defines, discovered on connect and watched *lazily*, so a cluster with hundreds of CRDs doesn't open hundreds of streams. Sidebar counts and a "watch: N streams active" footer.
 - **Resource tables** with per-kind columns, namespace filtering, label-selector filtering (`app=web,tier=api`), sorting, and status coloring driven by the backend. Large tables are windowed.
 - **Detail panels** for every kind: follow/pause **log streaming** (container cycler, interleaved multi-container, `previous`-container reads for crash loops, since-windows, save-to-file), **YAML** view/edit/apply, **Events**, and a **Properties** view answering "what is this actually wired to".

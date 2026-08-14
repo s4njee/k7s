@@ -7,7 +7,9 @@
 //! Secondary. CPU/MEM for pods and CPU/MEMORY for nodes are "—" placeholders that
 //! the frontend overlays from the separate metrics feed.
 
+use super::discovery::PrinterColumn;
 use super::dto::{Cell, InvolvedRef, PodMeta, PodResources, Row, Tone};
+use super::jsonpath;
 use super::metrics::{parse_cpu_millis, parse_mem_bytes};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
@@ -912,15 +914,19 @@ pub fn sort_events(mut rows: Vec<Row>, cap: usize) -> Vec<Row> {
 // ---------------------------------------------------------------------------
 
 /// Generic columns for a CRD-backed object: NAME, NAMESPACE (namespaced kinds
-/// only), AGE.
+/// only), then the CRD's own printer columns evaluated live (B30), then AGE.
 ///
-/// A CRD's schema is arbitrary, so there is no meaningful status or ready column
-/// to derive without per-CRD knowledge; the YAML tab is where the detail lives.
-/// The column set must match `kinds.ts`'s generic custom columns.
-pub fn map_dynamic(o: &kube::core::DynamicObject, namespaced: bool) -> Row {
+/// A CRD's schema is arbitrary, so without per-CRD knowledge the generic set is
+/// just identity + age; the printer columns are the CRD's own declaration of
+/// what it wants shown, and we already fetch the full CRD at discovery. The
+/// column set must match `kinds.ts`'s custom columns.
+pub fn map_dynamic(o: &kube::core::DynamicObject, namespaced: bool, columns: &[PrinterColumn]) -> Row {
     let mut cells = vec![Cell::new(o.name_any(), Tone::Primary)];
     if namespaced {
         cells.push(Cell::new(o.namespace().unwrap_or_default(), Tone::Muted));
+    }
+    for col in columns {
+        cells.push(printer_cell(o, col));
     }
     cells.push(Cell::age(o.creation_timestamp().map(|t| t.0.to_rfc3339())));
 
@@ -930,6 +936,41 @@ pub fn map_dynamic(o: &kube::core::DynamicObject, namespaced: bool) -> Row {
         namespace: o.namespace(),
         cells,
         ..Default::default()
+    }
+}
+
+/// Evaluate one printer column against an object. `date`-typed columns render
+/// through the age cell (the frontend formats the RFC3339 timestamp it carries);
+/// everything else is plain secondary text. V1 takes no colour opinions on
+/// arbitrary CRD columns, so tone stays Secondary throughout.
+fn printer_cell(o: &kube::core::DynamicObject, col: &PrinterColumn) -> Cell {
+    match jsonpath::eval(&col.json_path, &o.data) {
+        // Missing is normal (optional status fields) and silent; unsupported
+        // syntax is a coverage gap worth hearing about once per expression.
+        jsonpath::Eval::Value(text) if col.type_ == "date" => Cell::age(Some(text)),
+        jsonpath::Eval::Value(text) => Cell::new(text, Tone::Secondary),
+        jsonpath::Eval::Missing => Cell::new("—", Tone::Secondary),
+        jsonpath::Eval::Unsupported => {
+            warn_once_unevaluable(&col.json_path);
+            Cell::new("—", Tone::Secondary)
+        }
+    }
+}
+
+/// Log a printer column whose JSONPath is outside the evaluator's subset, at
+/// most once per expression across the process lifetime. A kind with dozens of
+/// objects must not spam the log on every row.
+fn warn_once_unevaluable(path: &str) {
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    let seen = SEEN.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+    let mut guard = match seen.lock() {
+        Ok(g) => g,
+        // Poisoned lock: logging is best-effort; carry on without the dedupe.
+        Err(p) => p.into_inner(),
+    };
+    if guard.insert(path.to_string()) {
+        tracing::warn!("printer column jsonPath unsupported by the subset (shows '—'): {path}");
     }
 }
 
@@ -1400,5 +1441,90 @@ mod tests {
         let row = map_event(&e);
         assert!(row.cells[4].sort.is_some());
         assert_eq!(row.cells[5].text, "×1", "missing count defaults to 1");
+    }
+
+    // -----------------------------------------------------------------------
+    // CRD printer columns (B30)
+    // -----------------------------------------------------------------------
+
+    /// An Argo CD Application: NAME, NAMESPACE, then the CRD's declared columns
+    /// evaluated live (Synced / Healthy), then AGE.
+    #[test]
+    fn dynamic_applies_printer_columns() {
+        let o: kube::core::DynamicObject = serde_json::from_value(json!({
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Application",
+            "metadata": { "name": "valkyrie", "namespace": "argocd", "uid": "u1",
+                          "creationTimestamp": "2026-08-01T00:00:00Z" },
+            "status": { "sync": { "status": "Synced" }, "health": { "status": "Healthy" } },
+        }))
+        .unwrap();
+        let cols = vec![
+            PrinterColumn { name: "Sync Status".into(), type_: "string".into(), json_path: ".status.sync.status".into() },
+            PrinterColumn { name: "Health Status".into(), type_: "string".into(), json_path: ".status.health.status".into() },
+        ];
+        let row = map_dynamic(&o, true, &cols);
+        let texts: Vec<&str> = row.cells.iter().map(|c| c.text.as_str()).collect();
+        // `to_rfc3339` emits +00:00 for UTC; the frontend's Date() parses both.
+        assert_eq!(texts, ["valkyrie", "argocd", "Synced", "Healthy", "2026-08-01T00:00:00+00:00"]);
+        // Printer data is secondary; the two identity columns keep their tones.
+        assert_eq!(row.cells[2].tone, Tone::Secondary);
+    }
+
+    /// A column whose jsonPath doesn't resolve on this object (a status not yet
+    /// set) renders "—" rather than guessing — silently, not an error.
+    #[test]
+    fn dynamic_missing_column_renders_dash() {
+        let o: kube::core::DynamicObject = serde_json::from_value(json!({
+            "apiVersion": "example.com/v1",
+            "kind": "Widget",
+            "metadata": { "name": "w", "namespace": "prod", "uid": "u1",
+                          "creationTimestamp": "2026-08-01T00:00:00Z" },
+            "spec": {},
+        }))
+        .unwrap();
+        let cols = vec![
+            PrinterColumn { name: "Phase".into(), type_: "string".into(), json_path: ".status.phase".into() },
+        ];
+        let row = map_dynamic(&o, true, &cols);
+        assert_eq!(row.cells[2].text, "—");
+    }
+
+    /// `date`-typed columns render through the age cell so the frontend formats
+    /// the timestamp into a k8s-style age, just like the object's own AGE.
+    #[test]
+    fn dynamic_date_column_renders_as_age() {
+        let o: kube::core::DynamicObject = serde_json::from_value(json!({
+            "apiVersion": "example.com/v1",
+            "kind": "Widget",
+            "metadata": { "name": "w", "namespace": "prod", "uid": "u1",
+                          "creationTimestamp": "2026-08-01T00:00:00Z" },
+            "status": { "lastTransition": "2026-08-10T08:30:00Z" },
+        }))
+        .unwrap();
+        let cols = vec![
+            PrinterColumn { name: "Last Transition".into(), type_: "date".into(), json_path: ".status.lastTransition".into() },
+        ];
+        let row = map_dynamic(&o, true, &cols);
+        assert_eq!(row.cells[2].format, Some("age"));
+        assert_eq!(row.cells[2].text, "2026-08-10T08:30:00Z");
+    }
+
+    /// With no printer columns the kind keeps the generic NAME, NAMESPACE, AGE
+    /// set, and cluster-scoped kinds omit NAMESPACE.
+    #[test]
+    fn dynamic_without_columns_stays_generic() {
+        let o: kube::core::DynamicObject = serde_json::from_value(json!({
+            "apiVersion": "cert-manager.io/v1",
+            "kind": "ClusterIssuer",
+            "metadata": { "name": "letsencrypt-prod", "uid": "u1",
+                          "creationTimestamp": "2026-08-01T00:00:00Z" },
+        }))
+        .unwrap();
+        let namespaced_row = map_dynamic(&o, true, &[]);
+        assert_eq!(namespaced_row.cells.len(), 3);
+        let cluster_row = map_dynamic(&o, false, &[]);
+        let texts: Vec<&str> = cluster_row.cells.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(texts, ["letsencrypt-prod", "2026-08-01T00:00:00+00:00"]);
     }
 }

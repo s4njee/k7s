@@ -88,12 +88,17 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let namespaced = target.namespaced;
+    let columns = target.printer_columns.clone();
     let rows: Vec<_> = reader
         .state()
         .iter()
-        .map(|o| mappers::map_dynamic(o.as_ref(), namespaced))
+        .map(|o| mappers::map_dynamic(o.as_ref(), namespaced, &columns))
         .collect();
-    println!("watcher produced {} rows (columns NAME, NAMESPACE, AGE):", rows.len());
+    let headers: Vec<String> = std::iter::once("NAME".into())
+        .chain(columns.iter().map(|c| c.name.clone()))
+        .chain(std::iter::once("AGE".into()))
+        .collect();
+    println!("watcher produced {} rows (columns {headers:?}):", rows.len());
     for r in &rows {
         let c: Vec<&str> = r.cells.iter().map(|c| c.text.as_str()).collect();
         println!("    {c:?}");

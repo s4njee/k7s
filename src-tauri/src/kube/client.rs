@@ -153,6 +153,57 @@ pub async fn build_client(context: &str) -> AppResult<(Client, String)> {
     Ok((client, server))
 }
 
+/// A standalone kubeconfig containing only `context` and the cluster/user it
+/// names. Used to render the M9 QR sequence — the phone must receive a complete
+/// file, not a slice of a multi-context config.
+pub fn extract_context_yaml(src: &str, context: &str) -> AppResult<String> {
+    let v: serde_yaml::Value = serde_yaml::from_str(src)?;
+    let contexts = v.get("contexts").and_then(|c| c.as_sequence()).ok_or_else(|| {
+        AppError::Kubeconfig("kubeconfig has no contexts".into())
+    })?;
+    let ctx = contexts
+        .iter()
+        .find(|c| c.get("name").and_then(|n| n.as_str()) == Some(context))
+        .ok_or_else(|| AppError::Kubeconfig(format!("context \"{context}\" not found")))?;
+    let inner = ctx.get("context").cloned().unwrap_or(serde_yaml::Value::Null);
+    let cluster = inner.get("cluster").and_then(|c| c.as_str()).unwrap_or("");
+    let user = inner.get("user").and_then(|u| u.as_str()).unwrap_or("");
+
+    let clusters = filter_named(v.get("clusters"), cluster);
+    let users = filter_named(v.get("users"), user);
+
+    let out = serde_yaml::Mapping::from_iter([
+        (
+            serde_yaml::Value::String("apiVersion".into()),
+            v.get("apiVersion").cloned().unwrap_or(serde_yaml::Value::String("v1".into())),
+        ),
+        (
+            serde_yaml::Value::String("kind".into()),
+            v.get("kind").cloned().unwrap_or(serde_yaml::Value::String("Config".into())),
+        ),
+        (
+            serde_yaml::Value::String("current-context".into()),
+            serde_yaml::Value::String(context.into()),
+        ),
+        (serde_yaml::Value::String("clusters".into()), serde_yaml::Value::Sequence(clusters)),
+        (
+            serde_yaml::Value::String("contexts".into()),
+            serde_yaml::Value::Sequence(vec![ctx.clone()]),
+        ),
+        (serde_yaml::Value::String("users".into()), serde_yaml::Value::Sequence(users)),
+    ]);
+    Ok(serde_yaml::to_string(&serde_yaml::Value::Mapping(out))?)
+}
+
+fn filter_named(list: Option<&serde_yaml::Value>, name: &str) -> Vec<serde_yaml::Value> {
+    list.and_then(|v| v.as_sequence())
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("name").and_then(|n| n.as_str()) == Some(name))
+        .cloned()
+        .collect()
+}
+
 /// Probe the API server for its version. Also serves as a reachability check.
 pub async fn probe_version(client: &Client) -> AppResult<String> {
     let info = client.apiserver_version().await?;
@@ -225,5 +276,43 @@ users:
         let path = temp_file("junk", "this is not a kubeconfig at all\n\t- [");
         assert!(contexts_from_file(path.to_str().unwrap()).is_err());
         std::fs::remove_file(path).ok();
+    }
+
+    /// extract_context_yaml keeps only the named context and its cluster/user,
+    /// including client-cert data — the QR payload the phone must receive whole.
+    #[test]
+    fn extracts_one_context_with_its_certs() {
+        let yaml = r#"
+apiVersion: v1
+kind: Config
+current-context: beta
+clusters:
+  - name: alpha-cluster
+    cluster: { server: https://alpha.example:6443, certificate-authority-data: AAA }
+  - name: beta-cluster
+    cluster: { server: https://beta.example:6443, certificate-authority-data: BBB }
+contexts:
+  - name: alpha
+    context: { cluster: alpha-cluster, user: alpha-user }
+  - name: beta
+    context: { cluster: beta-cluster, user: beta-user }
+users:
+  - name: alpha-user
+    user: { client-certificate-data: CERTA, client-key-data: KEYA }
+  - name: beta-user
+    user: { client-certificate-data: CERTB, client-key-data: KEYB }
+"#;
+        let out = extract_context_yaml(yaml, "beta").unwrap();
+        assert!(out.contains("current-context: beta"));
+        assert!(out.contains("beta-cluster"));
+        assert!(out.contains("CERTB"));
+        assert!(out.contains("KEYB"));
+        assert!(!out.contains("alpha-cluster"));
+        assert!(!out.contains("CERTA"));
+    }
+
+    #[test]
+    fn extract_unknown_context_is_an_error() {
+        assert!(extract_context_yaml(KUBECONFIG, "nope").is_err());
     }
 }

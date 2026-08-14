@@ -15,7 +15,7 @@ import { useStore } from "../../store";
 import { useNow } from "../../hooks/useNow";
 import { formatAge } from "../../lib/format";
 import { toneColor } from "../../lib/tone";
-import { DETAIL_TABS, kindMeta, KINDS_WITH_PROPERTIES, tabsFor } from "../../lib/kinds";
+import { DETAIL_TABS, hasLogs, kindMeta, KINDS_WITH_PROPERTIES, tabsFor } from "../../lib/kinds";
 import { drainErrors, drainSummary, drainTone, pdbBlocked } from "../../lib/drain";
 import { LogsTab } from "./LogsTab";
 import { PropertiesTab } from "./PropertiesTab";
@@ -52,6 +52,8 @@ export function DetailPanel() {
   // Which tabs this kind gets — shared with the `[`/`]` cycle keys, so the strip
   // and the keyboard can't disagree about what exists (see lib/kinds.ts).
   const tabIds = tabsFor(nav, isPod);
+  // Logs for a workload (Deployment/STS/DS) is the pod bundle (B31), not a pod.
+  const logs = hasLogs(nav, isPod);
   const tabs = DETAIL_TABS.filter((t) => tabIds.includes(t.id));
   const statusColor = meta ? toneColor(meta.statusTone) : "var(--text-muted)";
   // Custom kinds resolve their label from discovery, so this is a runtime lookup.
@@ -121,7 +123,7 @@ export function DetailPanel() {
         </div>
       </div>
 
-      {activeTab === "logs" && isPod && <LogsTab />}
+      {activeTab === "logs" && logs && <LogsTab />}
       {/* Mirrors the tab list above: Properties is no longer pod-only (B18). */}
       {activeTab === "properties" && KINDS_WITH_PROPERTIES.has(nav) && <PropertiesTab />}
       {/* Mounting is what starts the scraper, so this must mirror the tab list. A

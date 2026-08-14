@@ -21,7 +21,7 @@ import type {
   PodSample,
   Row,
 } from "./providers/types";
-import { KIND_ORDER } from "./lib/kinds";
+import { hasLogs, KIND_ORDER } from "./lib/kinds";
 import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
 import { cachedTheme, prefersDark } from "./lib/theme";
 import { EMPTY_SELECTION, type SelectionState } from "./lib/selection";
@@ -85,15 +85,16 @@ export const POD_SAMPLE_CAP = 240;
  * and reset the per-object view state. Shared by selectRow and jumpTo (B28) so
  * arriving via the palette and via a click are the same thing.
  */
-function selectionPatch(row: Row) {
+function selectionPatch(row: Row, kind: KindId) {
   return {
     selectedRow: row,
     // A plain click is a single-row selection (B39): opening the detail panel for
     // one object and leaving a stale multi-selection behind would mean the row
     // menu acts on rows the panel isn't showing.
     selection: { selected: [row.uid], anchor: row.uid } as SelectionState,
-    // Pods open on Logs; every other kind lacks that tab, so YAML is the default.
-    activeTab: (row.pod ? "logs" : "yaml") as DetailTab,
+    // Pods and workloads (B31) open on Logs; every other kind lacks that tab, so
+    // YAML is the default.
+    activeTab: (hasLogs(kind, !!row.pod) ? "logs" : "yaml") as DetailTab,
     yamlEditing: false,
     logBuffer: [] as LogLine[],
     logSearch: "",
@@ -133,7 +134,7 @@ function jumpPatch(current: { namespace: string }, kind: KindId, row?: Row) {
       ? row.namespace
       : current.namespace;
 
-  return { ...base, namespace, ...selectionPatch(row) };
+  return { ...base, namespace, ...selectionPatch(row, kind) };
 }
 
 /** A copy of `obj` without `key`. */
@@ -547,7 +548,7 @@ export const useStore = create<AppState>((set) => ({
   // Selecting a row opens the panel and resets log/yaml view state. Pods open on
   // the Logs tab; other kinds have no Logs tab, so they open on YAML.
   // (The logs component re-seeds the stream in response to a pod selection.)
-  selectRow: (row) => set(selectionPatch(row)),
+  selectRow: (row) => set((s) => selectionPatch(row, s.nav)),
   closeDetail: () => set({ selectedRow: null }),
   // Switching tabs cancels any in-progress YAML edit (design behavior).
   setActiveTab: (tab) => set({ activeTab: tab, yamlEditing: false }),

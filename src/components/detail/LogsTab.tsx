@@ -10,7 +10,14 @@ import styles from "./LogsTab.module.css";
 import { useStore } from "../../store";
 import { getProvider } from "../../providers";
 import { useLogStream } from "../../hooks/useLogStream";
-import { hasPrevious, sinceSeconds, SINCE_OPTIONS } from "../../lib/logview";
+import { hasLogs } from "../../lib/kinds";
+import {
+  hasPrevious,
+  shortPod,
+  sinceSeconds,
+  SINCE_OPTIONS,
+  sourceColor,
+} from "../../lib/logview";
 import type { LogLine } from "../../providers/types";
 
 /** Color per log level for the level column. */
@@ -32,7 +39,8 @@ export function LogsTab() {
   // Drive the stream for as long as this tab is mounted.
   useLogStream();
 
-  const pod = useStore((s) => s.selectedRow);
+  const row = useStore((s) => s.selectedRow);
+  const nav = useStore((s) => s.nav);
   const logBuffer = useStore((s) => s.logBuffer);
   const logSearch = useStore((s) => s.logSearch);
   const setLogSearch = useStore((s) => s.setLogSearch);
@@ -50,9 +58,14 @@ export function LogsTab() {
   // Transient save feedback: which file was written, or why it wasn't.
   const [saveNote, setSaveNote] = useState<string | null>(null);
 
+  // A pod streams its containers; a workload (Deployment/STS/DS) streams the
+  // bundle of every matching pod's logs, tagged per line with its pod (B31).
+  const isPod = !!row?.pod;
+  const workload = !isPod && hasLogs(nav, isPod);
+
   // Multi-container pods get an "all" option ("") first; "(all)" is its label and
   // turns on the per-line container tag column.
-  const containers = pod?.pod?.containers ?? [];
+  const containers = row?.pod?.containers ?? [];
   const options = containers.length > 1 ? [...containers, ""] : containers;
   const current = options.length ? options[containerIndex % options.length] : "";
   const containerLabel = current === "" ? "(all)" : current;
@@ -68,18 +81,20 @@ export function LogsTab() {
   }, [logBuffer, logSearch]);
 
   // Offered only when a container has actually restarted — see hasPrevious.
-  const showPrevious = hasPrevious(pod?.pod?.restarts);
+  const showPrevious = hasPrevious(row?.pod?.restarts);
 
   /** Save the *full* log (not the ring buffer) to a file the user picks. */
   async function save() {
-    if (!pod) return;
+    if (!row) return;
     setSaveNote("saving…");
     try {
-      const result = await getProvider().saveLogs(
-        { kind: "pods", namespace: pod.namespace, name: pod.name },
-        current,
-        { sinceSeconds: sinceSeconds(since), previous },
-      );
+      const ref = { kind: nav, namespace: row.namespace, name: row.name };
+      const result = workload
+        ? await getProvider().saveWorkloadLogs(ref, { sinceSeconds: sinceSeconds(since) })
+        : await getProvider().saveLogs(ref, current, {
+            sinceSeconds: sinceSeconds(since),
+            previous,
+          });
       // null means the dialog was cancelled — not an error, and not worth a note.
       setSaveNote(result ? `saved ${result.lines} lines` : null);
     } catch (e) {
@@ -123,12 +138,15 @@ export function LogsTab() {
           />
         </div>
 
-        {/* Container cycler (cycles through the pod's containers, plus "all"). */}
-        <div className={styles.button} onClick={cycleContainer} title="container">
-          <span className={styles.buttonGlyph}>▣</span>
-          {containerLabel}
-          {options.length > 1 && <span className={styles.buttonChevron}>▼</span>}
-        </div>
+        {/* Container cycler (cycles through the pod's containers, plus "all").
+            A workload bundle has no container to pick — it's every pod already. */}
+        {!workload && (
+          <div className={styles.button} onClick={cycleContainer} title="container">
+            <span className={styles.buttonGlyph}>▣</span>
+            {containerLabel}
+            {options.length > 1 && <span className={styles.buttonChevron}>▼</span>}
+          </div>
+        )}
 
         {/* Timestamp toggle. */}
         <div
@@ -154,8 +172,8 @@ export function LogsTab() {
 
         {/* Previous container — only offered when there *is* one to read (B29).
             A pod that has never restarted has no previous generation, and asking
-            for one is a 400. */}
-        {showPrevious && (
+            for one is a 400. A workload bundle has no single container either. */}
+        {!workload && showPrevious && (
           <div
             className={`${styles.toggle} ${previous ? styles.toggleActive : ""}`}
             onClick={() => setLogPrevious(!previous)}
@@ -184,13 +202,19 @@ export function LogsTab() {
 
       <div className={styles.viewport} ref={viewportRef}>
         {filtered.map((line, i) => (
-          <LogRow key={i} line={line} showTs={showTimestamps} showContainer={showContainerTag} />
+          <LogRow
+            key={i}
+            line={line}
+            showTs={showTimestamps}
+            showPod={workload}
+            showContainer={showContainerTag || workload}
+          />
         ))}
       </div>
 
       <div className={styles.footer}>
         <span>{filtered.length} lines</span>
-        <span>container: {containerLabel}</span>
+        <span>{workload ? "pods: all" : `container: ${containerLabel}`}</span>
         {saveNote && <span className={styles.saveNote}>{saveNote}</span>}
         {previous ? (
           <span style={{ color: "var(--status-warn)" }}>↺ previous container</span>
@@ -204,21 +228,37 @@ export function LogsTab() {
   );
 }
 
-/** A single log line row: timestamp (optional), container tag (in "all" mode),
- *  level column, message. */
+/**
+ * A single log line row: timestamp (optional), pod tag (workload bundle, B31 —
+ * tinted with the pod's per-source colour), container tag (in "all" mode),
+ * level column, message.
+ */
 function LogRow({
   line,
   showTs,
+  showPod,
   showContainer,
 }: {
   line: LogLine;
   showTs: boolean;
+  showPod: boolean;
   showContainer: boolean;
 }) {
   return (
     <div className={styles.line}>
       {showTs && <span className={styles.lineTs}>{line.ts}</span>}
-      {showContainer && <span className={styles.lineContainer}>{line.container}</span>}
+      {showPod && line.pod && (
+        <span
+          className={styles.linePod}
+          style={{ color: sourceColor(line.pod) }}
+          title={line.pod}
+        >
+          {shortPod(line.pod)}
+        </span>
+      )}
+      {showContainer && line.container && (
+        <span className={styles.lineContainer}>{line.container}</span>
+      )}
       <span className={styles.lineLevel} style={{ color: LEVEL_COLOR[line.level] ?? "var(--text-muted)" }}>
         {line.level}
       </span>

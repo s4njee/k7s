@@ -10,7 +10,7 @@
 //! is emitted. Most kinds use [`identity`] (the frontend sorts); the Events feed
 //! uses it to order and cap a stream that can otherwise run to thousands of rows.
 
-use super::discovery::CustomKind;
+use super::discovery::{CustomKind, PrinterColumn};
 use super::{dto::Row, events, helm, mappers, ClientManager, ResourceKind, ResourceUpdate};
 use futures::stream::BoxStream;
 use futures::StreamExt;
@@ -180,8 +180,11 @@ pub async fn spawn_custom(mgr: &ClientManager, client: Client, kind: &CustomKind
     let id = kind.id.clone();
     let ar = kind.api_resource();
     let namespaced = kind.namespaced;
+    // Printer columns are the CRD's own column declaration (B30); cloning them
+    // into the watcher lets every row evaluate them against its object.
+    let columns = kind.printer_columns.clone();
     let handle = tokio::spawn(async move {
-        run_custom_watcher(client, app, id, ar, namespaced).await;
+        run_custom_watcher(client, app, id, ar, namespaced, columns).await;
     });
     mgr.add_custom_watcher(kind.id.clone(), handle).await;
 }
@@ -193,6 +196,7 @@ async fn run_custom_watcher(
     id: String,
     ar: ApiResource,
     namespaced: bool,
+    columns: Vec<PrinterColumn>,
 ) {
     let api: Api<DynamicObject> = Api::all_with(client, &ar);
 
@@ -206,9 +210,15 @@ async fn run_custom_watcher(
         .default_backoff()
         .boxed();
 
-    // Generic columns only: a CRD's interesting fields live in an arbitrary schema.
-    pump(reader, stream, app, id, move |o| Some(mappers::map_dynamic(o, namespaced)), identity)
-        .await;
+    pump(
+        reader,
+        stream,
+        app,
+        id,
+        move |o| Some(mappers::map_dynamic(o, namespaced, &columns)),
+        identity,
+    )
+    .await;
 }
 
 /// The shared watch loop: coalesce watch events, then emit a full post-processed

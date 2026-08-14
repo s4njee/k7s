@@ -189,6 +189,34 @@ pub async fn import_kubeconfig(
     Ok(merged_contexts(&manager).await)
 }
 
+/// Standalone kubeconfig YAML for one context (M9 QR handoff).
+///
+/// Same winner as the switcher: a name that exists in the default kubeconfig
+/// is read from there, not from an imported file of the same name.
+#[tauri::command]
+pub async fn export_context_kubeconfig(
+    context: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<String> {
+    let manager: Arc<ClientManager> = (*mgr).clone();
+    let in_default = client::list_contexts()
+        .ok()
+        .is_some_and(|cs| cs.iter().any(|c| c.name == context));
+    let yaml = if in_default {
+        let path = client::default_kubeconfig_path();
+        if path.is_empty() {
+            return Err(AppError::Kubeconfig("no default kubeconfig".into()));
+        }
+        std::fs::read_to_string(&path).map_err(|e| AppError::Kubeconfig(e.to_string()))?
+    } else {
+        let path = manager.import_path(&context).await.ok_or_else(|| {
+            AppError::Kubeconfig(format!("context \"{context}\" is not imported"))
+        })?;
+        std::fs::read_to_string(&path).map_err(|e| AppError::Kubeconfig(e.to_string()))?
+    };
+    client::extract_context_yaml(&yaml, &context)
+}
+
 /// Build the switcher list: default kubeconfig contexts plus every imported
 /// context not already present (imported files never shadow the default).
 async fn merged_contexts(manager: &ClientManager) -> Vec<ContextInfo> {
@@ -812,6 +840,56 @@ pub async fn stop_log_stream(
 ) -> AppResult<()> {
     mgr.remove_log(&stream_id).await;
     Ok(())
+}
+
+/// Start following every pod of a workload (Deployment/StatefulSet/DaemonSet),
+/// multiplexed into one stream id (B31). Resolves the workload's selector and
+/// re-resolves the pod set on a slow tick, so scale-ups join and gone pods drop;
+/// the bundle registers as a single manager entry, so one abort tears it all down.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn start_workload_logs(
+    kind: String,
+    namespace: String,
+    name: String,
+    tail: Option<i64>,
+    since_time: Option<String>,
+    since_seconds: Option<i64>,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<String> {
+    let client = require_client(&mgr).await?;
+    let manager: Arc<ClientManager> = (*mgr).clone();
+
+    // A distinct id namespace ("wl-") so a workload bundle can't collide with a
+    // pod stream that happens to share the name.
+    let stream_id = format!("wl-{}-{}", name, STREAM_SEQ.fetch_add(1, Ordering::Relaxed));
+    let app = manager.app();
+    let opts = logs::LogStreamOptions { tail, since_time, since_seconds, previous: false };
+    let id_for_task = stream_id.clone();
+    let handle = tokio::spawn(async move {
+        logs::run_workload_log_stream(client, app, id_for_task, kind, namespace, name, opts).await;
+    });
+
+    manager.add_log(stream_id.clone(), handle).await;
+    Ok(stream_id)
+}
+
+/// Write the full logs of every pod a workload selects to `path` (B31), labelled
+/// by pod and container — the save path for a workload stream.
+#[tauri::command]
+pub async fn export_workload_logs(
+    kind: String,
+    namespace: String,
+    name: String,
+    since_seconds: Option<i64>,
+    path: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<usize> {
+    let client = require_client(&mgr).await?;
+    let text = logs::export_workload_text(client, &kind, &namespace, &name, since_seconds).await?;
+    let lines = text.lines().count();
+    std::fs::write(&path, text).map_err(|e| AppError::Other(format!("could not write {path}: {e}")))?;
+    Ok(lines)
 }
 
 // --------------------------------------------------------------------------

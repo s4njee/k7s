@@ -1,5 +1,6 @@
 /**
- * Manages a pod's log stream lifecycle for the Logs tab.
+ * Manages a log stream lifecycle for the Logs tab: a pod's containers, or a
+ * workload's bundle of every matching pod's logs (B31).
  *
  * Behavior (Design §4-Logs, B29):
  *  - Streams only while `following` is true; pausing stops the backend stream
@@ -19,11 +20,13 @@
 import { useEffect, useRef } from "react";
 import { getProvider } from "../providers";
 import { useStore, LOG_BUFFER_CAP } from "../store";
+import { hasLogs } from "../lib/kinds";
 import { sinceSeconds } from "../lib/logview";
-import type { LogHandle } from "../providers/types";
+import type { LogHandle, LogLine } from "../providers/types";
 
 export function useLogStream(): void {
-  const pod = useStore((s) => s.selectedRow);
+  const row = useStore((s) => s.selectedRow);
+  const nav = useStore((s) => s.nav);
   const following = useStore((s) => s.following);
   const containerIndex = useStore((s) => s.containerIndex);
   const previous = useStore((s) => s.logPrevious);
@@ -31,9 +34,14 @@ export function useLogStream(): void {
   const appendLogs = useStore((s) => s.appendLogs);
   const setFollowing = useStore((s) => s.setFollowing);
 
+  // A pod streams its containers; a workload (Deployment/STS/DS) streams the
+  // bundle of its pods' logs (B31). Everything else has no Logs tab at all.
+  const isPod = !!row?.pod;
+  const logs = hasLogs(nav, isPod);
+
   // For multi-container pods, add an "all" option ("") after each container, so the
   // default (index 0) is still the first container.
-  const containers = pod?.pod?.containers ?? [];
+  const containers = row?.pod?.containers ?? [];
   const options = containers.length > 1 ? [...containers, ""] : containers;
   // null → no pod; "" → all containers; else a specific container name.
   const container = options.length ? options[containerIndex % options.length] : null;
@@ -44,11 +52,13 @@ export function useLogStream(): void {
   const lastActivity = useRef(0);
   useEffect(() => {
     lastActivity.current = 0;
-  }, [pod?.uid, container, previous, since]);
+  }, [row?.uid, container, previous, since]);
 
   useEffect(() => {
-    // container === "" is valid (all containers); only null means "no pod".
-    if (!pod || !pod.pod || container === null) return;
+    // container === "" is valid (all containers); only null means "no pod". A
+    // workload has no container at all — the bundle is the whole read.
+    if (!row || !logs) return;
+    if (isPod && container === null) return;
     // Pausing stops a live stream. A previous read has nothing to pause: it's a
     // finite dump, and gating it on `following` would leave the tab empty for a
     // user who paused before switching to it.
@@ -63,36 +73,40 @@ export function useLogStream(): void {
     const sinceTime = lastActivity.current
       ? new Date(lastActivity.current).toISOString()
       : undefined;
+    const opts = {
+      tail: sinceTime ? undefined : LOG_BUFFER_CAP,
+      sinceTime,
+      sinceSeconds: sinceSeconds(since),
+    };
+    const ref = { kind: nav, namespace: row.namespace, name: row.name };
+
+    const onLines = (lines: LogLine[]) => {
+      if (cancelled) return;
+      lastActivity.current = Date.now();
+      appendLogs(lines);
+    };
+    const onClosed = (reason: string) => {
+      if (cancelled) return;
+      if (previous) {
+        // Reaching the end of a dead container's log is the expected outcome,
+        // not a failure — say so, and leave the follow state alone.
+        appendLogs([{ ts: "", level: "", msg: "— end of previous container's log" }]);
+        return;
+      }
+      // Surface the close reason as a muted line and flip to paused so the
+      // user can retry (Story 6.2).
+      appendLogs([{ ts: "", level: "", msg: `— stream closed: ${reason}` }]);
+      setFollowing(false);
+    };
 
     void (async () => {
-      handle = await provider.startLogs(
-        { kind: "pods", namespace: pod.namespace, name: pod.name },
-        container,
-        {
-          tail: sinceTime ? undefined : LOG_BUFFER_CAP,
-          sinceTime,
-          sinceSeconds: sinceSeconds(since),
-          previous,
-        },
-        (lines) => {
-          if (cancelled) return;
-          lastActivity.current = Date.now();
-          appendLogs(lines);
-        },
-        (reason) => {
-          if (cancelled) return;
-          if (previous) {
-            // Reaching the end of a dead container's log is the expected outcome,
-            // not a failure — say so, and leave the follow state alone.
-            appendLogs([{ ts: "", level: "", msg: "— end of previous container's log" }]);
-            return;
-          }
-          // Surface the close reason as a muted line and flip to paused so the
-          // user can retry (Story 6.2).
-          appendLogs([{ ts: "", level: "", msg: `— stream closed: ${reason}` }]);
-          setFollowing(false);
-        },
-      );
+      if (isPod) {
+        // null is impossible here (guarded above); "" means "all containers".
+        handle = await provider.startLogs(ref, container ?? "", { ...opts, previous }, onLines, onClosed);
+      } else {
+        // A workload bundle has no container or previous — those are pod notions.
+        handle = await provider.startWorkloadLogs(ref, opts, onLines, onClosed);
+      }
       // If the effect was torn down before the stream attached, stop it now.
       if (cancelled) handle.stop();
     })();
@@ -102,5 +116,5 @@ export function useLogStream(): void {
       handle?.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pod?.uid, container, following, previous, since]);
+  }, [row?.uid, isPod, nav, container, following, previous, since]);
 }

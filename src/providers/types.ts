@@ -37,6 +37,20 @@ export type ResourceKind =
   | "helm";
 
 /**
+ * One `additionalPrinterColumn` a CRD declares for its kind (B30): a column the
+ * kind's table shows between NAMESPACE and AGE, whose value the backend
+ * evaluates from each object's `jsonPath`.
+ */
+export interface PrinterColumn {
+  /** Column header, e.g. "Sync Status". */
+  name: string;
+  /** kubectl column type: "string", "integer", "date", "boolean", … */
+  type: string;
+  /** JSONPath into the object, e.g. ".status.sync.status". */
+  jsonPath: string;
+}
+
+/**
  * A CRD-backed kind discovered on connect (B15).
  *
  * These aren't known at build time, so they can't be part of {@link ResourceKind}.
@@ -52,6 +66,12 @@ export interface CustomKind {
   plural: string;
   /** False for cluster-scoped CRDs, which ignore the namespace filter. */
   namespaced: boolean;
+  /**
+   * Printer columns declared by the CRD's storage version (B30), in declared
+   * order. Empty (or absent) when the CRD declares none — the kind then keeps
+   * the generic NAME, NAMESPACE?, AGE columns.
+   */
+  printerColumns?: PrinterColumn[];
 }
 
 /**
@@ -218,6 +238,8 @@ export interface LogLine {
   msg: string;
   /** Source container — set only when streaming all containers (B7). */
   container?: string;
+  /** Source pod — set only on a workload log bundle (B31). */
+  pod?: string;
 }
 
 /** Per-pod resource usage, keyed by "namespace/name". */
@@ -486,6 +508,11 @@ export interface DataProvider {
    */
   importKubeconfig(): Promise<ImportResult | null>;
   /**
+   * Standalone kubeconfig YAML for one context (M9): the cluster, user, and
+   * context entries only. Used to render the QR sequence mk7s on a phone scans.
+   */
+  exportContextKubeconfig(context: string): Promise<string>;
+  /**
    * Re-register previously imported kubeconfig files on boot (B17). Returns the
    * paths that still parse — callers should persist that, dropping the rest.
    * Must run before {@link listContexts} for imports to appear in the switcher.
@@ -636,6 +663,28 @@ export interface DataProvider {
     ref: ResourceRef,
     container: string,
     opts: { sinceSeconds?: number; previous?: boolean },
+  ): Promise<SavedLog | null>;
+
+  /**
+   * Start a workload log bundle (B31): every pod a Deployment/StatefulSet/
+   * DaemonSet selects, interleaved into one stream. Lines carry a `pod` field.
+   * Same lifecycle as {@link startLogs} — a {@link LogHandle} whose stop tears
+   * down all per-pod pumps.
+   */
+  startWorkloadLogs(
+    ref: ResourceRef,
+    opts: LogOptions,
+    onLines: (lines: LogLine[]) => void,
+    onClosed: (reason: string) => void,
+  ): Promise<LogHandle>;
+
+  /**
+   * Save a workload's full logs to a file the user picks (B31), each pod
+   * labelled in the file. Returns null if the user cancelled the save dialog.
+   */
+  saveWorkloadLogs(
+    ref: ResourceRef,
+    opts: { sinceSeconds?: number },
   ): Promise<SavedLog | null>;
 
   // ---- shell / exec (B4) ----

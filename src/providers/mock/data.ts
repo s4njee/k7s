@@ -217,6 +217,17 @@ function deriveApp(name: string): string {
 }
 
 /**
+ * The demo pods of a workload, by derived app name (B31). For a workload the
+ * fixture has no pods for, falls back to two synthetic pods so the log bundle
+ * still demonstrates interleaving with distinct prefixes.
+ */
+export function workloadPods(name: string): string[] {
+  const real = MOCK_PODS.filter((p) => deriveApp(p.name) === name).map((p) => p.name);
+  if (real.length > 0) return real;
+  return [`${name}-5b8c9d4f7-x2k4n`, `${name}-7d9f8b64d-p9w7z`];
+}
+
+/**
  * The demo events feed (B14), already in the order the real backend emits:
  * Warnings first, then newest. Mirrors the warnings the mock pods imply
  * (heimdall-auth crash-looping, the canary unschedulable).
@@ -282,6 +293,12 @@ export const MOCK_CUSTOM_KINDS: CustomKind[] = [
     kind: "Application",
     plural: "applications",
     namespaced: true,
+    // The real Argo CD CRD's printer columns (B30): the kind's table shows these
+    // between NAMESPACE and AGE, evaluated from each object's status.
+    printerColumns: [
+      { name: "Sync Status", type: "string", jsonPath: ".status.sync.status" },
+      { name: "Health Status", type: "string", jsonPath: ".status.health.status" },
+    ],
   },
   {
     id: "argoproj.io/appprojects",
@@ -328,18 +345,113 @@ const MOCK_CUSTOM_ROWS: Record<string, [string, string, string][]> = {
 };
 
 /**
- * Build rows for a custom kind. Columns are the generic NAME, NAMESPACE?, AGE —
- * the same set the backend's `map_dynamic` emits.
+ * The part of each demo object the printer columns' jsonPaths read (B30),
+ * keyed by "kind id / name". Kept minimal — just the fields a column evaluates
+ * — mirroring how the real backend reads them from the live object's `data`.
+ */
+const MOCK_CUSTOM_OBJECTS: Record<string, Record<string, unknown>> = {
+  "argoproj.io/applications": {
+    valkyrie: { status: { sync: { status: "Synced" }, health: { status: "Healthy" } } },
+    bifrost: { status: { sync: { status: "Synced" }, health: { status: "Healthy" } } },
+    // The case worth seeing: synced but still rolling out (backlog B30 cites
+    // live apps reading Synced/Progressing).
+    observability: { status: { sync: { status: "Synced" }, health: { status: "Progressing" } } },
+  },
+};
+
+/**
+ * Build rows for a custom kind: NAME, NAMESPACE?, the CRD's own printer columns
+ * evaluated against the object (B30), then AGE — the same shape and order the
+ * backend's `map_dynamic` emits.
  */
 export function buildCustomRows(id: string): Row[] {
   const ck = MOCK_CUSTOM_KINDS.find((k) => k.id === id);
   const raw = MOCK_CUSTOM_ROWS[id] ?? [];
+  const columns = ck?.printerColumns ?? [];
   return raw.map(([name, ns, age]) => {
     const cells: Cell[] = [{ text: name, tone: "primary" }];
     if (ck?.namespaced) cells.push({ text: ns, tone: "muted" });
+    const obj = MOCK_CUSTOM_OBJECTS[id]?.[name] ?? {};
+    for (const col of columns) {
+      cells.push(evalPrinterColumn(col, obj));
+    }
     cells.push({ text: age, tone: "muted" });
     return { uid: `${id}:${ns}/${name}`, name, namespace: ns === "" ? undefined : ns, cells };
   });
+}
+
+/** Evaluate one printer column against a demo object; "—" when it can't. */
+function evalPrinterColumn(
+  col: { name: string; type: string; jsonPath: string },
+  obj: unknown,
+): Cell {
+  const v = evalJsonPath(col.jsonPath, obj);
+  if (col.type === "date" && typeof v === "string" && !Number.isNaN(Date.parse(v))) {
+    // A real timestamp renders as a live-formatted age, like the backend's
+    // date columns; demo rows that carry a literal age stay literal.
+    return { text: v, tone: "muted", format: "age" };
+  }
+  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+    return { text: String(v), tone: "secondary" };
+  }
+  return { text: "—", tone: "secondary" };
+}
+
+/**
+ * The backend's JSONPath subset (src-tauri/src/kube/jsonpath.rs), mirrored for
+ * demo data: dotted field access plus `[n]` array indexing. Returns undefined
+ * for an unresolvable path, a subtree, or null — the same "—" contract.
+ */
+function evalJsonPath(path: string, obj: unknown): unknown {
+  const segs = parseJsonPath(path);
+  if (!segs) return undefined;
+  let cur: unknown = obj;
+  for (const seg of segs) {
+    if (typeof seg === "number") {
+      cur = Array.isArray(cur) ? cur[seg] : undefined;
+    } else {
+      cur = (cur as Record<string, unknown> | undefined)?.[seg];
+    }
+    if (cur === undefined || cur === null) return undefined;
+  }
+  return typeof cur === "object" ? undefined : cur;
+}
+
+/** Tokenize a kubectl-style path (`.a.b[0].c`, `{.a.b}`, `$.a.b`) into
+ * field/index segments, or null for syntax the subset doesn't cover. */
+function parseJsonPath(path: string): (string | number)[] | null {
+  let s = path.trim();
+  if (s.startsWith("{") && s.endsWith("}")) s = s.slice(1, -1);
+  if (s.startsWith("$")) s = s.slice(1);
+  const segs: (string | number)[] = [];
+  let field = "";
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === ".") {
+      if (field) {
+        segs.push(field);
+        field = "";
+      }
+      i++;
+    } else if (ch === "[") {
+      if (field) {
+        segs.push(field);
+        field = "";
+      }
+      i++;
+      const start = i;
+      while (i < s.length && /\d/.test(s[i])) i++;
+      if (i === start || i >= s.length || s[i] !== "]") return null;
+      segs.push(Number(s.slice(start, i)));
+      i++;
+    } else {
+      field += ch;
+      i++;
+    }
+  }
+  if (field) segs.push(field);
+  return segs;
 }
 
 /**

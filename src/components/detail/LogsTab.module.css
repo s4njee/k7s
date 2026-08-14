@@ -133,6 +133,17 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Pod tag column, shown on a workload bundle (B31): the short replica suffix,
+   tinted per pod via an inline sourceColor. */
+.linePod {
+  flex: none;
+  min-width: 42px;
+  text-align: right;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .lineLevel {
   flex: none;
   width: 42px;

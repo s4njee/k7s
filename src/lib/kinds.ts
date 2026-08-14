@@ -246,6 +246,26 @@ export const DETAIL_TABS: { id: DetailTabId; label: string }[] = [
 ];
 
 /**
+ * Workload kinds whose Logs tab is a stern-style bundle of every matching pod's
+ * logs (B31) — Deployments, StatefulSets, DaemonSets. Must match the backend's
+ * `start_workload_logs` kinds.
+ */
+const LOG_BUNDLE_KINDS: ReadonlySet<string> = new Set([
+  "deployments",
+  "statefulsets",
+  "daemonsets",
+]);
+
+/**
+ * Whether a kind's Logs tab can be shown: pods stream a container's logs
+ * directly (B7), and the workload kinds stream a bundle of every matching pod's
+ * logs (B31). Everything else has nothing to read.
+ */
+export function hasLogs(kind: KindId, isPod: boolean): boolean {
+  return isPod || LOG_BUNDLE_KINDS.has(kind);
+}
+
+/**
  * Which tabs a selected object gets.
  *
  * One source of truth, because there are three consumers that must agree: the
@@ -255,18 +275,19 @@ export const DETAIL_TABS: { id: DetailTabId; label: string }[] = [
  * Metrics arrived (B27) and Helm dropped Events (B26). Cycling would have landed
  * on tabs that weren't there.
  *
- * The rules: Logs needs a running container, so it's pods-only. Shell is pods
- * *or* nodes — a node's shell is a different mechanism (a privileged debug pod;
- * see B53) but the same tab from the user's point of view. Properties needs a
- * backend gatherer. Metrics is pods *or* nodes — a node's come from its
- * node-exporter, a pod's from metrics.k8s.io — again the same tab either way. A
- * Helm release has no Kubernetes events of its own.
+ * The rules: Logs needs something to read — a pod's containers, or a workload's
+ * pod bundle (B31). Shell is pods *or* nodes — a node's shell is a different
+ * mechanism (a privileged debug pod; see B53) but the same tab from the user's
+ * point of view. Properties needs a backend gatherer. Metrics is pods *or*
+ * nodes — a node's come from its node-exporter, a pod's from metrics.k8s.io —
+ * again the same tab either way. A Helm release has no Kubernetes events of its
+ * own.
  */
 export function tabsFor(kind: KindId, isPod: boolean): DetailTabId[] {
   return DETAIL_TABS.filter((t) => {
     switch (t.id) {
       case "logs":
-        return isPod;
+        return hasLogs(kind, isPod);
       case "shell":
         return isPod || kind === "nodes";
       case "properties":
@@ -346,12 +367,16 @@ export function navIdForKind(
 const CUSTOM_ICON = "◈";
 
 /**
- * Generic columns for a CRD-backed kind. A CRD's schema is arbitrary, so there's
- * nothing meaningful to show beyond identity and age without per-CRD knowledge —
- * the YAML tab carries the detail. Must match the backend's `map_dynamic`.
+ * Columns for a CRD-backed kind (B30). A CRD's schema is arbitrary, so without
+ * per-CRD knowledge the generic set is NAME, NAMESPACE?, AGE; the CRD's own
+ * printer columns (when it declares any) sit between NAMESPACE and AGE, exactly
+ * where the backend's `map_dynamic` places the cells. Must match it.
  */
-function customColumns(namespaced: boolean): string[] {
-  return namespaced ? ["NAME", "NAMESPACE", "AGE"] : ["NAME", "AGE"];
+function customColumns(ck: CustomKind): string[] {
+  const cols = ck.namespaced ? ["NAME", "NAMESPACE"] : ["NAME"];
+  for (const pc of ck.printerColumns ?? []) cols.push(pc.name);
+  cols.push("AGE");
+  return cols;
 }
 
 /**
@@ -368,7 +393,7 @@ export function kindMeta(id: KindId, customKinds: CustomKind[]): KindMeta | unde
     // The Kind name reads better than the plural ("Application", not "applications").
     label: ck.kind,
     icon: CUSTOM_ICON,
-    columns: customColumns(ck.namespaced),
+    columns: customColumns(ck),
   };
 }
 

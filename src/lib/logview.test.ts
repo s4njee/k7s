@@ -3,7 +3,14 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { exportFilename, hasPrevious, sinceSeconds, SINCE_OPTIONS } from "./logview";
+import {
+  exportFilename,
+  hasPrevious,
+  shortPod,
+  sinceSeconds,
+  SINCE_OPTIONS,
+  sourceColor,
+} from "./logview";
 
 describe("sinceSeconds", () => {
   it("maps each window to its seconds", () => {
@@ -59,5 +66,34 @@ describe("exportFilename", () => {
 
   it("names the all-containers view", () => {
     expect(exportFilename("api-x", "", false)).toBe("api-x.all.log");
+  });
+});
+
+describe("shortPod (B31)", () => {
+  it("keeps the replica suffix after the last dash", () => {
+    expect(shortPod("wiki-abc123-x2k4n")).toBe("x2k4n");
+    expect(shortPod("yggdrasil-db-0")).toBe("0");
+  });
+
+  it("passes through a name with no suffix", () => {
+    expect(shortPod("coredns")).toBe("coredns");
+  });
+});
+
+describe("sourceColor (B31)", () => {
+  it("is deterministic per pod — a pod keeps its tint for the stream's life", () => {
+    expect(sourceColor("wiki-abc123-x2k4n")).toBe(sourceColor("wiki-abc123-x2k4n"));
+  });
+
+  it("is a readable hue string", () => {
+    expect(sourceColor("wiki-abc123-x2k4n")).toMatch(/^hsl\(\d+ 62% 52%\)$/);
+  });
+
+  it("tends to differ between pods of one workload", () => {
+    const a = sourceColor("wiki-abc123-x2k4n");
+    const b = sourceColor("wiki-7d9f8b64d-p9w7z");
+    // Not a hard guarantee (hashes can collide) but the two fixture pods must
+    // not trivially collide.
+    expect(a === b).toBe(false);
   });
 });

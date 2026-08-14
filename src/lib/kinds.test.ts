@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { isClusterScoped, isCustomKind, kindMeta, navIdForKind, KINDS_WITH_PROPERTIES,
+import { hasLogs, isClusterScoped, isCustomKind, kindMeta, navIdForKind, KINDS_WITH_PROPERTIES,
   tabsFor,
 } from "./kinds";
 import { mockProperties } from "../providers/mock/properties";
@@ -30,6 +30,15 @@ const ISSUERS: CustomKind = {
 };
 
 const CUSTOM = [APPS, ISSUERS];
+
+/** A kind whose CRD declares printer columns (mirrors the real Argo CD CRD, B30). */
+const SYNCED: CustomKind = {
+  ...APPS,
+  printerColumns: [
+    { name: "Sync Status", type: "string", jsonPath: ".status.sync.status" },
+    { name: "Health Status", type: "string", jsonPath: ".status.health.status" },
+  ],
+};
 
 describe("isCustomKind", () => {
   it("distinguishes custom ids by their slash", () => {
@@ -59,6 +68,22 @@ describe("kindMeta", () => {
 
   it("omits NAMESPACE for cluster-scoped custom kinds", () => {
     expect(kindMeta("cert-manager.io/clusterissuers", CUSTOM)?.columns).toEqual(["NAME", "AGE"]);
+  });
+
+  // B30: a CRD's printer columns become table columns between NAMESPACE and AGE,
+  // in the order the CRD declares them — the same order the backend maps cells.
+  // Headers are the CRD's own column names, verbatim (kubectl does the same).
+  it("inserts the CRD's printer columns between NAMESPACE and AGE", () => {
+    expect(kindMeta("argoproj.io/applications", [SYNCED])?.columns).toEqual([
+      "NAME", "NAMESPACE", "Sync Status", "Health Status", "AGE",
+    ]);
+  });
+
+  it("still puts AGE last after printer columns, no NAMESPACE when cluster-scoped", () => {
+    const synced: CustomKind = { ...SYNCED, id: "example.com/widgets", namespaced: false };
+    expect(kindMeta("example.com/widgets", [synced])?.columns).toEqual([
+      "NAME", "Sync Status", "Health Status", "AGE",
+    ]);
   });
 
   it("puts custom kinds in the custom nav group", () => {
@@ -242,6 +267,26 @@ describe("tabsFor", () => {
   });
 
   /**
+   * B31: Deployments/StatefulSets/DaemonSets gain the Logs tab — a stern-style
+   * bundle of their pods' logs — but no Shell or Metrics (those are pod/node
+   * notions, and a workload has no single container or usage series).
+   */
+  it("offers Logs but not Shell or Metrics on the workload kinds", () => {
+    for (const kind of ["deployments", "statefulsets", "daemonsets"]) {
+      const tabs = tabsFor(kind, false);
+      expect(tabs, kind).toContain("logs");
+      expect(tabs, kind).not.toContain("shell");
+      expect(tabs, kind).not.toContain("metrics");
+    }
+  });
+
+  it("keeps other non-pod kinds without Logs", () => {
+    for (const kind of ["services", "configmaps", "secrets", "helm"]) {
+      expect(tabsFor(kind, false), kind).not.toContain("logs");
+    }
+  });
+
+  /**
    * Metrics is offered for pods (metrics.k8s.io) as well as nodes (node-exporter),
    * but for nothing else — a Deployment has no single usage series to plot.
    */
@@ -251,5 +296,23 @@ describe("tabsFor", () => {
     for (const kind of ["deployments", "services", "configmaps", "helm"]) {
       expect(tabsFor(kind, false), kind).not.toContain("metrics");
     }
+  });
+});
+
+describe("hasLogs (B31)", () => {
+  it("is true for pods and the workload kinds", () => {
+    expect(hasLogs("pods", true)).toBe(true);
+    expect(hasLogs("deployments", false)).toBe(true);
+    expect(hasLogs("statefulsets", false)).toBe(true);
+    expect(hasLogs("daemonsets", false)).toBe(true);
+  });
+
+  it("is false everywhere else", () => {
+    expect(hasLogs("services", false)).toBe(false);
+    expect(hasLogs("nodes", false)).toBe(false);
+    expect(hasLogs("helm", false)).toBe(false);
+    // A custom kind's logs, if it ever had them, would be a backend gatherer —
+    // not the workload bundle.
+    expect(hasLogs("argoproj.io/applications", false)).toBe(false);
   });
 });

@@ -56,10 +56,11 @@ from the discovered metadata.
 
 **Accept:**
 - [ ] Argo Applications on freya show SYNC STATUS and HEALTH STATUS live,
-      matching `kubectl get applications -n argocd` exactly.
-- [ ] Kinds with no printer columns keep the generic set; an unevaluable
+      matching `kubectl get applications -n argocd` exactly. *(needs a live
+      freya check — `cargo run --example crd_check` prints the evaluated cells)*
+- [x] Kinds with no printer columns keep the generic set; an unevaluable
       jsonPath shows "—" and logs once.
-- [ ] The JSONPath subset is unit-tested against the exact expressions on
+- [x] The JSONPath subset is unit-tested against the exact expressions on
       freya's CRDs, plus array-index and missing-field cases.
 
 ### B31 — Workload logs (stern-style)
@@ -78,7 +79,8 @@ pod suffix tinted with the per-source palette.
 **Accept:**
 - [ ] Scale a freya Deployment to 2 via the app's own Scale action: both pods'
       lines interleave with distinct prefixes; scale back and the second
-      prefix stops within a tick.
+      prefix stops within a tick. *(all three need a live freya check —
+      implementation is in)*
 - [ ] Search/timestamps/follow/save (B29) work unchanged on workload streams.
 - [ ] Closing the tab tears down every per-pod pump (watch-status returns to
       baseline — the same proof B15 uses).
@@ -308,6 +310,13 @@ Newest first. One line each — the full records (design decisions, live
 verification, corrections of wrong premises) are in the git log and, for
 B28–B43, in the commit messages of `feat/backlog-qol`.
 
+### M9 — Kubeconfig QR for mk7s
+
+- **▣** on a cluster-switcher context row exports that context as a standalone
+  kubeconfig and cycles an `MK7S1` QR sequence. mk7s on a phone scans it
+  (same frames, checksum, paste-import path). Closing the dialog drops the
+  frames; a partial scan on the phone imports nothing.
+
 ### Backlog v4 (B39, B52–B53)
 
 - **B39 — Bulk selection & row context menu.** Shift/⌘-click multi-select and a
@@ -377,7 +386,9 @@ B28–B43, in the commit messages of `feat/backlog-qol`.
 - **B33 — Related-resource navigation.** Owner links resolving through
   ReplicaSets; workload → pods via label-selector filter syntax
   (`lib/filter.ts`); clickable events via Kind+group → nav id resolution.
-- **B32/B31/B30 — not done** (moved above).
+- **B32 — not done** (moved above). *B30 shipped — CRD printer columns
+  (jsonpath.rs subset, evaluated live by `map_dynamic`). B31 shipped — workload
+  log bundles (selector-resolved per-pod pumps, re-resolved on a 15s tick).*
 - **B29 — Crash-loop debugging.** `previous` reads (terminate, never follow),
   since-windows, save-to-file written in Rust (13k lines / 4.8MB past the
   200-line ring buffer). Backlog premise about `previous` corrected in the

@@ -4,12 +4,13 @@
  * kubeconfig contexts. Selecting one triggers the connect flow.
  */
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import styles from "./Sidebar.module.css";
 import { useStore } from "../../store";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { connectTo } from "../../lib/connect";
 import { getProvider } from "../../providers";
+import { ShowKubeconfigQr } from "./ShowKubeconfigQr";
 
 /** First two letters of the cluster name, uppercased ("FR" for "freya"). */
 function initials(name: string): string {
@@ -28,6 +29,7 @@ export function ClusterSwitcher() {
 
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, closeMenus, open);
+  const [qrContext, setQrContext] = useState<string | null>(null);
 
   // Import contexts from a kubeconfig file (native picker), then merge them into
   // the switcher list. A null result means the user cancelled the dialog.
@@ -83,6 +85,17 @@ export function ClusterSwitcher() {
                 />
                 <span className={styles.menuName}>{ctx.name}</span>
                 <span className={styles.menuEnv}>{ctx.cluster}</span>
+                <span
+                  className={styles.qrBtn}
+                  title="Show as QR for mk7s on a phone"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeMenus();
+                    setQrContext(ctx.name);
+                  }}
+                >
+                  ▣
+                </span>
               </div>
             );
           })}
@@ -102,6 +115,8 @@ export function ClusterSwitcher() {
           </div>
         </div>
       )}
+
+      {qrContext && <ShowKubeconfigQr context={qrContext} onClose={() => setQrContext(null)} />}
     </div>
   );
 }

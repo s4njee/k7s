@@ -47,3 +47,28 @@ export function exportFilename(pod: string, container: string, previous: boolean
   const part = container === "" ? "all" : container;
   return `${pod}.${part}${previous ? ".previous" : ""}.log`;
 }
+
+/**
+ * A deterministic colour for a named log source (a pod, in the workload bundle —
+ * B31). Hashes the name to a hue at a fixed saturation/lightness that reads on
+ * both themes, so a pod keeps the same tint for the life of the stream and two
+ * pods in one Deployment don't collide.
+ */
+export function sourceColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return `hsl(${h % 360} 62% 52%)`;
+}
+
+/**
+ * The distinctive short form of a pod name for a tag column: the suffix after
+ * the last "-" — "x2k4n" from "wiki-abc123-x2k4n", "0" from "db-0". Replica
+ * suffixes are what tell a workload's pods apart; the full name lives in a
+ * tooltip.
+ */
+export function shortPod(name: string): string {
+  const i = name.lastIndexOf("-");
+  return i === -1 ? name : name.slice(i + 1);
+}

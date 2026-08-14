@@ -11,6 +11,7 @@ pub mod dto;
 pub mod exec;
 pub mod exporter;
 pub mod helm;
+pub mod jsonpath;
 pub mod logs;
 pub mod manager;
 pub mod mappers;

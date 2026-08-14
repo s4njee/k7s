@@ -112,6 +112,10 @@ export class TauriProvider implements DataProvider {
     return { contexts, path: selected };
   }
 
+  exportContextKubeconfig(context: string): Promise<string> {
+    return invoke<string>("export_context_kubeconfig", { context });
+  }
+
   getYaml(ref: ResourceRef): Promise<string> {
     return invoke<string>("get_yaml", {
       kind: ref.kind,
@@ -368,6 +372,60 @@ export class TauriProvider implements DataProvider {
       container,
       sinceSeconds: opts.sinceSeconds ?? null,
       previous: opts.previous ?? false,
+      path,
+    });
+    return { path, lines };
+  }
+
+  // ---- workload log bundle (B31) ----
+
+  async startWorkloadLogs(
+    ref: ResourceRef,
+    opts: LogOptions,
+    onLines: (lines: LogLine[]) => void,
+    onClosed: (reason: string) => void,
+  ): Promise<LogHandle> {
+    const streamId = await invoke<string>("start_workload_logs", {
+      kind: ref.kind,
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+      tail: opts.tail ?? null,
+      sinceTime: opts.sinceTime ?? null,
+      sinceSeconds: opts.sinceSeconds ?? null,
+    });
+
+    const offLine = subscribe<{ lines: LogLine[] }>(`log-line:${streamId}`, (p) => onLines(p.lines));
+    const offClosed = subscribe<string>(`log-closed:${streamId}`, onClosed);
+
+    let stopped = false;
+    return {
+      stop: () => {
+        if (stopped) return;
+        stopped = true;
+        offLine();
+        offClosed();
+        void invoke("stop_log_stream", { streamId });
+      },
+    };
+  }
+
+  async saveWorkloadLogs(
+    ref: ResourceRef,
+    opts: { sinceSeconds?: number },
+  ): Promise<SavedLog | null> {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const path = await save({
+      title: "Save logs",
+      defaultPath: exportFilename(ref.name, "", false),
+      filters: [{ name: "Log", extensions: ["log", "txt"] }],
+    });
+    if (!path) return null; // cancelled
+
+    const lines = await invoke<number>("export_workload_logs", {
+      kind: ref.kind,
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+      sinceSeconds: opts.sinceSeconds ?? null,
       path,
     });
     return { path, lines };
