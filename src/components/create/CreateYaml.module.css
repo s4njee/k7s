@@ -1,0 +1,120 @@
+/* Create-from-YAML modal (B36): a wide modal over the app, with a CodeMirror
+   editor and a Preview/Create toolbar. Chrome mirrors the settings panel. */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel {
+  width: min(720px, calc(100vw - 48px));
+  height: min(560px, calc(100vh - 96px));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-menu);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  overflow: hidden;
+}
+
+.header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-default);
+}
+.title {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.close {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.close:hover {
+  color: var(--text-primary);
+}
+
+.toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-row);
+}
+.ns {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.spacer {
+  flex: 1;
+}
+.previewBtn,
+.createBtn {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.previewBtn {
+  border: 1px solid var(--border-control);
+  color: var(--text-secondary);
+}
+.previewBtn:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+.createBtn {
+  background: var(--accent);
+  color: var(--bg-app);
+  border: none;
+  font-weight: 600;
+}
+.createBtn:hover {
+  background: var(--accent-hover);
+}
+.previewBtn[aria-disabled="true"],
+.createBtn[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.error {
+  flex: none;
+  padding: 6px 14px;
+  color: var(--status-err);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-bottom: 1px solid var(--border-row);
+}
+
+.editor {
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-terminal);
+  overflow: auto;
+}
+
+.hint {
+  flex: none;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border-default);
+  font-size: 10.5px;
+  color: var(--text-faint);
+  line-height: 1.4;
+}

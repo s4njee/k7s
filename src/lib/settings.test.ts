@@ -127,4 +127,10 @@ describe("appearance settings (font / accent / motion)", () => {
     expect(sanitizeSettings({ reduceMotion: true }).reduceMotion).toBe(true);
     expect(sanitizeSettings({ reduceMotion: "yes" }).reduceMotion).toBe(false);
   });
+
+  it("defaults notifications to off, and only accepts a boolean (B50)", () => {
+    expect(sanitizeSettings({}).notifications).toBe(false);
+    expect(sanitizeSettings({ notifications: true }).notifications).toBe(true);
+    expect(sanitizeSettings({ notifications: "yes" }).notifications).toBe(false);
+  });
 });

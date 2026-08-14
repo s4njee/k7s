@@ -227,12 +227,23 @@ describe("ReplicaSets and StorageClasses (B40)", () => {
 });
 
 describe("ServiceAccounts", () => {
-  it("sits in Config, namespaced, with kubectl's columns", () => {
-    expect(kindMeta("serviceaccounts", CUSTOM)?.group).toBe("config");
+  it("sits in the Access group (B49 moved it out of Config), namespaced, with kubectl's columns", () => {
+    expect(kindMeta("serviceaccounts", CUSTOM)?.group).toBe("access");
     expect(kindMeta("serviceaccounts", CUSTOM)?.columns).toEqual([
       "NAME", "NAMESPACE", "SECRETS", "AGE",
     ]);
     expect(isClusterScoped("serviceaccounts", CUSTOM)).toBe(false);
+  });
+
+  it("is joined by the RBAC kinds in the Access group", () => {
+    expect(kindMeta("roles", CUSTOM)?.group).toBe("access");
+    expect(kindMeta("clusterroles", CUSTOM)?.group).toBe("access");
+    expect(kindMeta("rolebindings", CUSTOM)?.group).toBe("access");
+    expect(kindMeta("clusterrolebindings", CUSTOM)?.group).toBe("access");
+    // The cluster-scoped pair ignores the namespace filter.
+    expect(isClusterScoped("clusterroles", CUSTOM)).toBe(true);
+    expect(isClusterScoped("clusterrolebindings", CUSTOM)).toBe(true);
+    expect(isClusterScoped("roles", CUSTOM)).toBe(false);
   });
 
   // So a pod's "service account" field links, instead of dead-ending.
@@ -284,6 +295,32 @@ describe("tabsFor", () => {
     for (const kind of ["services", "configmaps", "secrets", "helm"]) {
       expect(tabsFor(kind, false), kind).not.toContain("logs");
     }
+  });
+
+  /**
+   * B54: the Diff tab is offered wherever an API object's YAML exists — but not
+   * on a Helm release, whose "YAML" is a rendered manifest with no last-applied
+   * baseline to diff against.
+   */
+  it("offers Diff on API objects, not on a Helm release", () => {
+    expect(tabsFor("deployments", false)).toContain("diff");
+    expect(tabsFor("pods", true)).toContain("diff");
+    expect(tabsFor("nodes", false)).toContain("diff");
+    expect(tabsFor("helm", false)).not.toContain("diff");
+  });
+
+  /**
+   * B55: Topology is offered where the graph has something to walk (ownership
+   * chains + selector/backend references), not on the cluster/config kinds or
+   * a Helm release.
+   */
+  it("offers Topology on graph-capable kinds only", () => {
+    for (const kind of ["deployments", "pods", "services", "ingresses"]) {
+      expect(tabsFor(kind, kind === "pods"), kind).toContain("topology");
+    }
+    expect(tabsFor("nodes", false)).not.toContain("topology");
+    expect(tabsFor("configmaps", false)).not.toContain("topology");
+    expect(tabsFor("helm", false)).not.toContain("topology");
   });
 
   /**

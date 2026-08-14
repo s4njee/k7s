@@ -25,6 +25,8 @@ import { PodMetricsTab } from "./PodMetricsTab";
 import { ShellTab } from "./ShellTab";
 import { NodeShellTab } from "./NodeShellTab";
 import { YamlTab } from "./YamlTab";
+import { DiffTab } from "./DiffTab";
+import { TopologyTab } from "./TopologyTab";
 import { EventsTab } from "./EventsTab";
 import { ActionsMenu } from "./ActionsMenu";
 import type { DrainProgress } from "../../providers/types";
@@ -60,6 +62,14 @@ export function DetailPanel() {
   // Custom kinds resolve their label from discovery, so this is a runtime lookup.
   const kindLabel = kindMeta(nav, customKinds)?.label ?? nav;
 
+  // The current context's bookmarks, for the ☆ toggle (B56).
+  const context = useStore((s) => s.connection.context ?? "");
+  const bookmarks = useStore((s) => s.bookmarksByContext[context] ?? []);
+  const toggleBookmark = useStore((s) => s.toggleBookmark);
+  const isBookmarked = bookmarks.some(
+    (b) => b.kind === nav && (b.namespace ?? "") === (row.namespace ?? "") && b.name === row.name,
+  );
+
   // data-surface="panel": in light mode the inspector is dark chrome (tokens.css).
   return (
     <div className={styles.panel} data-surface="panel">
@@ -68,6 +78,16 @@ export function DetailPanel() {
           <span className={styles.statusDot} style={{ background: statusColor }} />
           <div className={styles.name} title={row.name}>
             {row.name}
+          </div>
+          {/* B56: bookmark this resource for the sidebar's quick access. */}
+          <div
+            className={`${styles.bookmark} ${isBookmarked ? styles.bookmarkOn : ""}`}
+            title={isBookmarked ? "remove bookmark" : "bookmark for quick access"}
+            onClick={() =>
+              toggleBookmark({ kind: nav, namespace: row.namespace, name: row.name })
+            }
+          >
+            {isBookmarked ? "★" : "☆"}
           </div>
           <ActionsMenu kind={nav} row={row} onError={setActionError} onDeleted={closeDetail} />
           <div className={styles.close} onClick={closeDetail} title="close">
@@ -140,6 +160,8 @@ export function DetailPanel() {
           (B53), so it's a different component behind the same tab. */}
       {activeTab === "shell" && nav === "nodes" && <NodeShellTab />}
       {activeTab === "yaml" && <YamlTab />}
+      {activeTab === "diff" && <DiffTab />}
+      {activeTab === "topology" && <TopologyTab />}
       {activeTab === "events" && <EventsTab />}
     </div>
   );

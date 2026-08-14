@@ -290,6 +290,37 @@
   color: var(--text-muted);
 }
 
+/* Bookmarks (B56): a collapsible section of quick-access resources below the
+   cluster switcher, above the kind nav. */
+.bookmarks {
+  padding-top: 6px;
+}
+.bookmarksHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin: 0 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.bookmarksHeader:hover {
+  background: var(--bg-hover);
+}
+.bookmarksTitle {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+/* The status dot / not-found marker at a bookmark's right edge. */
+.bookmarkStatus {
+  flex: none;
+  font-size: 9px;
+}
+
 /* Problems count badge (B32): a soft pill toned by the worst severity. */
 .problemBadge {
   font-family: var(--font-mono);

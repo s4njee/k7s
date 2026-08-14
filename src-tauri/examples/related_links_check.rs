@@ -36,6 +36,10 @@ fn gvk_for(kind: &str) -> Option<(&'static str, &'static str, &'static str)> {
         "deployments" => ("apps", "v1", "Deployment"),
         "replicasets" => ("apps", "v1", "ReplicaSet"),
         "statefulsets" => ("apps", "v1", "StatefulSet"),
+        "roles" => ("rbac.authorization.k8s.io", "v1", "Role"),
+        "clusterroles" => ("rbac.authorization.k8s.io", "v1", "ClusterRole"),
+        "rolebindings" => ("rbac.authorization.k8s.io", "v1", "RoleBinding"),
+        "clusterrolebindings" => ("rbac.authorization.k8s.io", "v1", "ClusterRoleBinding"),
         _ => return None,
     })
 }
@@ -204,6 +208,18 @@ async fn main() -> anyhow::Result<()> {
         .max_by_key(|r| r.manifest.matches("kind: ").count())
     {
         panels.push(("helm", rel.namespace.clone(), rel.name.clone()));
+    }
+    // B49: the ServiceAccount panel walks the RBAC chain (bindings → roles), so
+    // it joins the walk. Prefer the freya `prometheus` SA the backlog names.
+    let sas: Api<k8s_openapi::api::core::v1::ServiceAccount> = Api::all(client.clone());
+    let sa_list = sas.list(&ListParams::default()).await?;
+    if let Some(sa) = sa_list
+        .items
+        .iter()
+        .find(|s| s.metadata.name.as_deref() == Some("prometheus"))
+        .or_else(|| sa_list.items.first())
+    {
+        panels.push(("serviceaccounts", sa.namespace().unwrap_or_default(), sa.name_any()));
     }
 
     for (kind, pns, pname) in &panels {

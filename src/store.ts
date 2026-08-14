@@ -22,6 +22,7 @@ import type {
   Row,
 } from "./providers/types";
 import { hasLogs, KIND_ORDER } from "./lib/kinds";
+import { sameBookmark, type Bookmark } from "./lib/bookmarks";
 import { deriveProblems } from "./lib/problems";
 import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
 import { cachedTheme, prefersDark } from "./lib/theme";
@@ -35,7 +36,15 @@ import type { SinceOption } from "./lib/logview";
 export const LOG_BUFFER_CAP = DEFAULT_SETTINGS.logBufferCap;
 
 /** Detail-panel tab identifiers. */
-export type DetailTab = "logs" | "properties" | "metrics" | "shell" | "yaml" | "events";
+export type DetailTab =
+  | "logs"
+  | "properties"
+  | "metrics"
+  | "shell"
+  | "yaml"
+  | "events"
+  | "diff"
+  | "topology";
 
 /** Which dropdown menu (if any) is currently open — only one at a time. */
 export type OpenMenu = "cluster" | "ns" | null;
@@ -158,6 +167,8 @@ export interface AppState {
    * re-imported on boot, so imported contexts survive a relaunch.
    */
   importedFiles: string[];
+  /** Bookmarks (B56), per cluster context — switching contexts swaps the list. */
+  bookmarksByContext: Record<string, Bookmark[]>;
 
   // ---------- navigation & filtering ----------
   /** Active resource kind (drives the table + breadcrumb); a custom id for CRDs. */
@@ -198,6 +209,8 @@ export interface AppState {
   systemDark: boolean;
   /** Whether the settings panel is open. */
   settingsOpen: boolean;
+  /** Whether the Create-from-YAML modal is open (B36). */
+  createOpen: boolean;
   /** Whether the command palette is open (B28). */
   paletteOpen: boolean;
   podMetrics: PodMetricsMap;
@@ -264,6 +277,12 @@ export interface AppState {
   setImportedFiles: (paths: string[]) => void;
   /** Remember an imported kubeconfig path (no-op if already known). */
   addImportedFile: (path: string) => void;
+  /** Add a bookmark to the current context's list (B56), deduplicated. */
+  addBookmark: (bookmark: Bookmark) => void;
+  /** Remove a bookmark from the current context's list (B56). */
+  removeBookmark: (bookmark: Bookmark) => void;
+  /** Add or remove a bookmark — the sidebar and the action menu toggle it. */
+  toggleBookmark: (bookmark: Bookmark) => void;
   setClusterStatus: (s: ClusterStatus) => void;
   setWatchCount: (n: number) => void;
   setRows: (kind: KindId, rows: Row[]) => void;
@@ -292,6 +311,7 @@ export interface AppState {
   /** Drop the multi-row selection, leaving the detail panel alone. */
   clearSelection: () => void;
   setSettingsOpen: (open: boolean) => void;
+  setCreateOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
   /**
    * Go to a kind, optionally selecting a row within it (B28).
@@ -343,6 +363,7 @@ export const useStore = create<AppState>((set) => ({
   watchCount: 0,
   contexts: [],
   importedFiles: [],
+  bookmarksByContext: {},
 
   nav: "pods",
   namespace: "all",
@@ -361,6 +382,7 @@ export const useStore = create<AppState>((set) => ({
   selection: EMPTY_SELECTION,
   systemDark: prefersDark(),
   settingsOpen: false,
+  createOpen: false,
   paletteOpen: false,
   podMetrics: {},
   nodeMetrics: {},
@@ -419,6 +441,39 @@ export const useStore = create<AppState>((set) => ({
     set((s) =>
       s.importedFiles.includes(path) ? s : { importedFiles: [...s.importedFiles, path] },
     ),
+  addBookmark: (bookmark) =>
+    set((s) => {
+      const ctx = s.connection.context ?? "";
+      const list = s.bookmarksByContext[ctx] ?? [];
+      if (list.some((b) => sameBookmark(b, bookmark))) return s;
+      return {
+        bookmarksByContext: { ...s.bookmarksByContext, [ctx]: [...list, bookmark] },
+      };
+    }),
+  removeBookmark: (bookmark) =>
+    set((s) => {
+      const ctx = s.connection.context ?? "";
+      const list = s.bookmarksByContext[ctx] ?? [];
+      const next = list.filter((b) => !sameBookmark(b, bookmark));
+      if (next.length === list.length) return s;
+      return { bookmarksByContext: { ...s.bookmarksByContext, [ctx]: next } };
+    }),
+  toggleBookmark: (bookmark) =>
+    set((s) => {
+      const ctx = s.connection.context ?? "";
+      const list = s.bookmarksByContext[ctx] ?? [];
+      if (list.some((b) => sameBookmark(b, bookmark))) {
+        return {
+          bookmarksByContext: {
+            ...s.bookmarksByContext,
+            [ctx]: list.filter((b) => !sameBookmark(b, bookmark)),
+          },
+        };
+      }
+      return {
+        bookmarksByContext: { ...s.bookmarksByContext, [ctx]: [...list, bookmark] },
+      };
+    }),
   setClusterStatus: (status) => set({ clusterStatus: status }),
   setWatchCount: (n) => set({ watchCount: n }),
   setRows: (kind, rows) =>
@@ -486,6 +541,7 @@ export const useStore = create<AppState>((set) => ({
       return { settings, logBuffer };
     }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setCreateOpen: (open) => set({ createOpen: open }),
   setSystemDark: (dark) => set({ systemDark: dark }),
   setSelection: (selection) => set({ selection }),
   clearSelection: () => set({ selection: EMPTY_SELECTION }),

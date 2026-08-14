@@ -156,6 +156,24 @@ pub struct InvolvedRef {
     pub api_version: Option<String>,
 }
 
+/// The object an Event refers to (its `involvedObject`), for click-through
+/// navigation (B33). `kind` + the group from `api_version` resolve to a nav id
+/// — including CRDs, where the kind alone can be ambiguous across groups.
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EventInvolved {
+    /// Kubernetes Kind, e.g. "Pod", "Deployment", "Application".
+    pub kind: String,
+    /// Name of the object.
+    pub name: String,
+    /// Namespace of the object (None for cluster-scoped).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
+    /// API version, e.g. "argoproj.io/v1alpha1". The group part disambiguates CRDs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_version: Option<String>,
+}
+
 /// Extra fields carried only by job rows (B32). The problems view needs to know
 /// a job failed outright, which the COMPLETIONS cell can't say (a running job and
 /// a failed one both show "0/1" amber) — only the status conditions can.
@@ -164,6 +182,15 @@ pub struct InvolvedRef {
 pub struct JobMeta {
     /// The job has a `Failed` condition: it terminated without succeeding.
     pub failed: bool,
+}
+
+/// Extra fields carried only by CronJob rows (B47). The suspend state gates the
+/// Suspend/Resume actions and tones the SUSPENDED column.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CronMeta {
+    /// `spec.suspend` — the CronJob's schedule is paused.
+    pub suspended: bool,
 }
 
 /// Extra fields carried only by pod rows, used to drive the detail panel.
@@ -225,4 +252,7 @@ pub struct Row {
     /// Job status beyond the cells, for the problems view (B32).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job: Option<JobMeta>,
+    /// CronJob state beyond the cells (B47).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cron: Option<CronMeta>,
 }

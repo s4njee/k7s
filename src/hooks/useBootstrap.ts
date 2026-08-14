@@ -110,6 +110,7 @@ export function useBootstrap(): void {
             uiFont: prefs.uiFont ?? undefined,
             accent: prefs.accent ?? undefined,
             reduceMotion: prefs.reduceMotion ?? undefined,
+            notifications: prefs.notifications ?? undefined,
             nodeShellImage: prefs.nodeShellImage ?? undefined,
           });
           // Custom kinds aren't in KIND_META and aren't discovered yet at this
@@ -123,6 +124,8 @@ export function useBootstrap(): void {
           restore.namespace =
             typeof prefs.namespace === "string" ? prefs.namespace : restore.settings.defaultNamespace;
           if (typeof prefs.showTimestamps === "boolean") restore.showTimestamps = prefs.showTimestamps;
+          // Bookmarks are keyed by context, so each context keeps its own list (B56).
+          if (prefs.bookmarks) restore.bookmarksByContext = prefs.bookmarks;
           if (Object.keys(restore).length) useStore.setState(restore);
         }
 
@@ -152,6 +155,8 @@ export function useBootstrap(): void {
             showTimestamps: s.showTimestamps,
             // Persisted so imported contexts survive a relaunch (B17).
             importedFiles: s.importedFiles,
+            // Bookmarks keyed by context (B56).
+            bookmarks: s.bookmarksByContext,
             // Settings (B23). The backend reads the poll intervals and shell
             // command straight out of this same file.
             ...s.settings,

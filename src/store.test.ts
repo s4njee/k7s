@@ -438,3 +438,34 @@ describe("multi-row selection (B39)", () => {
     expect(useStore.getState().selectedRow?.name).toBe("api");
   });
 });
+
+describe("bookmarks (B56)", () => {
+  beforeEach(() => {
+    useStore.setState({ connection: { phase: "connected", context: "prod-cluster", clusterName: "prod" } });
+    useStore.setState({ bookmarksByContext: {} });
+  });
+
+  it("adds a bookmark to the current context and deduplicates", () => {
+    useStore.getState().addBookmark({ kind: "pods", namespace: "prod", name: "wiki" });
+    useStore.getState().addBookmark({ kind: "pods", namespace: "prod", name: "wiki" });
+    useStore.getState().addBookmark({ kind: "pods", namespace: "prod", name: "api" });
+    const list = useStore.getState().bookmarksByContext["prod-cluster"];
+    expect(list.length).toBe(2);
+  });
+
+  it("toggles a bookmark on and off", () => {
+    const b = { kind: "services", namespace: "prod", name: "api" };
+    useStore.getState().toggleBookmark(b);
+    expect(useStore.getState().bookmarksByContext["prod-cluster"].length).toBe(1);
+    useStore.getState().toggleBookmark(b);
+    expect(useStore.getState().bookmarksByContext["prod-cluster"] ?? []).toEqual([]);
+  });
+
+  it("keeps each context's bookmarks separate", () => {
+    useStore.getState().addBookmark({ kind: "pods", namespace: "prod", name: "wiki" });
+    useStore.setState({ connection: { phase: "connected", context: "other-cluster", clusterName: "other" } });
+    useStore.getState().addBookmark({ kind: "pods", namespace: "prod", name: "api" });
+    expect(useStore.getState().bookmarksByContext["prod-cluster"].length).toBe(1);
+    expect(useStore.getState().bookmarksByContext["other-cluster"].length).toBe(1);
+  });
+});

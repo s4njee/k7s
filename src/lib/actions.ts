@@ -28,7 +28,14 @@ export type ActionId =
   | "cordon"
   | "uncordon"
   | "drain"
-  | "delete";
+  | "delete"
+  // Batch verbs (B47).
+  | "run-now"
+  | "suspend"
+  | "resume"
+  | "retry"
+  // B56.
+  | "bookmark";
 
 export interface ActionDef {
   id: ActionId;
@@ -57,6 +64,15 @@ const ALL: ActionDef[] = [
   // draining several nodes at once is how you accidentally evict everything with
   // nowhere left to reschedule it.
   { id: "drain", label: "Drain…", danger: true, mode: "confirm", bulk: false },
+  // Batch verbs (B47): the workload verbs skip these kinds, and each is something
+  // kubectl makes annoyingly manual.
+  { id: "run-now", label: "Run now…", mode: "confirm", bulk: false },
+  { id: "suspend", label: "Suspend", mode: "confirm", bulk: true },
+  { id: "resume", label: "Resume", mode: "confirm", bulk: true },
+  { id: "retry", label: "Retry…", mode: "confirm", bulk: false },
+  // B56: bookmarking is per-object (a selection has no single target), and the
+  // label flips to Unbookmark when the row is already bookmarked.
+  { id: "bookmark", label: "Bookmark", mode: "immediate", bulk: false },
   { id: "delete", label: "Delete…", danger: true, mode: "confirm", bulk: true },
 ];
 
@@ -76,12 +92,25 @@ function applies(id: ActionId, kind: KindId, row: Row): boolean {
       return kind === "nodes";
     case "restart":
       return isRestartable(kind);
+    case "suspend":
+      // Only a running schedule can be suspended — and a suspended one resumes.
+      return kind === "cronjobs" && row.cron?.suspended === false;
+    case "resume":
+      return kind === "cronjobs" && row.cron?.suspended === true;
+    case "run-now":
+      return kind === "cronjobs";
+    case "retry":
+      // A running job has nothing to retry; only a failed one does (B47).
+      return kind === "jobs" && row.job?.failed === true;
     case "view-pods":
       // Needs a selector to build the filter from; a workload without one would
       // navigate to an empty table.
       return isRolloutKind(kind) && !!row.selector && Object.keys(row.selector).length > 0;
     case "forward":
       return kind === "pods" || kind === "services";
+    case "bookmark":
+      // Any navigable object can be bookmarked — Events are a feed, not an object.
+      return kind !== "events" && kind !== "problems";
   }
 }
 
@@ -149,6 +178,14 @@ export function confirmText(id: ActionId, kind: KindId, rows: Row[]): string {
       return `Cordon ${what}?${names}`;
     case "uncordon":
       return `Uncordon ${what}?${names}`;
+    case "suspend":
+      return `Suspend ${what}?${names} The schedule stops firing until you resume it.`;
+    case "resume":
+      return `Resume ${what}?${names} The schedule starts firing again.`;
+    case "run-now":
+      return `Run ${what} now?${names} Creates a Job from its template, owned by nothing so it can be deleted on its own.`;
+    case "retry":
+      return `Retry ${what}?${names} Deletes the failed Job and recreates it from its own spec, fresh and unowned.`;
     default:
       return `${id} ${what}?${names}`;
   }
@@ -201,7 +238,9 @@ export interface BulkOutcome {
  */
 export async function runBulk<T extends { name: string }>(
   rows: T[],
-  fn: (row: T) => Promise<void>,
+  // The return value is deliberately ignored: some actions resolve with useful
+  // payloads (run-now/retry return the new object's name), and it's not shown.
+  fn: (row: T) => Promise<unknown>,
 ): Promise<BulkOutcome> {
   const results = await Promise.allSettled(rows.map(fn));
   const failures: BulkOutcome["failures"] = [];

@@ -4,6 +4,7 @@
 //! Everything the frontend sees flows through the DTOs in [`dto`] and the Tauri
 //! events named in [`events`].
 
+pub mod batch;
 pub mod client;
 pub mod discovery;
 pub mod drain;
@@ -22,6 +23,8 @@ pub mod portforward;
 pub mod promql;
 pub mod properties;
 pub mod restart;
+pub mod tls;
+pub mod topology;
 pub mod watchers;
 
 use serde::{Deserialize, Serialize};
@@ -50,6 +53,12 @@ pub enum ResourceKind {
     Secrets,
     /// The identity a pod runs as.
     Serviceaccounts,
+    /// RBAC (B49): roles and the bindings that grant them. Namespaced first,
+    /// then the cluster-scoped pair.
+    Roles,
+    Clusterroles,
+    Rolebindings,
+    Clusterrolebindings,
     /// Storage claims (namespaced) and the volumes that back them (cluster-scoped).
     Persistentvolumeclaims,
     Persistentvolumes,
@@ -80,6 +89,10 @@ impl ResourceKind {
             ResourceKind::Configmaps => "configmaps",
             ResourceKind::Secrets => "secrets",
             ResourceKind::Serviceaccounts => "serviceaccounts",
+            ResourceKind::Roles => "roles",
+            ResourceKind::Clusterroles => "clusterroles",
+            ResourceKind::Rolebindings => "rolebindings",
+            ResourceKind::Clusterrolebindings => "clusterrolebindings",
             ResourceKind::Persistentvolumeclaims => "persistentvolumeclaims",
             ResourceKind::Persistentvolumes => "persistentvolumes",
             ResourceKind::Storageclasses => "storageclasses",

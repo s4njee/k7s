@@ -37,6 +37,7 @@ import type {
   ShellHandle,
   Row,
   SavedLog,
+  Topology,
   Unsub,
   YamlDiff,
 } from "../types";
@@ -158,6 +159,16 @@ export class TauriProvider implements DataProvider {
     });
   }
 
+  copySecretValue(ref: ResourceRef, key: string): Promise<void> {
+    // The value is decoded and written to the clipboard in Rust; the webview
+    // never sees it (B37).
+    return invoke<void>("copy_secret_value", {
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+      key,
+    });
+  }
+
   deleteResource(ref: ResourceRef): Promise<void> {
     return invoke<void>("delete_resource", {
       kind: ref.kind,
@@ -200,6 +211,61 @@ export class TauriProvider implements DataProvider {
 
   setCordon(node: string, unschedulable: boolean): Promise<void> {
     return invoke<void>("set_cordon", { name: node, unschedulable });
+  }
+
+  setCronjobSuspend(ref: ResourceRef, suspended: boolean): Promise<void> {
+    return invoke<void>("set_cronjob_suspend", {
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+      suspended,
+    });
+  }
+
+  runCronjob(ref: ResourceRef): Promise<string> {
+    return invoke<string>("run_cronjob", {
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+    });
+  }
+
+  retryJob(ref: ResourceRef): Promise<string> {
+    return invoke<string>("retry_job", {
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+    });
+  }
+
+  notifyProblem(ref: ResourceRef, reason: string): Promise<void> {
+    return invoke<void>("notify_problem", {
+      kind: ref.kind,
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+      reason,
+    });
+  }
+
+  createResource(
+    yaml: string,
+    namespace: string,
+    dryRun: boolean,
+  ): Promise<{ proposed: string; created?: { kind: KindId; namespace?: string; name: string } }> {
+    return invoke("create_resource", { yaml, namespace, dryRun });
+  }
+
+  getDiff(ref: ResourceRef): Promise<{ live: string; baseline?: string }> {
+    return invoke("get_diff", {
+      kind: ref.kind,
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+    });
+  }
+
+  getTopology(ref: ResourceRef): Promise<Topology> {
+    return invoke<Topology>("get_topology", {
+      kind: ref.kind,
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+    });
   }
 
   drainNode(node: string): Promise<void> {

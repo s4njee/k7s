@@ -3,6 +3,10 @@
  * from Prometheus, drawn as two compact inline-SVG sparklines with the current
  * values.
  *
+ * B58: Overlay resource requests/limits as reference lines on the sparklines.
+ * Requests are dashed, limits are solid. The area above 80% of limit tints amber,
+ * above 95% tints red. Tooltip shows exact values.
+ *
  * Fetch-on-open — the backend fires exactly two range queries (one per metric),
  * once per pod selection; switching pods or closing the panel discards any
  * in-flight result. A cluster without Prometheus resolves empty and the header
@@ -13,9 +17,13 @@ import { useEffect, useState } from "react";
 import styles from "./PodSparklines.module.css";
 import { getProvider } from "../../providers";
 import { formatCpu, formatMem } from "../../lib/format";
-import type { PodPoint } from "../../providers/types";
+import type { PodPoint, PodResources } from "../../providers/types";
 
-export function PodSparklines({ namespace, name }: { namespace: string; name: string }) {
+export function PodSparklines({
+  namespace,
+  name,
+  resources,
+}: { namespace: string; name: string; resources?: PodResources }) {
   const [points, setPoints] = useState<PodPoint[] | null>(null);
 
   useEffect(() => {
@@ -42,6 +50,19 @@ export function PodSparklines({ namespace, name }: { namespace: string; name: st
   if (!points || points.length < 2) return null;
 
   const latest = points[points.length - 1];
+  const cpuLimit = resources?.cpuLimitMillis;
+  const cpuRequest = resources?.cpuRequestMillis;
+  const memLimit = resources?.memLimitBytes;
+  const memRequest = resources?.memRequestBytes;
+
+  // Compute thresholds for tinting
+  const cpuLimitPct = cpuLimit ? (latest.cpuMillis / cpuLimit) * 100 : 0;
+  const memLimitPct = memLimit ? (latest.memBytes / memLimit) * 100 : 0;
+  const cpuWarn = cpuLimitPct > 95;
+  const cpuWarnAmber = cpuLimitPct > 80 && !cpuWarn;
+  const memWarn = memLimitPct > 95;
+  const memWarnAmber = memLimitPct > 80 && !memWarn;
+
   return (
     <div className={styles.row}>
       <SparklineCell
@@ -49,42 +70,86 @@ export function PodSparklines({ namespace, name }: { namespace: string; name: st
         value={formatCpu(latest.cpuMillis)}
         series={points.map((p) => p.cpuMillis)}
         color="var(--accent)"
+        limit={cpuLimit}
+        request={cpuRequest}
+        warn={cpuWarn}
+        warnAmber={cpuWarnAmber}
       />
       <SparklineCell
         label="mem"
         value={formatMem(latest.memBytes)}
         series={points.map((p) => p.memBytes)}
         color="var(--status-ok)"
+        limit={memLimit}
+        request={memRequest}
+        warn={memWarn}
+        warnAmber={memWarnAmber}
       />
     </div>
   );
 }
 
-/** One labelled sparkline: the label + current value, with the history below. */
+/** One labelled sparkline: the label + current value, with the history below.
+ *  B58: optional limit/request lines and warning tints.
+ */
 function SparklineCell({
   label,
   value,
   series,
   color,
+  limit,
+  request,
+  warn,
+  warnAmber,
 }: {
   label: string;
   value: string;
   series: number[];
   color: string;
+  limit?: number | null;
+  request?: number | null;
+  warn?: boolean;
+  warnAmber?: boolean;
 }) {
+  const limitY = limit != null ? H - PAD - ((limit - min) / span) * (H - PAD * 2) : null;
+  const requestY = request != null ? H - PAD - ((request - min) / span) * (H - PAD * 2) : null;
+
   return (
     <div className={styles.cell}>
       <div className={styles.head}>
         <span className={styles.label}>{label}</span>
         <span className={styles.value}>{value}</span>
       </div>
-      <Sparkline series={series} color={color} />
+      <Sparkline
+        series={series}
+        color={color}
+        limitY={limitY}
+        requestY={requestY}
+        warn={warn}
+        warnAmber={warnAmber}
+      />
     </div>
   );
 }
 
-/** A minimal inline-SVG sparkline: a normalised line over a soft area fill. */
-function Sparkline({ series, color }: { series: number[]; color: string }) {
+/** A minimal inline-SVG sparkline: a normalised line over a soft area fill.
+ *  B58: supports limit/request reference lines and warning tints.
+ */
+function Sparkline({
+  series,
+  color,
+  limitY,
+  requestY,
+  warn,
+  warnAmber,
+}: {
+  series: number[];
+  color: string;
+  limitY?: number | null;
+  requestY?: number | null;
+  warn?: boolean;
+  warnAmber?: boolean;
+}) {
   const W = 96;
   const H = 22;
   const PAD = 2;
@@ -106,8 +171,53 @@ function Sparkline({ series, color }: { series: number[]; color: string }) {
   const firstX = pts[0][0].toFixed(1);
   const area = `${line} L${lastX},${H} L${firstX},${H} Z`;
 
+  // Warning tints: red above 95%, amber 80-95%
+  const warnAmberY = max - (max - min) * 0.8;
+  const warnRedY = max - (max - min) * 0.95;
+
   return (
     <svg className={styles.spark} width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
+      {/* Inline style (not an attribute) so the CSS var resolves. */}
+      {/* Warning tints (B58): red >95%, amber 80-95% */}
+      {warn && (
+        <>
+          <rect
+            x={0}
+            y={0}
+            width={W}
+            height={H - Math.max(warnRedY, 0)}
+            style={{ fill: "var(--status-err)", opacity: 0.12 }}
+          />
+          {warnAmber && (
+            <rect
+              x={0}
+              y={Math.max(warnRedY, 0)}
+              width={W}
+              height={Math.max(0, warnRedY - warnAmberY)}
+              style={{ fill: "var(--status-warn)", opacity: 0.12 }}
+            />
+          )}
+        )}
+      {/* Limit line (solid red) */}
+      {limitY != null && (
+        <line
+          x1={0}
+          y1={limitY}
+          x2={W}
+          y2={limitY}
+          className={styles.limitLine}
+        />
+      )}
+      {/* Request line (dashed gray) */}
+      {requestY != null && (
+        <line
+          x1={0}
+          y1={requestY}
+          x2={W}
+          y2={requestY}
+          className={styles.requestLine}
+        />
+      )}
       {/* Inline style (not an attribute) so the CSS var resolves. */}
       <path d={area} style={{ fill: color, opacity: 0.14 }} />
       <path d={line} style={{ fill: "none", stroke: color, strokeWidth: 1.4 }} />

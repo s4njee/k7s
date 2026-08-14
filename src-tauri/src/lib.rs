@@ -4,7 +4,7 @@
 //! registered here; it never speaks to the API server directly. Live data is
 //! pushed back to the webview via Tauri events (see the `kube` module).
 
-mod commands;
+pub mod commands;
 mod error;
 // Public so the live verification harnesses in examples/ can exercise the real
 // mappers rather than a copy of them; nothing outside this crate consumes it.
@@ -48,6 +48,10 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         // The dialog plugin backs the native file picker for "Import kubeconfig".
         .plugin(tauri_plugin_dialog::init())
+        // Backs the clipboard write in the Secret "copy value" command (B37).
+        .plugin(tauri_plugin_clipboard_manager::init())
+        // Backs the native problem notifications (B50).
+        .plugin(tauri_plugin_notification::init())
         // Remembers the window's size, position and monitor across launches (B22),
         // saving on exit and restoring on show. There's nothing to gate for demo
         // mode: that runs as a plain browser page with no Tauri backend at all, so
@@ -79,7 +83,12 @@ pub fn run() {
             commands::save_prefs,
             commands::connect,
             commands::get_yaml,
+            commands::get_diff,
             commands::apply_yaml,
+            commands::dry_run_yaml,
+            commands::create_resource,
+            commands::copy_secret_value,
+            commands::notify_problem,
             commands::dry_run_yaml,
             commands::delete_resource,
             commands::scale_resource,
@@ -87,9 +96,13 @@ pub fn run() {
             commands::restart_pod,
             commands::restart_rollout,
             commands::undo_rollout,
+            commands::set_cronjob_suspend,
+            commands::run_cronjob,
+            commands::retry_job,
             commands::drain_node,
             commands::get_events,
             commands::get_properties,
+            commands::get_topology,
             commands::watch_custom_kind,
             commands::node_history,
             commands::pod_history,

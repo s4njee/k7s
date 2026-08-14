@@ -74,9 +74,120 @@ export function mockProperties(ref: ResourceRef): Properties | null {
       return pvProperties(ref);
     case "replicasets":
       return replicaSetProperties(ref);
+    case "secrets":
+      return secretProperties(ref);
+    case "serviceaccounts":
+      return serviceAccountProperties(ref);
+    case "rolebindings":
+      return roleBindingProperties(ref);
+    case "clusterrolebindings":
+      return clusterRoleBindingProperties(ref);
     default:
       return null;
   }
+}
+
+/** Mock ServiceAccount panel (B49): the resolved RBAC chain — the bindings that
+ *  name the account, and those roles' rules. The panoptes prometheus SA shows
+ *  the nodes/metrics + nodes/proxy grants the backlog's accept names. */
+function serviceAccountProperties(ref: ResourceRef): Properties {
+  const prometheus = ref.name === "prometheus" && ref.namespace === "panoptes";
+  return {
+    sections: [
+      fields("Overview", [
+        f("secrets", "0"),
+        f("image pull secrets", "0"),
+        f("automount token", "yes"),
+      ]),
+      table(
+        "Role bindings",
+        ["BINDING", "TYPE", "ROLE"],
+        prometheus
+          ? [
+              [
+                link("panoptes-prometheus", "rolebindings", "panoptes-prometheus", ref.namespace, "primary"),
+                c("RoleBinding"),
+                link("prometheus", "clusterroles", "prometheus"),
+              ],
+            ]
+          : [],
+        "no bindings grant this account",
+      ),
+      table(
+        "Rules",
+        ["ROLE", "VERB", "RESOURCES", "API GROUPS"],
+        prometheus
+          ? [
+              [n("prometheus"), c("get,list,watch"), c("nodes/metrics"), c("—")],
+              [n("prometheus"), c("get,list,watch"), c("nodes/proxy"), c("—")],
+            ]
+          : [],
+        "no rules (the roles are empty or unreadable)",
+      ),
+    ],
+  };
+}
+
+/** Mock RoleBinding panel (B49): the role granted and the subjects, with a
+ *  ServiceAccount subject linking to it. */
+function roleBindingProperties(ref: ResourceRef): Properties {
+  return {
+    sections: [
+      fields("Overview", [
+        { label: "role", value: link("prometheus", "clusterroles", "prometheus") },
+        f("subjects", "1"),
+      ]),
+      table(
+        "Subjects",
+        ["KIND", "NAME", "NAMESPACE"],
+        [
+          [c("ServiceAccount"), link("prometheus", "serviceaccounts", "prometheus", ref.namespace), c(ref.namespace ?? "")],
+        ],
+        "no subjects",
+      ),
+    ],
+  };
+}
+
+/** Mock ClusterRoleBinding panel (B49). */
+function clusterRoleBindingProperties(_ref: ResourceRef): Properties {
+  return {
+    sections: [
+      fields("Overview", [
+        { label: "role", value: link("system:basic-user", "clusterroles", "system:basic-user") },
+        f("subjects", "1"),
+      ]),
+      table(
+        "Subjects",
+        ["KIND", "NAME", "NAMESPACE"],
+        [[c("Group"), c("system:authenticated"), c("—")]],
+        "no subjects",
+      ),
+    ],
+  };
+}
+
+/** Mock Secret panel (B37): an Overview plus a Data table of keys (no values —
+ *  those are reachable only through the clipboard command). */
+function secretProperties(_ref: ResourceRef): Properties {
+  return {
+    sections: [
+      fields("Overview", [
+        f("type", "Opaque"),
+        f("keys", "2"),
+        f("immutable", "no"),
+      ]),
+      table(
+        "Data",
+        ["KEY", "SOURCE"],
+        [
+          [n("password"), c("data (base64)")],
+          [n("username"), c("stringData")],
+        ],
+        "no data",
+      ),
+    ],
+  };
 }
 
 /** Mock PVC panel (B46): the claim's state/links, who mounts it, and events. */

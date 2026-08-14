@@ -201,7 +201,8 @@ pods and owner Deployment.
 in the CodeMirror editor, `create` it via the dynamic API (kind/ns parsed from
 the manifest). **Accept:** creating a scratch ConfigMap and a Deployment works,
 which also gives B34b its live fixture; the dry-run preview shipped below
-applies to the create path too.
+applies to the create path too. *(dry-run applies — `create_resource` runs the
+manifest past the server before writing; the live create is the check)*
 
 ### B37 — Secret values: copy without display
 **Do:** The app's stance is that Secret values never render — but *using* a
@@ -210,7 +211,8 @@ whose command decodes and writes the value to the clipboard **in Rust**
 (`tauri-plugin-clipboard-manager`), so the plaintext never enters the
 webview/DOM; UI shows only a "copied ✓" flash. **Accept:** pasted value
 matches `kubectl get secret … | base64 -d`; the value never appears in Tauri
-event traffic; YAML/table remain redacted.
+event traffic; YAML/table remain redacted. *(decode pinned by unit tests; the
+clipboard write itself is the live check)*
 
 ### B47 — CronJob and Job verbs
 *Why: the workload verbs shipped (scale, restart, drain) skip the batch kinds
@@ -225,7 +227,8 @@ recreate from its own spec, minus controller-owned fields). All through the
 actions menu with the usual confirm. **Accept:** suspending freya's cronjobs
 stops schedule-time Jobs appearing; Run now produces a Job that runs to
 completion and is visibly owned by nothing (so it's deletable); unit tests pin
-the jobTemplate copy (immutable fields stripped).
+the jobTemplate copy (immutable fields stripped). *(the two live checks need a
+cluster — the copy/mechanics are pinned by unit tests)*
 
 ### B48 — TLS certificate inspection
 *Why: `kubernetes.io/tls` Secrets hold certs whose expiry is the thing that
@@ -239,7 +242,8 @@ expired. The Ingress TLS table inherits the tone on its SECRET link, so an
 expiring cert is visible from the routing side. **Accept:** a live TLS secret
 shows correct fields vs `openssl x509 -text`; an expired fixture cert reads
 red; the private key never appears in any payload (grep the event traffic, the
-B37 proof).
+B37 proof). *(parser pinned by tests; the live `openssl` cross-check is the
+check)*
 
 ### B49 — RBAC: who can do what
 *Why: 16 Roles / 83 ClusterRoles / 86 bindings on freya and the app shows none
@@ -253,7 +257,8 @@ role's rules rendered as a compact verb×resource table. **Accept:** freya's
 `prometheus` SA shows the `panoptes-prometheus` binding → ClusterRole with
 `nodes/metrics` + `nodes/proxy` — the exact chain debugged by hand during the
 Prometheus fix; binding subjects that reference absent SAs render with the
-`ref_cell` not-found treatment.
+`ref_cell` not-found treatment. *(chain verified live on freya — 82 links,
+0 broken)*
 
 ### B50 — Warning notifications
 *Why: the app knows about CrashLoopBackOff the moment it happens; the person
@@ -268,7 +273,8 @@ not per event), never while the window is focused. Clicking the notification
 focuses the window and jumps to the object. **Accept:** killing a pod's
 process on freya notifies once within a poll tick; a crash-looper doesn't
 re-notify every restart within the cooldown; focused-window activity produces
-nothing.
+nothing. *(the transition/cooldown rule is unit-pinned; the two live checks
+need the running app against a real cluster)*
 
 ### B51 — Publishing hygiene
 **Do:** Pick and add a LICENSE (the repo is public and currently
@@ -407,6 +413,39 @@ B28–B43, in the commit messages of `feat/backlog-qol`.
   PV claim/reclaim, ReplicaSet owner/pods). `related_links_check` now walks all
   of them — 80 links, 0 broken on freya. Also existence-checked the Ingress
   class link, which the harness proved dead on a cluster without the controller.
+- **B37 — Secret values: copy without display.** A Secret's data panel lists
+  keys with a per-key copy button; `copy_secret_value` decodes the value in Rust
+  (`tauri-plugin-clipboard-manager`) and writes the system clipboard, so the
+  plaintext never enters the webview — the UI only sees the "copied ✓" flash.
+  Values stay redacted in YAML and the Data table shows keys only.
+- **B47 — CronJob and Job verbs.** Suspend/resume (patch `spec.suspend`, with a
+  muted SUSPENDED column gating the actions), Run now (`manual-` Job from the
+  jobTemplate, `kubectl create job --from=cronjob/x`), and Retry a failed Job
+  (delete + recreate from its own spec) — each strips the Job controller's
+  managed fields (selector, controller-uid/job-name labels, batch tracking
+  annotations), pinned by unit tests, so a run/retry is unowned and deletable.
+- **B49 — RBAC: who can do what.** Roles/ClusterRoles/RoleBindings/
+  ClusterRoleBindings as listed kinds in a new Access nav group (ServiceAccounts
+  moved there from Config). The ServiceAccount panel resolves the chain —
+  bindings naming it (each linking to its role) and the roles' rules as a
+  verb×resource table — and the bindings panels existence-check their subjects.
+  Verified live on freya: the prometheus SA → panoptes-prometheus binding →
+  ClusterRole granting nodes/metrics + nodes/proxy.
+- **B50 — Warning notifications.** Opt-in (Settings, default off) native
+  notifications via `tauri-plugin-notification` for *transitions into* a
+  problem (B32's derivation reused), debounced per object (one per cooldown,
+  pinned by unit tests) and never while the window is focused. Clicking focuses
+  the window and jumps to the just-announced problem.
+- **B36 — Create from YAML.** A topbar "+ Create" opens a CodeMirror modal; the
+  manifest's kind/namespace are parsed from the YAML, Preview runs it past the
+  server (dry-run create: defaulting + admission applied), and Create writes it
+  and navigates to the result. Built-in kinds and discovered CRDs both resolve.
+- **B48 — TLS certificate inspection.** `kubernetes.io/tls` Secrets get a
+  Certificate section parsing the *public* cert in Rust (`x509-parser`) —
+  subject, SANs, issuer, valid-from/notAfter with notAfter toned amber under 30
+  days and red when expired. The Ingress TLS SECRET link inherits that tone, so
+  an expiring cert is visible from the routing side. The private key is never
+  read.
 - **B29 — Crash-loop debugging.** `previous` reads (terminate, never follow),
   since-windows, save-to-file written in Rust (13k lines / 4.8MB past the
   200-line ring buffer). Backlog premise about `previous` corrected in the

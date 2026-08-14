@@ -194,6 +194,16 @@ describe("buildPalette", () => {
     expect(out[0].type).toBe("object");
   });
 
+  it("boosts a bookmarked object above its same-quality match (B56)", () => {
+    const c = ctx({
+      rows: { pods: [row("wiki-a", "prod"), row("wiki-b", "prod")] },
+      bookmarks: new Set(["pods:prod/wiki-b"]),
+    });
+    const objects = buildPalette("wiki", c).filter((i) => i.type === "object");
+    expect(objects[0].label).toBe("wiki-b");
+    expect(objects[0].score).toBeGreaterThan(objects[1].score);
+  });
+
   it("returns nothing for a query that matches nothing", () => {
     expect(buildPalette("zzzqqq", ctx())).toEqual([]);
   });

@@ -33,4 +33,33 @@
 
 .spark {
   display: block;
+  position: relative;
+}
+
+/* Limit/request reference lines (B58). */
+.limitLine,
+.requestLine {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+.limitLine {
+  background: var(--status-err);
+  opacity: 0.5;
+}
+.requestLine {
+  background: var(--text-faint);
+  opacity: 0.4;
+  border-bottom: 1px dashed;
+}
+
+/* Warning tints (B58): the area above 95% is red, 80-95% amber. */
+.warnRed {
+  background: var(--status-err);
+  opacity: 0.12;
+}
+.warnAmber {
+  background: var(--status-warn);
+  opacity: 0.12;
 }

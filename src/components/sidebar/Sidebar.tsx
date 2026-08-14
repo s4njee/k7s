@@ -4,6 +4,7 @@
 
 import styles from "./Sidebar.module.css";
 import { ClusterSwitcher } from "./ClusterSwitcher";
+import { Bookmarks } from "./Bookmarks";
 import { NavList } from "./NavList";
 import { WatchFooter } from "./WatchFooter";
 
@@ -12,6 +13,7 @@ export function Sidebar() {
   return (
     <div className={styles.sidebar} data-surface="panel">
       <ClusterSwitcher />
+      <Bookmarks />
       <NavList />
       <WatchFooter />
     </div>

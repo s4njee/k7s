@@ -26,6 +26,12 @@ tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 # Remembers window size/position/monitor across launches (B22).
 tauri-plugin-window-state = "2"
+# Writes to the system clipboard from Rust (B37): Secret values are copied by a
+# backend command so the plaintext never enters the webview.
+tauri-plugin-clipboard-manager = "2"
+# Native desktop notifications (B50): shown from Rust when a problem appears,
+# with the target carried as extra payload for click-to-navigate.
+tauri-plugin-notification = "2"
 
 # HTTP client for scraping node-exporter over a port-forward (B27). Already in
 # the tree via kube, so this adds no build time; default features off because the
@@ -36,6 +42,9 @@ reqwest = { version = "0.13", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+# Parses the *public* x509 certificate of a kubernetes.io/tls Secret (B48). The
+# private key is never touched.
+x509-parser = "0.18"
 
 # --- Async runtime & stream helpers ---
 # "signal" powers the SIGTERM handler that saves window state (B22): dev/run.sh
@@ -63,6 +72,10 @@ chrono = { version = "0.4", features = ["serde"] }
 http = "1"
 base64 = "0.22"
 flate2 = "1"
+
+[dev-dependencies]
+# Generates test certificates for the TLS parsing tests (B48); never in prod.
+rcgen = { version = "0.13", features = ["x509-parser"] }
 
 [features]
 # Reserved for future custom-protocol tweaks; kept so tauri.conf can reference it.

@@ -35,6 +35,8 @@ export interface Settings {
   accent: Accent;
   /** Disable the pulsing "live" dot and other motion. */
   reduceMotion: boolean;
+  /** Native notifications for problems (B50); off by default. */
+  notifications: boolean;
   /**
    * Image for the node debug shell (B53). Empty uses the built-in default.
    *
@@ -59,6 +61,9 @@ export const DEFAULT_SETTINGS: Settings = {
   uiFont: "mono",
   accent: "blue",
   reduceMotion: false,
+  // Notifications are a deliberate opt-in: a desktop app pinging you about a
+  // cluster you may not even be looking at is the kind of thing to ask about.
+  notifications: false,
   nodeShellImage: "",
 };
 
@@ -130,6 +135,7 @@ export function sanitizeSettings(raw: SettingsInput | null | undefined): Setting
     uiFont: asUiFont(s.uiFont),
     accent: asAccent(s.accent),
     reduceMotion: typeof s.reduceMotion === "boolean" ? s.reduceMotion : DEFAULT_SETTINGS.reduceMotion,
+    notifications: typeof s.notifications === "boolean" ? s.notifications : DEFAULT_SETTINGS.notifications,
     nodeShellImage: typeof s.nodeShellImage === "string" ? s.nodeShellImage.trim() : "",
   };
 }

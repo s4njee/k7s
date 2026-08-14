@@ -32,6 +32,9 @@ import type {
   ShellHandle,
   Row,
   SavedLog,
+  Topology,
+  TopologyEdge,
+  TopologyNode,
   Unsub,
   YamlDiff,
   NodeShellHandle,
@@ -167,6 +170,54 @@ export class MockProvider implements DataProvider {
       : yamlForGeneric(ref.kind, ref.namespace, ref.name);
   }
 
+  async getDiff(ref: ResourceRef): Promise<{ live: string; baseline?: string }> {
+    const live = await this.getYaml(ref);
+    // A demo baseline that differs from the live YAML by a label, so the Diff
+    // tab has something to show: "what was applied" vs "what's live".
+    const baseline = live.replace(/^metadata:\n/, "metadata:\n  labels:\n    demo: applied\n");
+    return baseline === live ? { live } : { live, baseline };
+  }
+
+  async getTopology(ref: ResourceRef): Promise<Topology> {
+    // A plausible demo graph mirroring the backlog's accept: a Deployment →
+    // ReplicaSet → Pods chain, with a Service selecting the pods and an Ingress
+    // routing to it.
+    const N = (id: string, kind: string, namespace: string, name: string, nav: KindId): TopologyNode =>
+      ({ id, kind, namespace, name, nav });
+    const E = (from: string, to: string, rel: "ownership" | "reference"): TopologyEdge =>
+      ({ from, to, rel });
+
+    if (ref.kind === "deployments") {
+      const ns = ref.namespace ?? "prod";
+      const rs = `${ref.name}-6c8d9`;
+      const p1 = `${rs}-mn4p`;
+      const p2 = `${rs}-qq7z`;
+      const seed = N(`deployments:${ns}/${ref.name}`, "Deployment", ns, ref.name, "deployments");
+      const rsN = N(`replicasets:${ns}/${rs}`, "ReplicaSet", ns, rs, "replicasets");
+      const p1N = N(`pods:${ns}/${p1}`, "Pod", ns, p1, "pods");
+      const p2N = N(`pods:${ns}/${p2}`, "Pod", ns, p2, "pods");
+      const svc = N(`services:${ns}/${ref.name}`, "Service", ns, ref.name, "services");
+      const ing = N(`ingresses:${ns}/api-public`, "Ingress", ns, "api-public", "ingresses");
+      return {
+        nodes: [seed, rsN, p1N, p2N, svc, ing],
+        edges: [
+          E(seed.id, rsN.id, "ownership"),
+          E(rsN.id, p1N.id, "ownership"),
+          E(rsN.id, p2N.id, "ownership"),
+          E(svc.id, p1N.id, "reference"),
+          E(svc.id, p2N.id, "reference"),
+          E(ing.id, svc.id, "reference"),
+        ],
+      };
+    }
+    // Other kinds get just the seed node — the real graph is what you see live.
+    const ns = ref.namespace ?? "prod";
+    return {
+      nodes: [N(`${ref.kind}:${ns}/${ref.name}`, ref.kind, ns, ref.name, ref.kind)],
+      edges: [],
+    };
+  }
+
   async applyYaml(ref: ResourceRef, text: string): Promise<void> {
     // Persist to the in-memory cache; no validation in demo mode.
     this.yamlCache.set(`${ref.kind}:${ref.namespace}/${ref.name}`, text);
@@ -208,6 +259,11 @@ export class MockProvider implements DataProvider {
     return props;
   }
 
+  async copySecretValue(_ref: ResourceRef, _key: string): Promise<void> {
+    // Demo mode has no system clipboard; claim success so the copied-✓ flash is
+    // exercised end to end.
+  }
+
   // Mutations are no-ops in demo mode (the data is static) — they resolve so the
   // UI flow can be exercised without a cluster.
   async deleteResource(_ref: ResourceRef): Promise<void> {}
@@ -221,6 +277,34 @@ export class MockProvider implements DataProvider {
     return revision;
   }
   async setCordon(_node: string, _unschedulable: boolean): Promise<void> {}
+  async setCronjobSuspend(_ref: ResourceRef, _suspended: boolean): Promise<void> {
+    // Demo has no real CronJob to patch; the confirm flow is still exercised.
+  }
+  async runCronjob(ref: ResourceRef): Promise<string> {
+    // Demo creates no real Job; claim a synthetic one so the flow completes.
+    return `manual-${ref.name}-${Date.now() % 100000}`;
+  }
+  async retryJob(ref: ResourceRef): Promise<string> {
+    return `${ref.name}-retry-${Date.now() % 100000}`;
+  }
+  async notifyProblem(_ref: ResourceRef, _reason: string): Promise<void> {
+    // Demo mode is a browser tab; there's no native notification to show.
+  }
+  async createResource(
+    yaml: string,
+    _namespace: string,
+    dryRun: boolean,
+  ): Promise<{ proposed: string; created?: { kind: KindId; namespace?: string; name: string } }> {
+    // Demo mode has no API server to create against; a dry run previews the
+    // manifest as-is, a real create claims a synthetic target so the flow's
+    // navigate-on-success is exercised.
+    const proposed = yaml;
+    const name = /name:\s*(\S+)/.exec(yaml)?.[1] ?? "created";
+    const kind = (/^kind:\s*(\S+)/m.exec(yaml)?.[1] ?? "ConfigMap").toLowerCase() + "s";
+    return dryRun
+      ? { proposed }
+      : { proposed, created: { kind: kind as KindId, namespace: "prod", name } };
+  }
   /** No native window in demo mode — the browser tab owns its own chrome. */
   async setWindowTheme(_theme: "dark" | "light"): Promise<void> {}
 

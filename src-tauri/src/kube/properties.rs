@@ -13,13 +13,18 @@
 
 use super::dto::{Cell, NavTarget, Tone};
 use super::helm;
+use super::tls;
 use crate::error::{AppError, AppResult};
 use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{
     ConfigMap, Event, Node, PersistentVolume, PersistentVolumeClaim, Pod, PodSpec, Secret, Service,
+    ServiceAccount,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::networking::v1::{Ingress, IngressClass};
+use k8s_openapi::api::rbac::v1::{
+    ClusterRole, ClusterRoleBinding, PolicyRule, Role, RoleBinding, Subject,
+};
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use kube::api::{Api, ListParams};
 use kube::{Client, ResourceExt};
@@ -205,6 +210,10 @@ pub fn builtin_nav_id(kind: &str) -> Option<&'static str> {
         "StorageClass" => "storageclasses",
         "Node" => "nodes",
         "Namespace" => "namespaces",
+        "Role" => "roles",
+        "ClusterRole" => "clusterroles",
+        "RoleBinding" => "rolebindings",
+        "ClusterRoleBinding" => "clusterrolebindings",
         _ => return None,
     })
 }
@@ -381,6 +390,10 @@ pub async fn gather(
         "persistentvolumeclaims" => gather_pvc(client, namespace, name).await,
         "persistentvolumes" => gather_pv(client, namespace, name).await,
         "replicasets" => gather_replicaset(client, namespace, name).await,
+        "secrets" => gather_secret(client, namespace, name).await,
+        "serviceaccounts" => gather_serviceaccount(client, namespace, name).await,
+        "rolebindings" => gather_rolebinding(client, namespace, name).await,
+        "clusterrolebindings" => gather_clusterrolebinding(client, name).await,
         other => Err(AppError::Other(format!("no properties for kind {other}"))),
     }
 }
@@ -528,29 +541,33 @@ async fn gather_ingress(client: Client, namespace: &str, name: &str) -> AppResul
     );
 
     // ---- tls ----
-    let tls_rows: Vec<Vec<Cell>> = spec
-        .tls
-        .iter()
-        .flatten()
-        .map(|t| {
-            let secret = t.secret_name.clone().unwrap_or_else(|| DASH.into());
-            let exists = sec_exists.get(&secret).copied().unwrap_or(false);
-            vec![
-                name_cell(
-                    t.hosts
-                        .as_ref()
-                        .map(|h| h.join(", "))
-                        .filter(|h| !h.is_empty())
-                        .unwrap_or_else(|| "*".into()),
-                ),
-                ref_cell(
-                    &secret,
-                    exists,
-                    NavTarget::namespaced("secrets", namespace, secret.clone()),
-                ),
-            ]
-        })
-        .collect();
+    let mut tls_rows: Vec<Vec<Cell>> = Vec::new();
+    for t in spec.tls.iter().flatten() {
+        let secret = t.secret_name.clone().unwrap_or_else(|| DASH.into());
+        let exists = sec_exists.get(&secret).copied().unwrap_or(false);
+        let mut cell = ref_cell(
+            &secret,
+            exists,
+            NavTarget::namespaced("secrets", namespace, secret.clone()),
+        );
+        // An expiring cert is worth seeing from the routing side: tone the
+        // SECRET link with the cert's notAfter tone (B48).
+        if exists && secret != DASH {
+            if let Some(tone) = secret_cert_tone(&sec_api, &secret).await {
+                cell.tone = tone;
+            }
+        }
+        tls_rows.push(vec![
+            name_cell(
+                t.hosts
+                    .as_ref()
+                    .map(|h| h.join(", "))
+                    .filter(|h| !h.is_empty())
+                    .unwrap_or_else(|| "*".into()),
+            ),
+            cell,
+        ]);
+    }
     props.push_table("TLS", Some("no TLS — served over HTTP"), &["HOSTS", "SECRET"], tls_rows);
 
     meta_sections(&mut props, &ing);
@@ -2033,6 +2050,321 @@ async fn gather_replicaset(client: Client, namespace: &str, name: &str) -> AppRe
 }
 
 // ---------------------------------------------------------------------------
+// RBAC (B49)
+// ---------------------------------------------------------------------------
+
+/// Does a binding's subjects include the named ServiceAccount? A subject's
+/// namespace must match the SA's — for a namespaced binding that's its own
+/// namespace; for a cluster binding the subject names the SA's namespace.
+fn subjects_sa(subjects: Option<&Vec<Subject>>, namespace: &str, name: &str) -> bool {
+    subjects
+        .map(|s| {
+            s.iter().any(|sub| {
+                sub.kind == "ServiceAccount"
+                    && sub.name == name
+                    && sub.namespace.as_deref() == Some(namespace)
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// A cell for a binding's role reference, linking to the referenced
+/// Role/ClusterRole. `binding_ns` is the binding's own namespace — a namespaced
+/// Role lives there; a ClusterRole is cluster-wide.
+fn role_link_cell(kind: &str, name: &str, binding_ns: &str) -> Cell {
+    match kind {
+        "Role" => Cell::link(
+            name.to_string(),
+            Tone::Secondary,
+            Some(NavTarget::namespaced("roles", binding_ns, name)),
+        ),
+        "ClusterRole" => Cell::link(name.to_string(), Tone::Secondary, Some(NavTarget::cluster("clusterroles", name))),
+        _ => Cell::new(format!("{kind}/{name}"), Tone::Secondary),
+    }
+}
+
+/// Comma-joined values ("get,list,watch"), or "—" when absent.
+fn join_csv(items: &Option<Vec<String>>) -> String {
+    match items {
+        Some(list) if !list.is_empty() => list.join(","),
+        _ => DASH.into(),
+    }
+}
+
+/// Properties for a ServiceAccount (B49): an Overview, then the resolved RBAC
+/// chain — the bindings that name it (each linking to its role) and those
+/// roles' rules as a compact verb×resource table.
+async fn gather_serviceaccount(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
+    let api: Api<ServiceAccount> = Api::namespaced(client.clone(), namespace);
+    let sa = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let mut props = Properties::default();
+
+    props.fields(
+        "Overview",
+        vec![
+            field("secrets", sa.secrets.as_ref().map(|s| s.len().to_string()).unwrap_or_else(|| "0".into())),
+            field("image pull secrets", sa.image_pull_secrets.as_ref().map(|s| s.len().to_string()).unwrap_or_else(|| "0".into())),
+            field(
+                "automount token",
+                if sa.automount_service_account_token.unwrap_or(false) { "yes" } else { "no" },
+            ),
+        ],
+    );
+
+    // ---- bindings naming this SA: namespaced RoleBindings, then cluster ones ----
+    // (binding name, binding kind, role kind, role name)
+    let mut bindings: Vec<(String, &'static str, String, String)> = Vec::new();
+    let rb_api: Api<RoleBinding> = Api::namespaced(client.clone(), namespace);
+    if let Ok(list) = rb_api.list(&ListParams::default()).await {
+        for b in list.items {
+            if subjects_sa(b.subjects.as_ref(), namespace, name) {
+                bindings.push((b.name_any(), "RoleBinding", b.role_ref.kind.clone(), b.role_ref.name.clone()));
+            }
+        }
+    }
+    let crb_api: Api<ClusterRoleBinding> = Api::all(client.clone());
+    if let Ok(list) = crb_api.list(&ListParams::default()).await {
+        for b in list.items {
+            if subjects_sa(b.subjects.as_ref(), namespace, name) {
+                bindings.push((b.name_any(), "ClusterRoleBinding", b.role_ref.kind.clone(), b.role_ref.name.clone()));
+            }
+        }
+    }
+
+    let binding_rows: Vec<Vec<Cell>> = bindings
+        .iter()
+        .map(|(bname, bkind, rkind, rname)| {
+            let bnav = if *bkind == "RoleBinding" {
+                NavTarget::namespaced("rolebindings", namespace, bname)
+            } else {
+                NavTarget::cluster("clusterrolebindings", bname)
+            };
+            vec![
+                Cell::link(bname.clone(), Tone::Primary, Some(bnav)),
+                c(bkind.to_string()),
+                role_link_cell(rkind, rname, namespace),
+            ]
+        })
+        .collect();
+    props.push_table(
+        "Role bindings",
+        Some("no bindings grant this account"),
+        &["BINDING", "TYPE", "ROLE"],
+        binding_rows,
+    );
+
+    // ---- the referenced roles' rules, one row per rule ----
+    let role_api: Api<Role> = Api::namespaced(client.clone(), namespace);
+    let cluster_role_api: Api<ClusterRole> = Api::all(client);
+    let mut rule_rows: Vec<Vec<Cell>> = Vec::new();
+    for (_, _, rkind, rname) in &bindings {
+        let rules: Vec<PolicyRule> = match rkind.as_str() {
+            "Role" => role_api.get_opt(rname).await.ok().flatten().and_then(|r| r.rules).unwrap_or_default(),
+            _ => cluster_role_api.get_opt(rname).await.ok().flatten().and_then(|r| r.rules).unwrap_or_default(),
+        };
+        for rule in rules {
+            // A rule grants verbs over resources (or non-resource URLs).
+            let resources = rule
+                .resources
+                .filter(|r| !r.is_empty())
+                .or(rule.non_resource_urls)
+                .unwrap_or_default();
+            rule_rows.push(vec![
+                name_cell(rname.clone()),
+                c(join_csv(&Some(rule.verbs))),
+                c(if resources.is_empty() { DASH.into() } else { resources.join(",") }),
+                c(join_csv(&rule.api_groups)),
+            ]);
+        }
+    }
+    props.push_table(
+        "Rules",
+        Some("no rules (the roles are empty or unreadable)"),
+        &["ROLE", "VERB", "RESOURCES", "API GROUPS"],
+        rule_rows,
+    );
+
+    meta_sections(&mut props, &sa);
+    Ok(props)
+}
+
+/// Properties for a RoleBinding (B49): the role it grants, and its subjects —
+/// ServiceAccount subjects existence-checked (an absent SA renders "not found").
+async fn gather_rolebinding(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
+    let api: Api<RoleBinding> = Api::namespaced(client.clone(), namespace);
+    let b = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let mut props = Properties::default();
+
+    props.fields(
+        "Overview",
+        vec![
+            nav_field("role", format!("{}/{}", b.role_ref.kind, b.role_ref.name), role_nav_of(&b.role_ref, namespace)),
+            field("subjects", b.subjects.as_ref().map(|s| s.len().to_string()).unwrap_or_else(|| "0".into())),
+        ],
+    );
+
+    let sa_api: Api<ServiceAccount> = Api::namespaced(client.clone(), namespace);
+    let mut rows = Vec::new();
+    for sub in b.subjects.as_ref().into_iter().flatten() {
+        // ServiceAccount subjects existence-check via ref_cell; a deleted SA
+        // that the binding still names is exactly the "not found" case.
+        let cell = if sub.kind == "ServiceAccount" {
+            let exists = sa_api.get_metadata(&sub.name).await.is_ok();
+            ref_cell(&sub.name, exists, NavTarget::namespaced("serviceaccounts", namespace, sub.name.clone()))
+        } else {
+            c(format!("{}/{}", sub.kind, sub.name))
+        };
+        rows.push(vec![c(sub.kind.clone()), cell, c(or_dash(sub.namespace.clone()))]);
+    }
+    props.push_table("Subjects", Some("no subjects"), &["KIND", "NAME", "NAMESPACE"], rows);
+
+    meta_sections(&mut props, &b);
+    Ok(props)
+}
+
+/// Properties for a ClusterRoleBinding (B49), like a RoleBinding but cluster
+/// scoped — each subject's SA is checked in its own namespace.
+async fn gather_clusterrolebinding(client: Client, name: &str) -> AppResult<Properties> {
+    let api: Api<ClusterRoleBinding> = Api::all(client.clone());
+    let b = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let mut props = Properties::default();
+
+    props.fields(
+        "Overview",
+        vec![
+            nav_field("role", format!("{}/{}", b.role_ref.kind, b.role_ref.name), role_nav_of(&b.role_ref, "")),
+            field("subjects", b.subjects.as_ref().map(|s| s.len().to_string()).unwrap_or_else(|| "0".into())),
+        ],
+    );
+
+    let mut rows = Vec::new();
+    for sub in b.subjects.as_ref().into_iter().flatten() {
+        let cell = if sub.kind == "ServiceAccount" {
+            let sub_ns = sub.namespace.clone().unwrap_or_default();
+            let exists = Api::<ServiceAccount>::namespaced(client.clone(), &sub_ns)
+                .get_metadata(&sub.name)
+                .await
+                .is_ok();
+            ref_cell(&sub.name, exists, NavTarget::namespaced("serviceaccounts", &sub_ns, sub.name.clone()))
+        } else {
+            c(format!("{}/{}", sub.kind, sub.name))
+        };
+        rows.push(vec![c(sub.kind.clone()), cell, c(or_dash(sub.namespace.clone()))]);
+    }
+    props.push_table("Subjects", Some("no subjects"), &["KIND", "NAME", "NAMESPACE"], rows);
+
+    meta_sections(&mut props, &b);
+    Ok(props)
+}
+
+/// The nav target for a role reference, or None for an unknown kind.
+fn role_nav_of(r: &k8s_openapi::api::rbac::v1::RoleRef, binding_ns: &str) -> Option<NavTarget> {
+    match r.kind.as_str() {
+        "Role" => Some(NavTarget::namespaced("roles", binding_ns, r.name.clone())),
+        "ClusterRole" => Some(NavTarget::cluster("clusterroles", r.name.clone())),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Secrets (B37)
+// ---------------------------------------------------------------------------
+
+/// Properties for a Secret: an Overview plus a Data table of *keys* (B37).
+///
+/// Values never render — the YAML tab redacts them and this panel lists only the
+/// keys. Each key's value is reachable only through the clipboard command, which
+/// decodes and writes in Rust so the plaintext never enters the webview.
+async fn gather_secret(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
+    let api: Api<Secret> = Api::namespaced(client, namespace);
+    let secret = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let data = secret.data.clone().unwrap_or_default();
+    let string_data = secret.string_data.clone().unwrap_or_default();
+    let mut props = Properties::default();
+
+    props.fields(
+        "Overview",
+        vec![
+            field("type", or_dash(secret.type_.clone())),
+            field("keys", (data.len() + string_data.len()).to_string()),
+            field("immutable", if secret.immutable.unwrap_or(false) { "yes" } else { "no" }),
+        ],
+    );
+
+    // Keys with their source; values stay on the backend.
+    let mut keys: Vec<(String, &'static str)> = Vec::new();
+    for k in data.keys() {
+        keys.push((k.clone(), "data (base64)"));
+    }
+    for k in string_data.keys() {
+        keys.push((k.clone(), "stringData"));
+    }
+    keys.sort();
+    let rows: Vec<Vec<Cell>> = keys
+        .iter()
+        .map(|(k, src)| vec![name_cell(k.clone()), c(src.to_string())])
+        .collect();
+    props.push_table("Data", Some("no data"), &["KEY", "SOURCE"], rows);
+
+    // For a TLS secret, the *public* certificate's metadata is shown — expiry is
+    // the thing that takes sites down, and the private key is never touched (B48).
+    if secret.type_.as_deref() == Some("kubernetes.io/tls") {
+        if let Some(cert) = data.get("tls.crt").and_then(|bs| tls::parse_crt(&bs.0)) {
+            let not_after_tone = cert_tone(&cert.not_after, chrono::Utc::now());
+            let mut expires = Cell::age(Some(cert.not_after.clone()).filter(|s| !s.is_empty()));
+            expires.tone = not_after_tone;
+            props.fields(
+                "Certificate",
+                vec![
+                    field("subject", cert.subject),
+                    field("SANs", cert.san),
+                    field("issuer", cert.issuer),
+                    Field {
+                        label: "valid from".into(),
+                        value: Cell::age(Some(cert.not_before).filter(|s| !s.is_empty())),
+                        nav: None,
+                    },
+                    Field { label: "expires".into(), value: expires, nav: None },
+                ],
+            );
+        }
+    }
+
+    meta_sections(&mut props, &secret);
+    Ok(props)
+}
+
+/// The tone for a certificate's notAfter: expired is red, under 30 days amber —
+/// the two cases worth seeing from the routing side (B48).
+fn cert_tone(not_after: &str, now: chrono::DateTime<chrono::Utc>) -> Tone {
+    let Ok(end) = chrono::DateTime::parse_from_rfc3339(not_after)
+        .map(|d| d.with_timezone(&chrono::Utc))
+    else {
+        return Tone::Secondary;
+    };
+    if end < now {
+        Tone::Bad
+    } else if end - now < chrono::Duration::days(30) {
+        Tone::Warn
+    } else {
+        Tone::Secondary
+    }
+}
+
+/// The notAfter tone of a Secret's certificate, when it's a TLS secret whose
+/// public cert parses — None otherwise, so a non-TLS secret keeps its normal
+/// link tone (B48).
+async fn secret_cert_tone(api: &Api<Secret>, name: &str) -> Option<Tone> {
+    let secret = api.get(name).await.ok()?;
+    if secret.type_.as_deref() != Some("kubernetes.io/tls") {
+        return None;
+    }
+    let bs = secret.data?.get("tls.crt")?.clone();
+    let cert = tls::parse_crt(&bs.0)?;
+    Some(cert_tone(&cert.not_after, chrono::Utc::now()))
+}
+
+// ---------------------------------------------------------------------------
 // Nodes (B18)
 // ---------------------------------------------------------------------------
 
@@ -2472,6 +2804,24 @@ metadata:
         assert_eq!(refs[4], ("Secret (envFrom)", "db-creds".into(), "—".into(), "api".into()));
     }
 
+    /// A binding subject matches the SA only on kind, name AND namespace — a
+    /// same-named SA in another namespace must not be adopted (B49).
+    #[test]
+    fn subjects_sa_matches_kind_name_and_namespace() {
+        let subjects = |ns: &str| Some(vec![Subject {
+            kind: "ServiceAccount".into(),
+            name: "prometheus".into(),
+            namespace: Some(ns.into()),
+            api_group: None,
+        }]);
+        assert!(subjects_sa(subjects("panoptes").as_ref(), "panoptes", "prometheus"));
+        assert!(!subjects_sa(subjects("other").as_ref(), "panoptes", "prometheus"));
+        assert!(!subjects_sa(subjects("panoptes").as_ref(), "panoptes", "grafana"));
+        // A User/Group subject never matches an SA name.
+        let user = Some(vec![Subject { kind: "User".into(), name: "prometheus".into(), namespace: None, api_group: None }]);
+        assert!(!subjects_sa(user.as_ref(), "panoptes", "prometheus"));
+    }
+
     /// A pod with no references collects none — the section's empty note covers it.
     #[test]
     fn pod_without_references_collects_none() {
@@ -2480,5 +2830,18 @@ metadata:
         }))
         .unwrap();
         assert!(collect_pod_refs(&spec).is_empty());
+    }
+
+    /// The cert notAfter tone (B48): healthy reads secondary, under 30 days
+    /// amber, expired red — the two cases worth seeing from the routing side.
+    #[test]
+    fn cert_tone_reflects_expiry() {
+        let now = chrono::Utc::now();
+        let healthy = now + chrono::Duration::days(90);
+        let expiring = now + chrono::Duration::days(10);
+        let expired = now - chrono::Duration::days(1);
+        assert_eq!(cert_tone(&healthy.to_rfc3339(), now), Tone::Secondary);
+        assert_eq!(cert_tone(&expiring.to_rfc3339(), now), Tone::Warn);
+        assert_eq!(cert_tone(&expired.to_rfc3339(), now), Tone::Bad);
     }
 }

@@ -8,7 +8,7 @@
 //! the frontend overlays from the separate metrics feed.
 
 use super::discovery::PrinterColumn;
-use super::dto::{Cell, InvolvedRef, JobMeta, PodMeta, PodResources, Row, Tone};
+use super::dto::{Cell, CronMeta, InvolvedRef, JobMeta, NavTarget, PodMeta, PodResources, Row, Tone};
 use super::jsonpath;
 use super::metrics::{parse_cpu_millis, parse_mem_bytes};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
@@ -18,6 +18,7 @@ use k8s_openapi::api::core::v1::{
     ServiceAccount,
 };
 use k8s_openapi::api::networking::v1::{Ingress, IngressClass};
+use k8s_openapi::api::rbac::v1::{ClusterRole, ClusterRoleBinding, Role, RoleBinding};
 use k8s_openapi::api::storage::v1::StorageClass;
 use kube::ResourceExt;
 
@@ -396,8 +397,9 @@ pub fn map_job(j: &Job) -> Row {
     row
 }
 
-/// CronJobs: NAME, NAMESPACE, SCHEDULE, LAST RUN, AGE.
+/// CronJobs: NAME, NAMESPACE, SCHEDULE, SUSPENDED, LAST RUN, AGE.
 pub fn map_cronjob(c: &CronJob) -> Row {
+    let suspended = c.spec.as_ref().and_then(|s| s.suspend).unwrap_or(false);
     let schedule = c.spec.as_ref().map(|s| s.schedule.clone()).unwrap_or_default();
     let last_run = c
         .status
@@ -409,10 +411,14 @@ pub fn map_cronjob(c: &CronJob) -> Row {
         name_cell(c),
         ns_cell(c),
         Cell::new(schedule, Tone::Secondary),
+        // A suspended schedule reads muted — it's paused, not broken (B47).
+        Cell::new(if suspended { "yes" } else { "no" }, if suspended { Tone::Muted } else { Tone::Secondary }),
         Cell::new(last_run, Tone::Secondary),
         age_cell(c),
     ];
-    simple_row(c, cells)
+    let mut row = simple_row(c, cells);
+    row.cron = Some(CronMeta { suspended });
+    row
 }
 
 // ---------------------------------------------------------------------------
@@ -566,6 +572,88 @@ pub fn map_serviceaccount(sa: &ServiceAccount) -> Row {
         age_cell(sa),
     ];
     simple_row(sa, cells)
+}
+
+// ---------------------------------------------------------------------------
+// RBAC (B49)
+// ---------------------------------------------------------------------------
+
+/// Roles: NAME, NAMESPACE, RULES, AGE. A role's worth is its rule count at a
+/// glance; the panel carries the full verb×resource breakdown.
+pub fn map_role(r: &Role) -> Row {
+    let rules = r.rules.as_ref().map(|r| r.len()).unwrap_or(0);
+    simple_row(
+        r,
+        vec![
+            name_cell(r),
+            ns_cell(r),
+            Cell::new(rules.to_string(), Tone::Secondary),
+            age_cell(r),
+        ],
+    )
+}
+
+/// ClusterRoles: NAME, RULES, AGE (cluster-scoped).
+pub fn map_clusterrole(cr: &ClusterRole) -> Row {
+    let rules = cr.rules.as_ref().map(|r| r.len()).unwrap_or(0);
+    simple_row(
+        cr,
+        vec![name_cell(cr), Cell::new(rules.to_string(), Tone::Secondary), age_cell(cr)],
+    )
+}
+
+/// RoleBindings: NAME, NAMESPACE, ROLE, SUBJECTS, AGE. The role cell links to
+/// the referenced Role/ClusterRole; subjects render as "Kind/name" pairs.
+pub fn map_rolebinding(b: &RoleBinding) -> Row {
+    let (role, _) = role_ref_cell(b.role_ref.kind.as_str(), &b.role_ref.name, b.namespace().as_deref());
+    simple_row(
+        b,
+        vec![
+            name_cell(b),
+            ns_cell(b),
+            role,
+            Cell::new(subjects_text(b.subjects.as_ref()), Tone::Secondary),
+            age_cell(b),
+        ],
+    )
+}
+
+/// ClusterRoleBindings: NAME, ROLE, SUBJECTS, AGE (cluster-scoped).
+pub fn map_clusterrolebinding(b: &ClusterRoleBinding) -> Row {
+    let (role, _) = role_ref_cell(b.role_ref.kind.as_str(), &b.role_ref.name, None);
+    simple_row(
+        b,
+        vec![
+            name_cell(b),
+            role,
+            Cell::new(subjects_text(b.subjects.as_ref()), Tone::Secondary),
+            age_cell(b),
+        ],
+    )
+}
+
+/// A cell for a binding's role reference, linking to the referenced
+/// Role/ClusterRole. `binding_ns` is the binding's own namespace — a namespaced
+/// Role lives there; a ClusterRole is cluster-wide.
+fn role_ref_cell(kind: &str, name: &str, binding_ns: Option<&str>) -> (Cell, Option<NavTarget>) {
+    let target = match kind {
+        "Role" => Some(NavTarget::namespaced("roles", binding_ns.unwrap_or_default(), name)),
+        "ClusterRole" => Some(NavTarget::cluster("clusterroles", name)),
+        _ => None,
+    };
+    (Cell::link(name.to_string(), Tone::Secondary, target.clone()), target)
+}
+
+/// "ServiceAccount/prometheus, Group/team, User/alice" — a binding's subjects.
+fn subjects_text(subjects: Option<&Vec<k8s_openapi::api::rbac::v1::Subject>>) -> String {
+    subjects
+        .map(|s| {
+            s.iter()
+                .map(|sub| format!("{}/{}", sub.kind, sub.name))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -1537,6 +1625,99 @@ mod tests {
         let cluster_row = map_dynamic(&o, false, &[]);
         let texts: Vec<&str> = cluster_row.cells.iter().map(|c| c.text.as_str()).collect();
         assert_eq!(texts, ["letsencrypt-prod", "2026-08-01T00:00:00+00:00"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // RBAC kinds (B49)
+    // -----------------------------------------------------------------------
+
+    /// A RoleBinding shows its role as a link (to the namespaced role) and its
+    /// subjects as "Kind/name" pairs; a ClusterRole ref links cluster-wide.
+    #[test]
+    fn rolebinding_links_role_and_lists_subjects() {
+        let b: RoleBinding = serde_json::from_value(json!({
+            "apiVersion": "rbac.authorization.k8s.io/v1",
+            "kind": "RoleBinding",
+            "metadata": { "name": "panoptes-prometheus", "namespace": "panoptes", "uid": "rb1" },
+            "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "prometheus" },
+            "subjects": [
+                { "kind": "ServiceAccount", "name": "prometheus", "namespace": "panoptes" },
+                { "kind": "User", "name": "alice" },
+            ],
+        }))
+        .unwrap();
+        let row = map_rolebinding(&b);
+        // NAME, NAMESPACE, ROLE, SUBJECTS, AGE.
+        assert_eq!(row.cells[2].text, "prometheus");
+        assert_eq!(row.cells[2].nav.as_ref().map(|t| t.kind.as_str()), Some("clusterroles"));
+        assert_eq!(row.cells[3].text, "ServiceAccount/prometheus, User/alice");
+    }
+
+    /// A namespaced Role ref links to the role in the binding's namespace.
+    #[test]
+    fn namespaced_role_ref_links_to_roles() {
+        let b: RoleBinding = serde_json::from_value(json!({
+            "apiVersion": "rbac.authorization.k8s.io/v1",
+            "kind": "RoleBinding",
+            "metadata": { "name": "rb", "namespace": "prod", "uid": "rb2" },
+            "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "deployer" },
+        }))
+        .unwrap();
+        let row = map_rolebinding(&b);
+        assert_eq!(row.cells[2].nav.as_ref().map(|t| t.kind.as_str()), Some("roles"));
+        assert_eq!(row.cells[2].nav.as_ref().and_then(|t| t.namespace.as_deref()), Some("prod"));
+    }
+
+    /// A Role's RULES column is its rule count.
+    #[test]
+    fn role_counts_its_rules() {
+        let r: Role = serde_json::from_value(json!({
+            "apiVersion": "rbac.authorization.k8s.io/v1",
+            "kind": "Role",
+            "metadata": { "name": "deployer", "namespace": "prod", "uid": "r1" },
+            "rules": [
+                { "verbs": ["get", "list"], "resources": ["deployments"], "apiGroups": ["apps"] },
+                { "verbs": ["update"], "resources": ["deployments/scale"], "apiGroups": ["apps"] },
+            ],
+        }))
+        .unwrap();
+        let row = map_role(&r);
+        // NAME, NAMESPACE, RULES, AGE.
+        assert_eq!(row.cells[2].text, "2");
+        assert!(row.namespace.is_some());
+    }
+
+    // -----------------------------------------------------------------------
+    // CronJob suspend state (B47)
+    // -----------------------------------------------------------------------
+
+    /// A suspended CronJob reads a muted "yes" in the SUSPENDED column and
+    /// carries the state, so the Suspend/Resume actions can gate on it.
+    #[test]
+    fn cronjob_suspended_column_and_meta() {
+        let cj: CronJob = serde_json::from_value(json!({
+            "apiVersion": "batch/v1",
+            "kind": "CronJob",
+            "metadata": { "name": "cache-warm", "namespace": "prod", "uid": "cj1" },
+            "spec": { "schedule": "*/15 * * * *", "suspend": true },
+        }))
+        .unwrap();
+        let row = map_cronjob(&cj);
+        // NAME, NAMESPACE, SCHEDULE, SUSPENDED, LAST RUN, AGE.
+        assert_eq!(row.cells.len(), 6);
+        assert_eq!((row.cells[3].text.as_str(), row.cells[3].tone), ("yes", Tone::Muted));
+        assert_eq!(row.cron.map(|c| c.suspended), Some(true));
+
+        let cj2: CronJob = serde_json::from_value(json!({
+            "apiVersion": "batch/v1",
+            "kind": "CronJob",
+            "metadata": { "name": "report-gen", "namespace": "prod", "uid": "cj2" },
+            "spec": { "schedule": "0 */6 * * *" },
+        }))
+        .unwrap();
+        let row2 = map_cronjob(&cj2);
+        assert_eq!(row2.cells[3].text, "no");
+        assert_eq!(row2.cron.map(|c| c.suspended), Some(false));
     }
 
     // -----------------------------------------------------------------------

@@ -10,6 +10,7 @@ import styles from "./App.module.css";
 import { useBootstrap } from "./hooks/useBootstrap";
 import { useCustomKindWatch } from "./hooks/useCustomKindWatch";
 import { useGlobalKeys } from "./hooks/useGlobalKeys";
+import { useProblemNotifications } from "./hooks/useProblemNotifications";
 import { useTheme } from "./hooks/useTheme";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { TopBar } from "./components/topbar/TopBar";
@@ -18,6 +19,7 @@ import { ResourceTable } from "./components/table/ResourceTable";
 import { DetailPanel } from "./components/detail/DetailPanel";
 import { ForwardsBar } from "./components/forwards/ForwardsBar";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
+import { CreateYaml } from "./components/create/CreateYaml";
 import { CommandPalette } from "./components/palette/CommandPalette";
 
 export default function App() {
@@ -29,6 +31,8 @@ export default function App() {
   useCustomKindWatch();
   // Apply the colour palette to <html> and follow the OS when set to "system" (B52).
   useTheme();
+  // Native problem notifications when opted in (B50).
+  useProblemNotifications();
 
   return (
     <div className={styles.app}>
@@ -45,6 +49,7 @@ export default function App() {
       {/* Modals, outside the layout flow. The palette is last so it layers over
           everything — ⌘K works from anywhere, including the settings panel. */}
       <SettingsPanel />
+      <CreateYaml />
       <CommandPalette />
     </div>
   );

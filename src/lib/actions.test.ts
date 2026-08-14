@@ -52,8 +52,46 @@ describe("actionsFor — single row", () => {
     expect(ids("deployments", [row("d", { selector: {} })])).not.toContain("view-pods");
   });
 
-  it("offers no actions for a kind with none", () => {
-    expect(actionsFor("namespaces", [row("ns")])).toEqual([]);
+  it("offers only Bookmark on a kind with no verbs (B56)", () => {
+    // Namespaces have no workload verbs, so bookmarking is the whole menu.
+    expect(actionsFor("namespaces", [row("ns")]).map((a) => a.id)).toEqual(["bookmark"]);
+  });
+
+  it("offers Bookmark on any navigable object, and never on the events feed (B56)", () => {
+    expect(ids("pods", [row("p")])).toContain("bookmark");
+    expect(ids("namespaces", [row("ns")])).toContain("bookmark");
+    expect(ids("events", [row("e")])).not.toContain("bookmark");
+  });
+
+  // ---- batch verbs (B47) ----
+  it("offers Suspend on a running CronJob, Resume on a suspended one", () => {
+    const running = row("report-gen", { cron: { suspended: false } });
+    const suspended = row("cache-warm", { cron: { suspended: true } });
+    expect(ids("cronjobs", [running])).toContain("suspend");
+    expect(ids("cronjobs", [running])).not.toContain("resume");
+    expect(ids("cronjobs", [suspended])).toContain("resume");
+    expect(ids("cronjobs", [suspended])).not.toContain("suspend");
+  });
+
+  it("offers Run now on a CronJob regardless of suspend state", () => {
+    expect(ids("cronjobs", [row("report-gen", { cron: { suspended: true } })])).toContain("run-now");
+    expect(ids("cronjobs", [row("report-gen", { cron: { suspended: false } })])).toContain("run-now");
+  });
+
+  it("offers Retry only on a failed Job", () => {
+    expect(ids("jobs", [row("migrate", { job: { failed: true } })])).toContain("retry");
+    expect(ids("jobs", [row("migrate", { job: { failed: false } })])).not.toContain("retry");
+    // A job that merely hasn't finished has no failed condition to retry.
+    expect(ids("jobs", [row("migrate", {})])).not.toContain("retry");
+  });
+
+  it("offers the batch verbs nowhere else", () => {
+    for (const kind of ["deployments", "pods", "services", "nodes"]) {
+      const got = ids(kind, [row("x")]);
+      expect(got, kind).not.toContain("suspend");
+      expect(got, kind).not.toContain("run-now");
+      expect(got, kind).not.toContain("retry");
+    }
   });
 
   it("offers nothing for an empty selection", () => {

@@ -312,6 +312,18 @@ impl ClientManager {
         self.inner.read().await.custom_kinds.get(id).cloned()
     }
 
+    /// Look up a discovered custom kind by its Kubernetes Kind + group (B36:
+    /// create-from-YAML resolves a manifest's kind/group to the resource).
+    pub async fn custom_kind_by_name(&self, group: &str, kind: &str) -> Option<CustomKind> {
+        self.inner
+            .read()
+            .await
+            .custom_kinds
+            .values()
+            .find(|k| k.group == group && k.kind == kind)
+            .cloned()
+    }
+
     /// Register a lazily-started watcher for a custom kind. Replaces (and aborts)
     /// any existing watcher for the same kind, so double-registration is safe.
     pub async fn add_custom_watcher(&self, id: String, handle: JoinHandle<()>) {

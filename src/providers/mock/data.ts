@@ -99,10 +99,6 @@ export const MOCK_RESOURCES: Partial<Record<ResourceKind, RawRow[]>> = {
     R("db-migrate-v214", "prod", ["1/1", "42s", "4d2h"]),
     R("report-gen-28661", "prod", ["1/1", "3m12s", "6h"]),
   ],
-  cronjobs: [
-    R("report-gen", "prod", ["0 */6 * * *", "6h ago", "31d"]),
-    R("cache-warm", "prod", ["*/15 * * * *", "4m ago", "11d"]),
-  ],
   services: [
     R("valkyrie-api", "prod", ["ClusterIP", "10.96.14.22", "8080/TCP", "31d"]),
     R("bifrost-gateway", "prod", ["LoadBalancer", "10.96.8.101", "443/TCP", "31d"]),
@@ -521,6 +517,91 @@ function buildHelmRows(): Row[] {
 }
 
 // ---------------------------------------------------------------------------
+// RBAC (B49): roles and bindings. Includes the prometheus chain the backlog's
+// accept names: the panoptes-prometheus RoleBinding → the prometheus ClusterRole
+// granting nodes/metrics + nodes/proxy.
+// ---------------------------------------------------------------------------
+
+/** [name, ns, rules, age] */
+const MOCK_ROLES: [string, string, string, string][] = [
+  ["deployer", "prod", "2", "31d"],
+  ["viewer", "monitoring", "1", "18d"],
+];
+
+/** [name, rules, age] */
+const MOCK_CLUSTER_ROLES: [string, string, string][] = [
+  ["prometheus", "2", "18d"],
+  ["system:basic-user", "1", "31d"],
+];
+
+/** [name, ns, roleKind, roleName, subjects, age] */
+const MOCK_ROLE_BINDINGS: [string, string, string, string, string, string][] = [
+  ["panoptes-prometheus", "panoptes", "ClusterRole", "prometheus", "ServiceAccount/prometheus", "18d"],
+  ["prod-deployers", "prod", "Role", "deployer", "ServiceAccount/ci-bot, User/alice", "31d"],
+];
+
+/** [name, roleName, subjects, age] */
+const MOCK_CLUSTER_ROLE_BINDINGS: [string, string, string, string][] = [
+  ["system:basic-user", "system:basic-user", "Group/system:authenticated", "31d"],
+];
+
+function buildRoleRows(): Row[] {
+  return MOCK_ROLES.map(([name, ns, rules, age]) => ({
+    uid: `role:${ns}/${name}`,
+    name,
+    namespace: ns,
+    cells: [
+      { text: name, tone: "primary" },
+      { text: ns, tone: "muted" },
+      { text: rules, tone: "secondary" },
+      { text: age, tone: "muted" },
+    ],
+  }));
+}
+
+function buildClusterRoleRows(): Row[] {
+  return MOCK_CLUSTER_ROLES.map(([name, rules, age]) => ({
+    uid: `cr:${name}`,
+    name,
+    cells: [
+      { text: name, tone: "primary" },
+      { text: rules, tone: "secondary" },
+      { text: age, tone: "muted" },
+    ],
+  }));
+}
+
+function buildRoleBindingRows(): Row[] {
+  return MOCK_ROLE_BINDINGS.map(([name, ns, roleKind, roleName, subjects, age]) => ({
+    uid: `rb:${ns}/${name}`,
+    name,
+    namespace: ns,
+    cells: [
+      { text: name, tone: "primary" },
+      { text: ns, tone: "muted" },
+      roleKind === "ClusterRole"
+        ? { text: roleName, tone: "secondary", nav: { kind: "clusterroles", name: roleName } }
+        : { text: roleName, tone: "secondary", nav: { kind: "roles", namespace: ns, name: roleName } },
+      { text: subjects, tone: "secondary" },
+      { text: age, tone: "muted" },
+    ],
+  }));
+}
+
+function buildClusterRoleBindingRows(): Row[] {
+  return MOCK_CLUSTER_ROLE_BINDINGS.map(([name, roleName, subjects, age]) => ({
+    uid: `crb:${name}`,
+    name,
+    cells: [
+      { text: name, tone: "primary" },
+      { text: roleName, tone: "secondary", nav: { kind: "clusterroles", name: roleName } },
+      { text: subjects, tone: "secondary" },
+      { text: age, tone: "muted" },
+    ],
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Storage: PersistentVolumeClaims and PersistentVolumes
 // ---------------------------------------------------------------------------
 
@@ -588,6 +669,8 @@ const MOCK_SERVICEACCOUNTS: [string, string, number, string][] = [
   ["default", "staging", 0, "62d"],
   ["default", "monitoring", 0, "62d"],
   ["prometheus", "monitoring", 0, "31d"],
+  // The SA whose RBAC chain the demo shows (B49): granted nodes/metrics + nodes/proxy.
+  ["prometheus", "panoptes", 0, "18d"],
 ];
 
 function buildServiceAccountRows(): Row[] {
@@ -625,6 +708,32 @@ function buildStorageClassRows(): Row[] {
       { text: expansion, tone: "secondary" },
       { text: age, tone: "muted" },
     ],
+  }));
+}
+
+/** [name, ns, schedule, suspended, last run, age] — one suspended, so the
+ * Suspend/Resume verbs are demonstrable (B47). */
+const MOCK_CRONJOBS: [string, string, string, boolean, string, string][] = [
+  ["report-gen", "prod", "0 */6 * * *", false, "3h ago", "31d"],
+  ["cache-warm", "prod", "*/15 * * * *", true, "—", "11d"],
+];
+
+/** Build cronjob rows: NAME, NAMESPACE, SCHEDULE, SUSPENDED, LAST RUN, AGE. */
+function buildCronJobRows(): Row[] {
+  return MOCK_CRONJOBS.map(([name, ns, schedule, suspended, lastRun, age]) => ({
+    uid: `cron:${ns}/${name}`,
+    name,
+    namespace: ns,
+    cells: [
+      { text: name, tone: "primary" },
+      { text: ns, tone: "muted" },
+      { text: schedule, tone: "secondary" },
+      // A suspended schedule reads muted — it's paused, not broken (B47).
+      { text: suspended ? "yes" : "no", tone: suspended ? "muted" : "secondary" },
+      { text: lastRun, tone: "secondary" },
+      { text: age, tone: "muted" },
+    ],
+    cron: { suspended },
   }));
 }
 
@@ -734,8 +843,15 @@ export function buildKindRows(kind: ResourceKind): Row[] {
   if (kind === "ingressclasses") return buildIngressClassRows();
   if (kind === "replicasets") return buildReplicaSetRows();
   // Jobs carry the failed flag the problems view keys on (B32), so they get a
-  // dedicated builder rather than the generic RawRow path.
+  // dedicated builder rather than the generic RawRow path. CronJobs carry the
+  // suspended state for the SUSPENDED column and the Suspend/Resume verbs (B47).
   if (kind === "jobs") return buildJobRows();
+  if (kind === "cronjobs") return buildCronJobRows();
+  // RBAC kinds carry role/subject links and the chain demo needs (B49).
+  if (kind === "roles") return buildRoleRows();
+  if (kind === "clusterroles") return buildClusterRoleRows();
+  if (kind === "rolebindings") return buildRoleBindingRows();
+  if (kind === "clusterrolebindings") return buildClusterRoleBindingRows();
   const raw = MOCK_RESOURCES[kind] ?? [];
   const hasNamespaceCol = KIND_META[kind].columns[1] === "NAMESPACE";
 

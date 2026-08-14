@@ -13,7 +13,11 @@
 
 import { fuzzyMatch } from "./fuzzy";
 import { isCustomKind, KIND_META, KIND_ORDER, type KindId } from "./kinds";
+import { bookmarkKey } from "./bookmarks";
 import type { CustomKind, Row } from "../providers/types";
+
+/** A bookmarked object's score boost — it outranks a same-quality match (B56). */
+const BOOKMARK_BONUS = 20;
 
 /** Actions the palette can run. Data, not closures, so this stays testable. */
 export type ActionId = "settings" | "import-kubeconfig" | "cordon" | "uncordon";
@@ -61,6 +65,8 @@ export interface PaletteContext {
   /** The current kind, which decides which object actions apply. */
   nav: KindId;
   selectedRow: Row | null;
+  /** Bookmark keys (B56) — bookmarked objects rank higher. Absent = none. */
+  bookmarks?: Set<string>;
 }
 
 /** A query split into its `ns:` scope and the text to match. */
@@ -112,7 +118,17 @@ export function buildPalette(raw: string, ctx: PaletteContext): PaletteItem[] {
   // Objects are only listed once there's something to match: every row in the
   // cluster is not a useful default screen, and the empty palette should show
   // where you can *go*, not everything that exists.
-  const objects = text === "" ? [] : rankClass(objectCandidates(ctx, namespace), text, MAX_OBJECTS);
+  const objects =
+    text === ""
+      ? []
+      : rankClass(objectCandidates(ctx, namespace), text, MAX_OBJECTS, (item) =>
+          item.type === "object" &&
+          (ctx.bookmarks ?? new Set()).has(
+            bookmarkKey({ kind: item.kind, namespace: item.row.namespace, name: item.row.name }),
+          )
+            ? BOOKMARK_BONUS
+            : 0,
+        );
 
   // One list, ranked together: the scores come from the same query, so they're
   // comparable, and a strong object match should be able to outrank a weak kind
@@ -138,6 +154,7 @@ function rankClass<T extends PaletteItem>(
   candidates: { item: Omit<T, "score" | "indices">; targets: string[] }[],
   text: string,
   max: number,
+  boost?: (item: Omit<T, "score" | "indices">) => number,
 ): T[] {
   const out: T[] = [];
   for (const { item, targets } of candidates) {
@@ -149,7 +166,10 @@ function rankClass<T extends PaletteItem>(
       const indices = i === 0 ? m.indices : [];
       if (!best || m.score > best.score) best = { score: m.score, indices };
     }
-    if (best) out.push({ ...item, score: best.score, indices: best.indices } as T);
+    if (best) {
+      // A bookmark boost (B56) outranks a same-quality match on a non-bookmark.
+      out.push({ ...item, score: best.score + (boost?.(item) ?? 0), indices: best.indices } as T);
+    }
   }
   return out.sort(byScore).slice(0, max);
 }

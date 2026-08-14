@@ -80,6 +80,13 @@ async function copyToClipboard(text: string): Promise<void> {
 export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListProps) {
   const setPortForwards = useStore((s) => s.setPortForwards);
   const viewPods = useStore((s) => s.viewPods);
+  const toggleBookmark = useStore((s) => s.toggleBookmark);
+  const context = useStore((s) => s.connection.context ?? "");
+  const bookmarks = useStore((s) => s.bookmarksByContext[context] ?? []);
+  const bookmarked = (row: Row) =>
+    bookmarks.some(
+      (b) => b.kind === kind && (b.namespace ?? "") === (row.namespace ?? "") && b.name === row.name,
+    );
 
   const [mode, setMode] = useState<Mode>({ kind: "menu" });
   const [busy, setBusy] = useState(false);
@@ -95,7 +102,7 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
   const refOf = (row: Row): ResourceRef => ({ kind, namespace: row.namespace, name: row.name });
 
   /** Execute an action, then close (or report). `gone` means the objects are no more. */
-  async function execute(fn: (row: Row) => Promise<void>, gone: boolean) {
+  async function execute(fn: (row: Row) => Promise<unknown>, gone: boolean) {
     setBusy(true);
     onError(null);
     try {
@@ -131,6 +138,11 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
         viewPods(single.namespace, selectorFilter(single.selector ?? {}));
         onClose();
         break;
+      case "bookmark":
+        // B56: toggle quick access for this one object (the action is per-object).
+        toggleBookmark({ kind, namespace: single.namespace, name: single.name });
+        onClose();
+        break;
     }
   }
 
@@ -154,6 +166,20 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
       case "drain":
         // Resolves once cordoned; the eviction progress streams to the banner.
         void execute((row) => getProvider().drainNode(row.name), false);
+        break;
+      case "suspend":
+        void execute((row) => getProvider().setCronjobSuspend(refOf(row), true), false);
+        break;
+      case "resume":
+        void execute((row) => getProvider().setCronjobSuspend(refOf(row), false), false);
+        break;
+      case "run-now":
+        void execute((row) => getProvider().runCronjob(refOf(row)), false);
+        break;
+      case "retry":
+        // The failed Job is deleted; the retry is a fresh, unowned Job — the row
+        // this menu was opened on no longer exists.
+        void execute((row) => getProvider().retryJob(refOf(row)), true);
         break;
     }
   }
@@ -276,7 +302,8 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
       )}
       {safe.map((a) => (
         <div key={a.id} className={styles.row} onClick={() => pick(a)}>
-          {a.label}
+          {/* The bookmark action's label follows the row's state. */}
+          {a.id === "bookmark" && single ? (bookmarked(single) ? "Unbookmark" : "Bookmark") : a.label}
         </div>
       ))}
       {safe.length > 0 && dangerous.length > 0 && <div className={styles.separator} />}
@@ -298,6 +325,14 @@ function label(id: ActionId): string {
       return "Restart";
     case "drain":
       return "Drain";
+    case "suspend":
+      return "Suspend";
+    case "resume":
+      return "Resume";
+    case "run-now":
+      return "Run now";
+    case "retry":
+      return "Retry";
     default:
       return "Confirm";
   }

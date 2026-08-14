@@ -9,64 +9,8 @@ import styles from "./YamlTab.module.css";
 import { useStore } from "../../store";
 import { getProvider } from "../../providers";
 import { CodeEditor } from "./CodeEditor";
-import { diffLines, diffStat, hasChanges, hunks } from "../../lib/diff";
+import { DiffView } from "./DiffView";
 import type { ResourceRef, YamlDiff } from "../../providers/types";
-
-/**
- * What the server says this edit would do (B36) — the live object against the
- * object that would be stored, so defaulting and mutating webhooks are visible
- * before anything is written.
- *
- * Only changed regions are shown. A manifest is mostly unchanged, and rendering
- * the whole file would bury the one line that matters.
- */
-function DiffView({ diff }: { diff: YamlDiff }) {
-  const lines = diffLines(diff.current, diff.proposed);
-  const groups = hunks(lines);
-  const { added, removed } = diffStat(lines);
-
-  if (!hasChanges(lines)) {
-    return (
-      <div className={styles.diffWrap}>
-        <div className={styles.diffEmpty}>
-          No changes — the server would store this object exactly as it is now.
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className={styles.diffWrap}>
-      <div className={styles.diffStat}>
-        <span className={styles.diffAdded}>+{added}</span>{" "}
-        <span className={styles.diffRemoved}>−{removed}</span>{" "}
-        <span className={styles.diffNote}>
-          as the server would store it, after defaulting and any mutating webhooks
-        </span>
-      </div>
-      {groups.map((g, i) => (
-        <div className={styles.diffHunk} key={i}>
-          {g.map((l, j) => (
-            <div
-              key={j}
-              className={[
-                styles.diffLine,
-                l.op === "add" ? styles.diffLineAdd : "",
-                l.op === "del" ? styles.diffLineDel : "",
-              ].join(" ")}
-            >
-              <span className={styles.diffGutter}>{l.before ?? l.after ?? ""}</span>
-              <span className={styles.diffSign}>
-                {l.op === "add" ? "+" : l.op === "del" ? "−" : " "}
-              </span>
-              <span className={styles.diffText}>{l.text || " "}</span>
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export function YamlTab() {
   const row = useStore((s) => s.selectedRow);
@@ -214,7 +158,11 @@ export function YamlTab() {
       {error && <div className={styles.error}>{error}</div>}
 
       {yamlEditing && review ? (
-        <DiffView diff={review} />
+        <DiffView
+          diff={review}
+          note="as the server would store it, after defaulting and any mutating webhooks"
+          empty="No changes — the server would store this object exactly as it is now."
+        />
       ) : yamlEditing ? (
         <div className={`${styles.editorWrap} ${styles.editing}`}>
           <CodeEditor key={`edit:${row.uid}`} value={yamlText} editable onChange={setYamlDraft} />

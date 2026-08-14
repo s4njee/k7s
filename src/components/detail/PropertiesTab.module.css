@@ -166,6 +166,35 @@
   color: var(--status-err);
   font-size: 10px;
 }
+
+/* ---------- Secret copy-value buttons (B37) ---------- */
+
+.copyButton {
+  background: none;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.copyButton:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+/* The transient "copied ✓" flash — green, so it reads as success at a glance. */
+.copyDone {
+  border-color: var(--status-ok);
+  color: var(--status-ok);
+}
+.copyError {
+  color: var(--status-err);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 4px 0;
+}
 /* Long values (images, mount paths, condition messages) wrap rather than blow out
    the panel — applied per value, not per column (see `wraps` in PropertiesTab).
    `anywhere` breaks at spaces first and only splits a token when it has no other

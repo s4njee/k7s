@@ -20,6 +20,7 @@ export function TopBar() {
   const closeMenus = useStore((s) => s.closeMenus);
   const setNamespace = useStore((s) => s.setNamespace);
   const customKinds = useStore((s) => s.customKinds);
+  const setCreateOpen = useStore((s) => s.setCreateOpen);
 
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, closeMenus, open);
@@ -43,6 +44,14 @@ export function TopBar() {
       </div>
 
       <div className={styles.spacer} />
+
+      {/* B36: create an object from pasted YAML. Only while connected — a
+          disconnected top bar has nothing to create against. */}
+      {connection.phase === "connected" && (
+        <div className={styles.createBtn} onClick={() => setCreateOpen(true)} title="create from YAML">
+          + Create
+        </div>
+      )}
 
       <div className={styles.nsWrap} ref={ref}>
         <div className={styles.nsButton} onClick={() => toggleMenu("ns")}>

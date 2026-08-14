@@ -15,6 +15,7 @@ import styles from "./CommandPalette.module.css";
 import { useStore } from "../../store";
 import { getProvider } from "../../providers";
 import { buildPalette, type ActionId, type PaletteItem } from "../../lib/palette";
+import { bookmarkKey } from "../../lib/bookmarks";
 
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen);
@@ -24,6 +25,8 @@ export function CommandPalette() {
   const customKinds = useStore((s) => s.customKinds);
   const nav = useStore((s) => s.nav);
   const selectedRow = useStore((s) => s.selectedRow);
+  const context = useStore((s) => s.connection.context ?? "");
+  const bookmarks = useStore((s) => s.bookmarksByContext[context] ?? []);
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -31,8 +34,17 @@ export function CommandPalette() {
   const listRef = useRef<HTMLDivElement>(null);
 
   const items = useMemo(
-    () => (open ? buildPalette(query, { rows, customKinds, nav, selectedRow }) : []),
-    [open, query, rows, customKinds, nav, selectedRow],
+    () =>
+      open
+        ? buildPalette(query, {
+            rows,
+            customKinds,
+            nav,
+            selectedRow,
+            bookmarks: new Set(bookmarks.map(bookmarkKey)),
+          })
+        : [],
+    [open, query, rows, customKinds, nav, selectedRow, bookmarks],
   );
 
   // A fresh palette every time: the last query is rarely the next one, and

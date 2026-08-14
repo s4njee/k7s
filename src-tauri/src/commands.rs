@@ -7,12 +7,15 @@ use crate::error::{AppError, AppResult};
 use crate::kube::client::{self, ClusterInfo, ContextInfo};
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
 use crate::kube::{
-    discovery, drain, exec, exporter, helm, logs, mappers, metrics, nodeshell, nodestats,
-    portforward, promql, properties, restart, watchers, ClientManager, ResourceKind,
+    batch, discovery, drain, exec, exporter, helm, logs, mappers, metrics, nodeshell, nodestats,
+    portforward, promql, properties, restart, topology, watchers, ClientManager, ResourceKind,
 };
 use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::Event;
+use crate::kube::dto::EventInvolved;
+use crate::kube::dto::InvolvedRef;
 use kube::api::{
     Api, ApiResource, DeleteParams, DynamicObject, ListParams, Patch, PatchParams, PostParams,
 };
@@ -66,6 +69,11 @@ pub struct Prefs {
     pub accent: Option<String>,
     /// Disable the pulsing "live" dot and other motion. Frontend-only.
     pub reduce_motion: Option<bool>,
+    /// Native problem notifications (B50). Frontend-only.
+    pub notifications: Option<bool>,
+    /// Resource bookmarks (B56), keyed by context. Frontend-owned, so it's
+    /// carried as an opaque JSON value to round-trip through saves.
+    pub bookmarks: Option<serde_json::Value>,
     /// Container image for the node debug shell; None/empty uses the default (B53).
     pub node_shell_image: Option<String>,
 }
@@ -318,6 +326,10 @@ async fn resource_for(kind: &str, mgr: &ClientManager) -> AppResult<(ApiResource
         "configmaps" => ("", "v1", "ConfigMap", true),
         "secrets" => ("", "v1", "Secret", true),
         "serviceaccounts" => ("", "v1", "ServiceAccount", true),
+        "roles" => ("rbac.authorization.k8s.io", "v1", "Role", true),
+        "clusterroles" => ("rbac.authorization.k8s.io", "v1", "ClusterRole", false),
+        "rolebindings" => ("rbac.authorization.k8s.io", "v1", "RoleBinding", true),
+        "clusterrolebindings" => ("rbac.authorization.k8s.io", "v1", "ClusterRoleBinding", false),
         "persistentvolumeclaims" => ("", "v1", "PersistentVolumeClaim", true),
         "persistentvolumes" => ("", "v1", "PersistentVolume", false),
         "storageclasses" => ("storage.k8s.io", "v1", "StorageClass", false),
@@ -397,6 +409,111 @@ pub async fn get_yaml(
     Ok(serde_yaml::to_string(&obj)?)
 }
 
+/// The live object and its last-applied baseline, for the Diff tab (B54).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffPayload {
+    /// The live object as YAML (redacted for Secrets).
+    pub live: String,
+    /// The last-applied baseline as YAML, when one can be reconstructed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<String>,
+}
+
+/// The delta between an object and its last-applied configuration (B54).
+///
+/// The baseline is the `kubectl.kubernetes.io/last-applied-configuration`
+/// annotation (client-side apply); when it's absent, a reconstruction from the
+/// server-side-apply managed fields. Neither present → `baseline: None`, and the
+/// UI shows a clean "no baseline" state.
+#[tauri::command]
+pub async fn get_diff(
+    kind: String,
+    namespace: String,
+    name: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<DiffPayload> {
+    let client = require_client(&mgr).await?;
+    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
+    let mut obj = api.get(&name).await?;
+    // Never surface Secret values — in the live YAML or the baseline (a Secret's
+    // last-applied annotation carries the raw data). `redact_secret` touches the
+    // data map, not the annotations, so the baseline is still extractable after.
+    if kind == "secrets" {
+        redact_secret(&mut obj);
+    }
+    let live = serde_yaml::to_string(&obj)?;
+    let baseline = last_applied_baseline(&obj)
+        .map(|v| if kind == "secrets" { redact_secret_value(v) } else { v })
+        .map(|v| serde_yaml::to_string(&v).unwrap_or_default())
+        .filter(|s| !s.is_empty());
+    Ok(DiffPayload { live, baseline })
+}
+
+/// The last-applied configuration of an object, or None when there's no source:
+/// the client-side-apply annotation first, then a managed-fields reconstruction.
+fn last_applied_baseline(obj: &DynamicObject) -> Option<serde_json::Value> {
+    if let Some(ann) = obj
+        .metadata
+        .annotations
+        .as_ref()
+        .and_then(|a| a.get("kubectl.kubernetes.io/last-applied-configuration"))
+    {
+        if let Ok(v) = serde_yaml::from_str::<serde_json::Value>(ann) {
+            return Some(v);
+        }
+    }
+    // Server-side apply: the apply-manager's fieldsV1 gives the shape; the live
+    // object's values are the only surviving copy of what was applied.
+    let fields = obj
+        .metadata
+        .managed_fields
+        .as_ref()?
+        .iter()
+        .find(|m| m.operation.as_deref() == Some("Apply"))
+        .and_then(|m| m.fields_v1.clone())?;
+    let full = serde_json::to_value(obj).ok()?;
+    reconstruct_from_managed(&full, &fields.0)
+}
+
+/// Reconstruct an applied object from a fieldsV1 tree: keep the live values only
+/// where the tree marks a field as applied. Objects recurse (owning their
+/// sub-fields); leaves and atomic lists are taken wholesale.
+fn reconstruct_from_managed(
+    live: &serde_json::Value,
+    fields: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let obj = fields.as_object()?;
+    let mut out = serde_json::Map::new();
+    for (key, marker) in obj {
+        let Some(name) = key.strip_prefix("f:") else { continue };
+        let Some(live_v) = live.get(name) else { continue };
+        if marker.is_object() && live_v.is_object() {
+            if let Some(recon) = reconstruct_from_managed(live_v, marker) {
+                out.insert(name.to_string(), recon);
+            }
+        } else {
+            out.insert(name.to_string(), live_v.clone());
+        }
+    }
+    if out.is_empty() {
+        return None;
+    }
+    Some(serde_json::Value::Object(out))
+}
+
+/// Mask the values of a Secret's data/stringData maps, for a baseline YAML.
+fn redact_secret_value(mut v: serde_json::Value) -> serde_json::Value {
+    for field in ["data", "stringData"] {
+        if let Some(serde_json::Value::Object(map)) = v.get_mut(field) {
+            for val in map.values_mut() {
+                *val = serde_json::Value::String("<redacted>".into());
+            }
+        }
+    }
+    v
+}
+
 /// Replace `data` values in a Secret with a placeholder so raw values never leave
 /// the backend.
 fn redact_secret(obj: &mut DynamicObject) {
@@ -407,6 +524,74 @@ fn redact_secret(obj: &mut DynamicObject) {
             }
         }
     }
+}
+
+/// The value of one Secret key, for the clipboard (B37). `data` values are
+/// base64 and decode to text; a value that isn't UTF-8 (a TLS key, a
+/// dockerconfig) stays in its base64 form — copying raw bytes to a text
+/// clipboard is useless. `stringData` values are already plain.
+fn secret_value(secret: &k8s_openapi::api::core::v1::Secret, key: &str) -> Option<String> {
+    if let Some(bs) = secret.data.as_ref().and_then(|d| d.get(key)) {
+        return Some(match String::from_utf8(bs.0.clone()) {
+            Ok(text) => text,
+            Err(_) => {
+                use base64::Engine as _;
+                base64::engine::general_purpose::STANDARD.encode(&bs.0)
+            }
+        });
+    }
+    secret.string_data.as_ref().and_then(|s| s.get(key)).cloned()
+}
+
+/// Copy one Secret value to the system clipboard (B37). The value is decoded and
+/// written entirely in Rust — it never crosses into the webview, so the UI only
+/// ever learns that the copy succeeded, not what it copied.
+#[tauri::command]
+pub async fn copy_secret_value(
+    namespace: String,
+    name: String,
+    key: String,
+    app: tauri::AppHandle,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<()> {
+    let client = require_client(&mgr).await?;
+    let api: Api<k8s_openapi::api::core::v1::Secret> = Api::namespaced(client, &namespace);
+    let secret = api.get(&name).await?;
+    let value = secret_value(&secret, &key)
+        .ok_or_else(|| AppError::NotFound(format!("no key {key} in {namespace}/{name}")))?;
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    app.clipboard()
+        .write_text(value)
+        .map_err(|e| AppError::Other(format!("clipboard write failed: {e}")))?;
+    Ok(())
+}
+
+/// Show a native notification that a problem appeared (B50). The target is
+/// carried as `extra` payload, so a click can focus the window and navigate to
+/// the object. Best-effort: the OS can quietly disable notifications, and that
+/// isn't an app error — it's the user's choice.
+#[tauri::command]
+pub async fn notify_problem(
+    kind: String,
+    namespace: String,
+    name: String,
+    reason: String,
+    app: tauri::AppHandle,
+) -> AppResult<()> {
+    use tauri_plugin_notification::NotificationExt;
+    let result = app
+        .notification()
+        .builder()
+        .title(format!("{kind}: {name}"))
+        .body(reason)
+        .extra("kind", kind.clone())
+        .extra("namespace", namespace.clone())
+        .extra("name", name.clone())
+        .show();
+    if let Err(e) = result {
+        tracing::warn!("problem notification failed to show: {e}");
+    }
+    Ok(())
 }
 
 /// Apply edited YAML back to the cluster via replace (preserving resourceVersion
@@ -498,6 +683,90 @@ pub async fn dry_run_yaml(
         current: serde_yaml::to_string(&current)?,
         proposed: serde_yaml::to_string(&proposed)?,
     })
+}
+
+/// The answer to a create-from-YAML request (B36): what the server would store,
+/// and — when actually created — where it went.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateOutcome {
+    /// The manifest as the server would store it (dry-run result), for preview.
+    pub proposed: String,
+    /// The created object's nav target; present only when not a dry run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<CreatedTarget>,
+}
+
+/// Where a created object landed, for the frontend to navigate to it.
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedTarget {
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
+    pub name: String,
+}
+
+/// Create an object from pasted YAML (B36). The manifest's apiVersion/kind
+/// select the resource (built-in, or a discovered CRD by group+kind);
+/// metadata.namespace — or the supplied namespace — places it. With
+/// `dry_run`, nothing is written: the server returns the object as it would
+/// store it (defaulting + admission applied), which is the preview.
+#[tauri::command]
+pub async fn create_resource(
+    yaml: String,
+    namespace: String,
+    dry_run: bool,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<CreateOutcome> {
+    let client = require_client(&mgr).await?;
+    let mut obj: DynamicObject = serde_yaml::from_str(&yaml)?;
+    let kind = obj.types.as_ref().map(|t| t.kind.clone()).unwrap_or_default();
+    let api_version = obj.types.as_ref().map(|t| t.api_version.clone()).unwrap_or_default();
+    if kind.is_empty() || api_version.is_empty() {
+        return Err(AppError::Other("the manifest needs apiVersion and kind".into()));
+    }
+    let nav = nav_for_manifest(&mgr, &kind, &api_version).await
+        .ok_or_else(|| AppError::Other(format!("cannot create a {kind}: it isn't a listed kind")))?;
+    let (ar, namespaced) = resource_for(&nav, &mgr).await?;
+    // The object's own namespace wins; else the supplied one. Cluster-scoped
+    // kinds ignore both.
+    let ns = if namespaced { obj.metadata.namespace.clone().unwrap_or(namespace) } else { String::new() };
+    if namespaced {
+        obj.metadata.namespace = Some(ns.clone());
+    }
+    let api: Api<DynamicObject> = if namespaced {
+        Api::namespaced_with(client, &ns, &ar)
+    } else {
+        Api::all_with(client, &ar)
+    };
+
+    let pp = if dry_run {
+        PostParams { dry_run: true, ..Default::default() }
+    } else {
+        PostParams::default()
+    };
+    let mut created = api.create(&pp, &obj).await?;
+    created.metadata.managed_fields = None;
+    let name = created.metadata.name.clone().unwrap_or_default();
+    Ok(CreateOutcome {
+        proposed: serde_yaml::to_string(&created)?,
+        created: (!dry_run).then(|| CreatedTarget {
+            kind: nav,
+            namespace: namespaced.then_some(ns),
+            name,
+        }),
+    })
+}
+
+/// Resolve a parsed manifest's Kind + apiVersion to a nav id: a built-in by its
+/// Kind, a CRD by Kind+group against the discovered kinds.
+async fn nav_for_manifest(mgr: &ClientManager, kind: &str, api_version: &str) -> Option<String> {
+    if let Some(nav) = properties::builtin_nav_id(kind) {
+        return Some(nav.to_string());
+    }
+    let group = api_version.split('/').next().unwrap_or_default();
+    mgr.custom_kind_by_name(group, kind).await.map(|k| k.id)
 }
 
 /// Delete a resource of any kind. The frontend confirms first; API errors are
@@ -613,6 +882,69 @@ pub async fn undo_rollout(
     })?;
     api.patch(&name, &PatchParams::default(), &Patch::Merge(patch)).await?;
     Ok(revision)
+}
+
+/// Suspend or resume a CronJob by patching `spec.suspend` (B47).
+#[tauri::command]
+pub async fn set_cronjob_suspend(
+    namespace: String,
+    name: String,
+    suspended: bool,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<()> {
+    let client = require_client(&mgr).await?;
+    let api: Api<CronJob> = Api::namespaced(client, &namespace);
+    api.patch(&name, &PatchParams::default(), &Patch::Merge(batch::suspend_patch(suspended)))
+        .await?;
+    Ok(())
+}
+
+/// Run a CronJob's jobTemplate now (B47): create a Job from it, the exact
+/// mechanic of `kubectl create job --from=cronjob/x`. The Job is owned by
+/// nothing, so it can be deleted on its own. Returns the new Job's name.
+#[tauri::command]
+pub async fn run_cronjob(
+    namespace: String,
+    name: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<String> {
+    let client = require_client(&mgr).await?;
+    let api: Api<CronJob> = Api::namespaced(client.clone(), &namespace);
+    let cronjob = api.get(&name).await?;
+    let seq = STREAM_SEQ.fetch_add(1, Ordering::Relaxed);
+    let job = batch::manual_job(&cronjob, seq)
+        .ok_or_else(|| AppError::Other(format!("{namespace}/{name} has no jobTemplate")))?;
+    let jobs: Api<Job> = Api::namespaced(client, &namespace);
+    let created = jobs.create(&PostParams::default(), &job).await?;
+    Ok(created.metadata.name.unwrap_or_default())
+}
+
+/// Retry a failed Job (B47): delete it, then recreate from its own spec minus
+/// the controller-owned fields, so the retry is a fresh, unowned Job. Refuses a
+/// Job that hasn't failed. Returns the new Job's name.
+#[tauri::command]
+pub async fn retry_job(
+    namespace: String,
+    name: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<String> {
+    let client = require_client(&mgr).await?;
+    let jobs: Api<Job> = Api::namespaced(client.clone(), &namespace);
+    let job = jobs.get(&name).await?;
+    let failed = job
+        .status
+        .as_ref()
+        .and_then(|s| s.conditions.as_ref())
+        .map(|cs| cs.iter().any(|c| c.type_ == "Failed" && c.status == "True"))
+        .unwrap_or(false);
+    if !failed {
+        return Err(AppError::Other(format!("{namespace}/{name} hasn't failed; nothing to retry")));
+    }
+    let seq = STREAM_SEQ.fetch_add(1, Ordering::Relaxed);
+    let retried = batch::retried_job(&job, seq).ok_or_else(|| AppError::Other("Job has no spec".into()))?;
+    jobs.delete(&name, &DeleteParams::default()).await?;
+    let created = jobs.create(&PostParams::default(), &retried).await?;
+    Ok(created.metadata.name.unwrap_or_default())
 }
 
 /// Start watching a custom (CRD-backed) kind (B15), if it isn't already watched.
@@ -752,6 +1084,10 @@ pub struct EventItem {
     message: String,
     count: i32,
     age: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timestamp: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    involved: Option<EventInvolved>,
 }
 
 /// Gather an object's properties as a generic section document (B13, B18).
@@ -766,6 +1102,21 @@ pub async fn get_properties(
 ) -> AppResult<properties::Properties> {
     let client = require_client(&mgr).await?;
     properties::gather(client, &kind, &namespace, &name).await
+}
+
+/// The ownership/reference graph around a resource (B55).
+#[tauri::command]
+pub async fn get_topology(
+    kind: String,
+    namespace: String,
+    name: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<topology::Topology> {
+    let client = require_client(&mgr).await?;
+    let api = dynamic_api(client.clone(), &kind, &namespace, &mgr).await?;
+    let seed = api.get(&name).await?;
+    let seed_kind = seed.types.as_ref().map(|t| t.kind.clone()).unwrap_or_default();
+    topology::build(&client, &namespace, &seed_kind, &seed).await
 }
 
 /// List events for an object, newest first, field-selected by involvedObject.
@@ -794,6 +1145,15 @@ pub async fn get_events(
             message: e.message.clone().unwrap_or_default(),
             count: e.count.unwrap_or(1),
             age: event_age(e),
+            timestamp: e.first_timestamp.as_ref().map(|t| t.0.to_rfc3339()),
+            involved: e.involved_object.as_ref().map(|inv| {
+                InvolvedRef {
+                    kind: inv.kind.clone().unwrap_or_default(),
+                    name: inv.name.clone().unwrap_or_default(),
+                    namespace: inv.namespace.clone(),
+                    api_version: inv.api_version.clone(),
+                }
+            }),
         })
         .collect();
     Ok(items)
@@ -1323,4 +1683,118 @@ fn last_seen(e: &Event) -> chrono::DateTime<chrono::Utc> {
 fn event_age(e: &Event) -> String {
     let secs = (chrono::Utc::now() - last_seen(e)).num_seconds().max(0);
     mappers::humanize_duration(secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::secret_value;
+    use k8s_openapi::api::core::v1::Secret;
+    use serde_json::json;
+
+    /// A text value in `data` (base64) decodes to its plaintext — the thing
+    /// `kubectl get secret … | base64 -d` yields.
+    #[test]
+    fn data_text_value_decodes() {
+        let s: Secret = serde_json::from_value(json!({
+            "metadata": { "name": "creds", "namespace": "prod" },
+            "data": { "password": "aHVudGVyMg==" }, // "hunter2"
+        }))
+        .unwrap();
+        assert_eq!(secret_value(&s, "password").as_deref(), Some("hunter2"));
+    }
+
+    /// A binary value (a TLS key) stays in its base64 form — copying raw bytes to
+    /// a text clipboard would be useless.
+    #[test]
+    fn binary_value_stays_base64() {
+        let s: Secret = serde_json::from_value(json!({
+            "metadata": { "name": "tls", "namespace": "prod" },
+            "data": { "tls.key": "AP////8=" }, // 0x00ff ffff, not UTF-8 text
+        }))
+        .unwrap();
+        assert_eq!(secret_value(&s, "tls.key").as_deref(), Some("AP////8="));
+    }
+
+    /// `stringData` values are already plain; an unknown key is None.
+    #[test]
+    fn string_data_is_plain_and_missing_key_is_none() {
+        let s: Secret = serde_json::from_value(json!({
+            "metadata": { "name": "creds", "namespace": "prod" },
+            "stringData": { "username": "admin" },
+        }))
+        .unwrap();
+        assert_eq!(secret_value(&s, "username").as_deref(), Some("admin"));
+        assert_eq!(secret_value(&s, "nope"), None);
+    }
+}
+
+#[cfg(test)]
+mod diff_tests {
+    use super::*;
+    use kube::core::DynamicObject;
+    use serde_json::json;
+
+    /// The client-side-apply annotation is the baseline, verbatim.
+    #[test]
+    fn baseline_from_last_applied_annotation() {
+        let obj: DynamicObject = serde_json::from_value(json!({
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {
+                "name": "api", "namespace": "prod",
+                "annotations": {
+                    "kubectl.kubernetes.io/last-applied-configuration":
+                        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n  replicas: 2\n"
+                },
+            },
+            "spec": { "replicas": 3 },
+        }))
+        .unwrap();
+        let baseline = last_applied_baseline(&obj).expect("the annotation is the baseline");
+        assert_eq!(baseline["spec"]["replicas"], 2, "the applied value, not the live one");
+    }
+
+    /// No annotation: a server-side-apply object reconstructs its applied shape
+    /// from the apply-manager's fieldsV1, taking values from the live object.
+    #[test]
+    fn baseline_reconstructed_from_managed_fields() {
+        let obj: DynamicObject = serde_json::from_value(json!({
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {
+                "name": "api",
+                "labels": { "app": "api" },
+                "managedFields": [{
+                    "manager": "kubectl-client-side-apply",
+                    "operation": "Apply",
+                    "fieldsType": "FieldsV1",
+                    "fieldsV1": {
+                        "f:metadata": { "f:labels": { "f:app": {} } },
+                        "f:spec": { "f:replicas": {} },
+                    },
+                }],
+            },
+            "spec": { "replicas": 5, "selector": { "matchLabels": { "app": "api" } } },
+        }))
+        .unwrap();
+        let baseline = last_applied_baseline(&obj).expect("managed fields reconstruct a baseline");
+        assert_eq!(baseline["spec"]["replicas"], 5, "an applied field keeps its live value");
+        assert_eq!(baseline["metadata"]["labels"]["app"], "api");
+        // serde_json's index returns Null for a missing key, so this covers
+        // both "absent" and "explicitly null": either way it wasn't applied.
+        assert!(baseline["spec"]["selector"].is_null(),
+            "an unapplied field (selector) is not part of the baseline");
+    }
+
+    /// Neither annotation nor apply-managed-fields: no baseline.
+    #[test]
+    fn no_baseline_without_annotation_or_apply_fields() {
+        let obj: DynamicObject = serde_json::from_value(json!({
+            "apiVersion": "v1", "kind": "ConfigMap",
+            "metadata": { "name": "c", "namespace": "prod" },
+            "data": { "k": "v" },
+        }))
+        .unwrap();
+        assert!(last_applied_baseline(&obj).is_none());
+    }
 }

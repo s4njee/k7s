@@ -35,6 +35,26 @@
 .nsWrap {
   position: relative;
 }
+/* + Create (B36): the accent affordance, right of the breadcrumb. */
+.createBtn {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--bg-app);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.createBtn:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
 .nsButton {
   display: flex;
   align-items: center;

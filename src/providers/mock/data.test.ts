@@ -73,6 +73,31 @@ describe("demo problems (B32)", () => {
     return out;
   }
 
+  it("carries the suspended state and column on cronjobs (B47)", () => {
+    const rows = buildKindRows("cronjobs");
+    const byName = Object.fromEntries(rows.map((r) => [r.name, r]));
+    // Columns: NAME, NAMESPACE, SCHEDULE, SUSPENDED, LAST RUN, AGE.
+    expect(byName["cache-warm"]?.cron).toEqual({ suspended: true });
+    expect(byName["cache-warm"]?.cells[3]).toMatchObject({ text: "yes", tone: "muted" });
+    expect(byName["report-gen"]?.cron).toEqual({ suspended: false });
+    expect(byName["report-gen"]?.cells[3]).toMatchObject({ text: "no" });
+  });
+
+  it("builds the RBAC kinds with role/subject links (B49)", () => {
+    const rbs = buildKindRows("rolebindings");
+    const panoptes = rbs.find((r) => r.name === "panoptes-prometheus");
+    expect(panoptes).toBeDefined();
+    // NAME, NAMESPACE, ROLE, SUBJECTS, AGE — the ROLE links to the clusterrole.
+    expect(panoptes?.cells[2].nav).toEqual({ kind: "clusterroles", name: "prometheus" });
+    expect(panoptes?.cells[3].text).toBe("ServiceAccount/prometheus");
+
+    const crbs = buildKindRows("clusterrolebindings");
+    expect(crbs[0]?.cells[1].nav).toEqual({ kind: "clusterroles", name: "system:basic-user" });
+
+    const crs = buildKindRows("clusterroles");
+    expect(crs.some((r) => r.name === "prometheus")).toBe(true);
+  });
+
   it("derives the freya-style fixtures the mock was given", () => {
     const problems = deriveProblems(mockRows());
 

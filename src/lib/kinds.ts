@@ -20,6 +20,7 @@ export type NavGroup =
   | "storage"
   | "cluster"
   | "helm"
+  | "access"
   | "custom";
 
 /** Human-readable group headers (mono uppercase in the sidebar). */
@@ -30,6 +31,7 @@ export const GROUP_LABELS: Record<NavGroup, string> = {
   storage: "Storage",
   cluster: "Cluster",
   helm: "Helm",
+  access: "Access",
   custom: "Custom",
 };
 
@@ -91,7 +93,7 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     group: "workloads",
     label: "CronJobs",
     icon: "↻",
-    columns: ["NAME", "NAMESPACE", "SCHEDULE", "LAST RUN", "AGE"],
+    columns: ["NAME", "NAMESPACE", "SCHEDULE", "SUSPENDED", "LAST RUN", "AGE"],
   },
   // ---- Network ----
   services: {
@@ -126,15 +128,37 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     icon: "⚿",
     columns: ["NAME", "NAMESPACE", "TYPE", "DATA", "AGE"],
   },
-  // The identity a pod runs as. Filed under Config rather than a group of its
-  // own: it's a namespaced thing you configure a workload with, and it sits
-  // naturally beside the Secrets it used to mint. (If RBAC lands later, an
-  // Access group holding both would be the better home.)
+  // ---- Access (B49) ----
+  // The identity a pod runs as, and the roles/bindings that grant it access.
   serviceaccounts: {
-    group: "config",
+    group: "access",
     label: "ServiceAccounts",
     icon: "☺",
     columns: ["NAME", "NAMESPACE", "SECRETS", "AGE"],
+  },
+  roles: {
+    group: "access",
+    label: "Roles",
+    icon: "⚷",
+    columns: ["NAME", "NAMESPACE", "RULES", "AGE"],
+  },
+  clusterroles: {
+    group: "access",
+    label: "ClusterRoles",
+    icon: "⚿",
+    columns: ["NAME", "RULES", "AGE"],
+  },
+  rolebindings: {
+    group: "access",
+    label: "RoleBindings",
+    icon: "⛓",
+    columns: ["NAME", "NAMESPACE", "ROLE", "SUBJECTS", "AGE"],
+  },
+  clusterrolebindings: {
+    group: "access",
+    label: "ClusterRoleBindings",
+    icon: "⛓",
+    columns: ["NAME", "ROLE", "SUBJECTS", "AGE"],
   },
   // ---- Storage ----
   // Claims first: a claim is what a workload actually references, and the volume
@@ -215,6 +239,8 @@ const CLUSTER_SCOPED: ReadonlySet<string> = new Set<string>([
   "persistentvolumes",
   "storageclasses",
   "ingressclasses",
+  "clusterroles",
+  "clusterrolebindings",
 ]);
 
 /** Groups in sidebar order. */
@@ -225,6 +251,7 @@ export const GROUP_ORDER: NavGroup[] = [
   "storage",
   "cluster",
   "helm",
+  "access",
   "custom",
 ];
 
@@ -246,10 +273,24 @@ export const KINDS_WITH_PROPERTIES: ReadonlySet<string> = new Set<string>([
   "persistentvolumeclaims",
   "persistentvolumes",
   "replicasets",
+  // B37: Secrets get a data-keys panel with per-key copy buttons.
+  "secrets",
+  // B49: the SA panel shows the RBAC chain; the bindings panels check subjects.
+  "serviceaccounts",
+  "rolebindings",
+  "clusterrolebindings",
 ]);
 
 /** Detail-panel tabs, in strip order. Mirrors DetailTab in the store. */
-export type DetailTabId = "logs" | "properties" | "metrics" | "shell" | "yaml" | "events";
+export type DetailTabId =
+  | "logs"
+  | "properties"
+  | "metrics"
+  | "shell"
+  | "yaml"
+  | "events"
+  | "diff"
+  | "topology";
 
 /** Tab id → label, in the order the strip renders them. */
 export const DETAIL_TABS: { id: DetailTabId; label: string }[] = [
@@ -258,6 +299,8 @@ export const DETAIL_TABS: { id: DetailTabId; label: string }[] = [
   { id: "metrics", label: "Metrics" },
   { id: "shell", label: "Shell" },
   { id: "yaml", label: "YAML" },
+  { id: "diff", label: "Diff" },
+  { id: "topology", label: "Topology" },
   { id: "events", label: "Events" },
 ];
 
@@ -270,6 +313,23 @@ const LOG_BUNDLE_KINDS: ReadonlySet<string> = new Set([
   "deployments",
   "statefulsets",
   "daemonsets",
+]);
+
+/**
+ * Kinds whose Topology tab (B55) has a graph: ownership chains plus
+ * selector/backend references. A Helm release isn't a real API object, and the
+ * cluster/config kinds have no relationships to walk.
+ */
+const TOPOLOGY_KINDS: ReadonlySet<string> = new Set([
+  "pods",
+  "deployments",
+  "replicasets",
+  "statefulsets",
+  "daemonsets",
+  "jobs",
+  "cronjobs",
+  "services",
+  "ingresses",
 ]);
 
 /**
@@ -312,6 +372,15 @@ export function tabsFor(kind: KindId, isPod: boolean): DetailTabId[] {
         return isPod || kind === "nodes";
       case "events":
         return kind !== "helm";
+      case "diff":
+        // A Helm release's YAML is a *rendered manifest*, not an API object —
+        // there's no last-applied baseline to diff it against (B54).
+        return kind !== "helm";
+      case "topology":
+        // The graph walks ownership + selector/backend references, which only
+        // the workload/network/config kinds carry (B55). A Helm release is a
+        // rendered manifest, not a real object.
+        return TOPOLOGY_KINDS.has(kind);
       default:
         return true;
     }

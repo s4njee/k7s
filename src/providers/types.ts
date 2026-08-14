@@ -28,6 +28,10 @@ export type ResourceKind =
   | "configmaps"
   | "secrets"
   | "serviceaccounts"
+  | "roles"
+  | "clusterroles"
+  | "rolebindings"
+  | "clusterrolebindings"
   | "persistentvolumeclaims"
   | "persistentvolumes"
   | "storageclasses"
@@ -186,6 +190,8 @@ export interface Row {
   involved?: InvolvedRef;
   /** Job status beyond the cells, for the problems view (B32). */
   job?: { failed: boolean };
+  /** CronJob state beyond the cells: whether the schedule is suspended (B47). */
+  cron?: { suspended: boolean };
 }
 
 /** A Kubernetes Event as shown in the detail panel's Events tab. */
@@ -196,6 +202,20 @@ export interface EventItem {
   count: number;
   /** Pre-formatted age string (e.g. "2m"). */
   age: string;
+  /** RFC3339 timestamp of the event's first/last occurrence. */
+  timestamp?: string;
+  /** The object this event is about. */
+  involved?: EventInvolved;
+}
+
+/** The object an Event refers to (its `involvedObject`), for click-through navigation (B33). `kind` + the group from
+ * `api_version` resolve to a nav id — including CRDs, where the kind alone can
+ * be ambiguous across groups. */
+export interface EventInvolved {
+  kind: string;
+  name: string;
+  namespace?: string;
+  apiVersion?: string;
 }
 
 /** Cluster-wide status shown in the status bar and cluster switcher. */
@@ -340,6 +360,32 @@ export interface Properties {
   sections: Section[];
 }
 
+/** One node in the topology graph (B55): a resource in the neighborhood. */
+export interface TopologyNode {
+  /** Stable id, "{nav}:{namespace}/{name}". */
+  id: string;
+  /** Kubernetes Kind, e.g. "Deployment" (for the node's label). */
+  kind: string;
+  namespace: string;
+  name: string;
+  /** Nav id a click navigates to ("deployments", "pods", …). */
+  nav: KindId;
+}
+
+/** A directed edge; `from` owns or references `to` (B55). */
+export interface TopologyEdge {
+  from: string;
+  to: string;
+  /** "ownership" (solid) or "reference" (dashed). */
+  rel: "ownership" | "reference";
+}
+
+/** The graph around one resource (B55). */
+export interface Topology {
+  nodes: TopologyNode[];
+  edges: TopologyEdge[];
+}
+
 /** Persisted UI preferences (B11) — where the user left off. */
 export interface Prefs {
   context?: string | null;
@@ -349,6 +395,8 @@ export interface Prefs {
   showTimestamps?: boolean | null;
   /** Kubeconfig files imported by the user, re-imported on boot (B17). */
   importedFiles?: string[] | null;
+  /** Bookmarks (B56) keyed by cluster context, so each context has its own list. */
+  bookmarks?: Record<string, Bookmark[]> | null;
   // ---- settings (B23) ----
   // Flat rather than nested so an older prefs.json keeps loading: serde and
   // JSON.parse both just leave absent fields undefined, and sanitizeSettings
@@ -366,6 +414,8 @@ export interface Prefs {
   accent?: string | null;
   /** Disable the pulsing "live" dot and other motion. */
   reduceMotion?: boolean | null;
+  /** Native problem notifications (B50). */
+  notifications?: boolean | null;
   /** Image for the node debug shell; empty uses the default (B53). */
   nodeShellImage?: string | null;
 }
@@ -373,6 +423,13 @@ export interface Prefs {
 /** Identifies a specific object for YAML/events/log commands. */
 export interface ResourceRef {
   /** Built-in kind id, or a custom kind's "group/plural" id (B15). */
+  kind: KindId;
+  namespace?: string;
+  name: string;
+}
+
+/** A bookmarked resource (B56) — a resource ref the sidebar keeps quick access to. */
+export interface Bookmark {
   kind: KindId;
   namespace?: string;
   name: string;
@@ -558,6 +615,14 @@ export interface DataProvider {
    */
   getProperties(ref: ResourceRef): Promise<Properties>;
 
+  /**
+   * Copy one Secret value to the system clipboard (B37). The backend decodes and
+   * writes it in Rust, so the plaintext never reaches the webview — this call
+   * only learns whether the copy succeeded. Rejects for a key that isn't in the
+   * Secret.
+   */
+  copySecretValue(ref: ResourceRef, key: string): Promise<void>;
+
   // ---- mutations (B3); all reject with the API error message on failure ----
   /** Delete a resource of any kind. */
   deleteResource(ref: ResourceRef): Promise<void>;
@@ -581,6 +646,39 @@ export interface DataProvider {
   undoRollout(ref: ResourceRef, revision: number): Promise<number>;
   /** Cordon or uncordon a node. */
   setCordon(node: string, unschedulable: boolean): Promise<void>;
+  /** Suspend or resume a CronJob by patching spec.suspend (B47). */
+  setCronjobSuspend(ref: ResourceRef, suspended: boolean): Promise<void>;
+  /** Run a CronJob's jobTemplate now (B47); resolves to the new Job's name. */
+  runCronjob(ref: ResourceRef): Promise<string>;
+  /** Retry a failed Job (B47): delete + recreate unowned; resolves to the new name. */
+  retryJob(ref: ResourceRef): Promise<string>;
+  /**
+   * Show a native notification that a problem appeared (B50). `ref.kind` is the
+   * nav target a click should jump to; `reason` is the notification body.
+   */
+  notifyProblem(ref: ResourceRef, reason: string): Promise<void>;
+
+  /**
+   * Create an object from pasted YAML (B36). The manifest's apiVersion/kind
+   * select the resource; metadata.namespace (or `namespace`) places it. With
+   * `dryRun` nothing is written — the result is the object as the server would
+   * store it, for a preview.
+   */
+  createResource(
+    yaml: string,
+    namespace: string,
+    dryRun: boolean,
+  ): Promise<{ proposed: string; created?: { kind: KindId; namespace?: string; name: string } }>;
+
+  /**
+   * The live object and its last-applied baseline, for the Diff tab (B54).
+   * `baseline` is absent when neither the last-applied annotation nor
+   * apply-managed-fields can reconstruct it.
+   */
+  getDiff(ref: ResourceRef): Promise<{ live: string; baseline?: string }>;
+
+  /** The ownership/reference graph around a resource (B55). */
+  getTopology(ref: ResourceRef): Promise<Topology>;
   /**
    * Drain a node (B20): cordon it, then evict its pods in the background.
    * Resolves once cordoned — watch {@link onDrainProgress} for the rest.

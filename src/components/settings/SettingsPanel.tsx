@@ -170,6 +170,17 @@ export function SettingsPanel() {
                 placeholder="all"
               />
             </Row>
+
+            <Row label="Notifications" hint="native notification when something goes wrong; never while the window is focused">
+              <div
+                className={`${styles.toggle} ${settings.notifications ? styles.toggleOn : ""}`}
+                onClick={() => update({ notifications: !settings.notifications })}
+                role="switch"
+                aria-checked={settings.notifications}
+              >
+                {settings.notifications ? "on" : "off"}
+              </div>
+            </Row>
           </Section>
 
           <Section title="Shell">
