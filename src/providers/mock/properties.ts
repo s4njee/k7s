@@ -68,9 +68,92 @@ export function mockProperties(ref: ResourceRef): Properties | null {
       return helmProperties(ref);
     case "ingresses":
       return ingressProperties(ref);
+    case "persistentvolumeclaims":
+      return pvcProperties(ref);
+    case "persistentvolumes":
+      return pvProperties(ref);
+    case "replicasets":
+      return replicaSetProperties(ref);
     default:
       return null;
   }
+}
+
+/** Mock PVC panel (B46): the claim's state/links, who mounts it, and events. */
+function pvcProperties(ref: ResourceRef): Properties {
+  return {
+    sections: [
+      fields("Overview", [
+        f("status", "Bound", "ok"),
+        f("capacity", "20Gi"),
+        f("access modes", "ReadWriteOnce"),
+        { label: "storage class", value: link("local-path", "storageclasses", "local-path") },
+        { label: "volume", value: link("pvc-8f2c1a3e-4b7d-11ef-9c21", "persistentvolumes", "pvc-8f2c1a3e-4b7d-11ef-9c21") },
+      ]),
+      table(
+        "Mounted by",
+        ["POD", "CONTAINER", "MOUNT PATH"],
+        [
+          [
+            link("yggdrasil-db-0", "pods", "yggdrasil-db-0", ref.namespace, "primary"),
+            c("postgres"),
+            c("/var/lib/postgresql/data"),
+          ],
+        ],
+        "no pods mount this claim",
+      ),
+      table(
+        "Events",
+        ["TYPE", "REASON", "COUNT", "MESSAGE", "AGE"],
+        [[n("Normal"), c("ProvisioningSucceeded", "ok"), c("×1"), c("Successfully provisioned volume"), age(daysAgo(31))]],
+        "no events",
+      ),
+    ],
+  };
+}
+
+/** Mock PV panel (B46): the volume's reclaim state and the claim bound to it. */
+function pvProperties(_ref: ResourceRef): Properties {
+  return {
+    sections: [
+      fields("Overview", [
+        f("status", "Bound", "ok"),
+        f("capacity", "20Gi"),
+        f("access modes", "ReadWriteOnce"),
+        f("reclaim policy", "Delete"),
+        { label: "storage class", value: link("local-path", "storageclasses", "local-path") },
+        { label: "claim", value: link("prod/data-yggdrasil-db-0", "persistentvolumeclaims", "data-yggdrasil-db-0", "prod") },
+      ]),
+    ],
+  };
+}
+
+/** Mock ReplicaSet panel (B46): the generation's state, owner, and pods. */
+function replicaSetProperties(ref: ResourceRef): Properties {
+  const owner = ref.name.replace(/-[a-z0-9]+$/, "");
+  return {
+    sections: [
+      fields("Overview", [
+        f("ready", "2/2", "ok"),
+        f("desired", "2"),
+        f("current", "2"),
+        {
+          label: "owner",
+          value: c(`Deployment/${owner}`),
+          nav: { kind: "deployments", namespace: ref.namespace, name: owner },
+        },
+      ]),
+      table(
+        "Pods",
+        ["POD", "STATUS"],
+        [
+          [link(`${ref.name}-mn4p`, "pods", `${ref.name}-mn4p`, ref.namespace, "primary"), c("Running", "ok")],
+          [link(`${ref.name}-qq7z`, "pods", `${ref.name}-qq7z`, ref.namespace, "primary"), c("Running", "ok")],
+        ],
+        "no pods owned",
+      ),
+    ],
+  };
 }
 
 /**

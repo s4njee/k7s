@@ -8,11 +8,12 @@
 //! points at an object that actually exists, resolving each one against the API.
 //! A link to a 404 would be worse than the plain text it replaced.
 
+use k7s_lib::kube::helm;
 use k7s_lib::kube::mappers::{map_replicaset, map_storageclass};
 use k7s_lib::kube::dto::NavTarget;
 use k7s_lib::kube::properties::{gather, Body};
 use k8s_openapi::api::apps::v1::ReplicaSet;
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::core::v1::{PersistentVolume, PersistentVolumeClaim, Pod, Secret};
 use k8s_openapi::api::storage::v1::StorageClass;
 use kube::api::{Api, ApiResource, DynamicObject, ListParams};
 use kube::core::GroupVersionKind;
@@ -80,14 +81,41 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // ---- every link a real pod's properties emit must resolve ----
-    // Prefer a pod with volumes, since that's where most references live.
+    // Prefer a pod with the most references — volumes plus image pull secrets
+    // and env/envFrom ConfigMap/Secret sources (B46) — since that's where the
+    // links live.
     let pods: Api<Pod> = Api::all(client.clone());
     let all = pods.list(&ListParams::default()).await?;
-    let target = all
-        .items
-        .iter()
-        .max_by_key(|p| p.spec.as_ref().map(|s| s.volumes.as_ref().map(|v| v.len()).unwrap_or(0)).unwrap_or(0))
-        .expect("the cluster has pods");
+    let refs = |p: &Pod| -> usize {
+        let spec = p.spec.as_ref();
+        let volumes = spec.and_then(|s| s.volumes.as_ref()).map(|v| v.len()).unwrap_or(0);
+        let secrets = spec.and_then(|s| s.image_pull_secrets.as_ref()).map(|x| x.len()).unwrap_or(0);
+        let envs = spec
+            .map(|s| {
+                s.containers
+                    .iter()
+                    .map(|c| {
+                        let keyed = c
+                            .env
+                            .as_ref()
+                            .map(|e| {
+                                e.iter()
+                                    .filter(|x| {
+                                        x.value_from
+                                            .as_ref()
+                                            .is_some_and(|v| v.config_map_key_ref.is_some() || v.secret_key_ref.is_some())
+                                    })
+                                    .count()
+                            })
+                            .unwrap_or(0);
+                        keyed + c.env_from.as_ref().map(|e| e.len()).unwrap_or(0)
+                    })
+                    .sum::<usize>()
+            })
+            .unwrap_or(0);
+        volumes + secrets + envs
+    };
+    let target = all.items.iter().max_by_key(|p| refs(p)).expect("the cluster has pods");
     let ns = target.namespace().unwrap_or_default();
     println!("\nchecking every link the properties panels emit:");
 
@@ -131,6 +159,51 @@ async fn main() -> anyhow::Result<()> {
         .next()
     {
         panels.push(("ingresses", i.namespace().unwrap_or_default(), i.name_any()));
+    }
+    // B46: the storage kinds, ReplicaSets and Helm releases grew panels of their
+    // own — walk them so their links (volume/class/claim, owner, mounted-by pods,
+    // the Objects table) are checked too.
+    if let Some(pvc) = Api::<PersistentVolumeClaim>::all(client.clone())
+        .list(&ListParams::default())
+        .await?
+        .items
+        .into_iter()
+        .next()
+    {
+        panels.push(("persistentvolumeclaims", pvc.namespace().unwrap_or_default(), pvc.name_any()));
+    }
+    if let Some(pv) = Api::<PersistentVolume>::all(client.clone())
+        .list(&ListParams::default())
+        .await?
+        .items
+        .into_iter()
+        .next()
+    {
+        // PVs are cluster-scoped; the gatherer ignores the namespace.
+        panels.push(("persistentvolumes", String::new(), pv.name_any()));
+    }
+    if let Some(rs) = Api::<ReplicaSet>::all(client.clone())
+        .list(&ListParams::default())
+        .await?
+        .items
+        .into_iter()
+        .next()
+    {
+        panels.push(("replicasets", rs.namespace().unwrap_or_default(), rs.name_any()));
+    }
+    // Prefer a release whose manifest installs objects we can link — one with a
+    // Deployment/Service/ConfigMap in it — so the Objects table is exercised.
+    let releases: Api<Secret> = Api::all(client.clone());
+    let release_secrets = releases
+        .list(&ListParams::default().fields(&format!("type={}", helm::RELEASE_SECRET_TYPE)))
+        .await?;
+    if let Some(rel) = release_secrets
+        .items
+        .iter()
+        .filter_map(helm::decode_release)
+        .max_by_key(|r| r.manifest.matches("kind: ").count())
+    {
+        panels.push(("helm", rel.namespace.clone(), rel.name.clone()));
     }
 
     for (kind, pns, pname) in &panels {

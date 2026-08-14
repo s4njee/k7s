@@ -242,6 +242,10 @@ export const KINDS_WITH_PROPERTIES: ReadonlySet<string> = new Set<string>([
   "nodes",
   "helm",
   "ingresses",
+  // B46: the storage kinds and ReplicaSets grew panels of their own.
+  "persistentvolumeclaims",
+  "persistentvolumes",
+  "replicasets",
 ]);
 
 /** Detail-panel tabs, in strip order. Mirrors DetailTab in the store. */

@@ -16,14 +16,14 @@ use super::helm;
 use crate::error::{AppError, AppResult};
 use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Node, PersistentVolume, PersistentVolumeClaim, Pod, Secret, Service,
+    ConfigMap, Event, Node, PersistentVolume, PersistentVolumeClaim, Pod, PodSpec, Secret, Service,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
-use k8s_openapi::api::networking::v1::Ingress;
+use k8s_openapi::api::networking::v1::{Ingress, IngressClass};
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use kube::api::{Api, ListParams};
 use kube::{Client, ResourceExt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// A label/annotation entry (a list keeps frontend rendering simple).
@@ -377,6 +377,10 @@ pub async fn gather(
         "ingresses" => gather_ingress(client, namespace, name).await,
         "nodes" => gather_node(client, name).await,
         "helm" => gather_helm(client, namespace, name).await,
+        // B46: the storage kinds and ReplicaSets finally have panels of their own.
+        "persistentvolumeclaims" => gather_pvc(client, namespace, name).await,
+        "persistentvolumes" => gather_pv(client, namespace, name).await,
+        "replicasets" => gather_replicaset(client, namespace, name).await,
         other => Err(AppError::Other(format!("no properties for kind {other}"))),
     }
 }
@@ -465,14 +469,25 @@ async fn gather_ingress(client: Client, namespace: &str, name: &str) -> AppResul
         .filter(|a| !a.is_empty())
         .unwrap_or_else(|| DASH.into());
 
+    // The class links only when it actually exists. An Ingress referencing a
+    // class that isn't installed — a missing ingress controller — is exactly the
+    // "why is nothing routing" case, and linking to a 404 would hide it.
+    let class_exists = class == DASH || {
+        let api: Api<IngressClass> = Api::all(client.clone());
+        api.get_metadata(&class).await.is_ok()
+    };
+    let class_cell = if class == DASH {
+        muted(DASH)
+    } else if class_exists {
+        Cell::link(class.clone(), Tone::Secondary, Some(NavTarget::cluster("ingressclasses", class.clone())))
+    } else {
+        Cell::new(format!("{class} (not found)"), Tone::Warn)
+    };
+
     props.fields(
         "Overview",
         vec![
-            nav_field(
-                "class",
-                class.clone(),
-                (class != DASH).then(|| NavTarget::cluster("ingressclasses", class.clone())),
-            ),
+            Field { label: "class".into(), value: class_cell, nav: None },
             nav_field(
                 "default backend",
                 default_backend.clone(),
@@ -568,6 +583,33 @@ async fn gather_helm(client: Client, namespace: &str, name: &str) -> AppResult<P
     Ok(build_helm_properties(releases))
 }
 
+/// Kind/name pairs of the objects a release's rendered manifest installs (B46).
+///
+/// The manifest is a sequence of YAML documents; each document's top-level
+/// `kind` and `metadata.name` are what we list. Parsed from the document, not by
+/// a schema: a Helm chart can install any object, including CRDs we don't model.
+fn manifest_objects(manifest: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for doc in serde_yaml::Deserializer::from_str(manifest) {
+        let Ok(value) = serde_yaml::Value::deserialize(doc) else {
+            continue; // a stray `---` or an unparsable doc is not a failure
+        };
+        let Some(kind) = value.get("kind").and_then(|v| v.as_str()).map(String::from) else {
+            continue;
+        };
+        let name = value
+            .get("metadata")
+            .and_then(|m| m.get("name"))
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_default();
+        if !kind.is_empty() && !name.is_empty() {
+            out.push((kind, name));
+        }
+    }
+    out
+}
+
 /// Build the release document from its decoded revisions (pure, so the ordering
 /// and toning are testable without a cluster). Newest revision leads the Overview
 /// and the History.
@@ -632,6 +674,24 @@ fn build_helm_properties(mut releases: Vec<helm::Release>) -> Properties {
         Some("chart defaults (no overrides)"),
         &["KEY", "VALUE"],
         value_rows,
+    );
+
+    // ---- objects the release installed (B46) ----
+    // Each is a link when the kind is one we list; a CRD kind we don't model
+    // renders as plain text rather than a dead link.
+    let obj_rows: Vec<Vec<Cell>> = manifest_objects(&current.manifest)
+        .into_iter()
+        .map(|(kind, name)| {
+            let nav = builtin_nav_id(&kind)
+                .map(|nav| NavTarget::namespaced(nav, current.namespace.clone(), name.clone()));
+            vec![name_cell(kind), Cell::link(name, Tone::Secondary, nav)]
+        })
+        .collect();
+    props.push_table(
+        "Objects",
+        Some("nothing in the manifest"),
+        &["KIND", "NAME"],
+        obj_rows,
     );
 
     props
@@ -860,6 +920,15 @@ async fn gather_pod(client: Client, namespace: &str, name: &str) -> AppResult<Pr
             .collect(),
     );
 
+    // ---- references: image pull secrets + env/envFrom sources (B46) ----
+    let refs = pod_references(&client, namespace, &pod).await;
+    props.push_table(
+        "References",
+        Some("no image pull secrets or env/envFrom ConfigMap/Secret refs"),
+        &["TYPE", "OBJECT", "KEY", "USED BY"],
+        refs,
+    );
+
     meta_sections(&mut props, &pod);
     Ok(props)
 }
@@ -896,6 +965,88 @@ fn mount_text(v: &VolumeInfo) -> String {
 }
 
 /// Build the volume list, resolving PVC → PV where possible (best-effort).
+/// The pod's references to ConfigMaps and Secrets — image pull secrets and the
+/// env/envFrom sources on its containers — as a table's rows (B46). Each is
+/// existence-checked and links to the object when it exists, following
+/// `ref_cell`'s "a link to a 404 is worse than the plain text it replaced" rule
+/// (an `optional: true` source may legitimately be absent).
+/// Collect (type, object name, key, used-by) references from a pod spec: image
+/// pull secrets and the env/envFrom ConfigMap/Secret sources (B46). Pure, so
+/// the row shape is pinned by a test. Key is "—" for whole-object sources.
+fn collect_pod_refs(spec: &PodSpec) -> Vec<(&'static str, String, String, String)> {
+    let mut refs = Vec::new();
+    for s in spec.image_pull_secrets.iter().flatten() {
+        refs.push(("image pull secret", s.name.clone(), DASH.into(), "pod".into()));
+    }
+    for ct in &spec.containers {
+        let used = ct.name.clone();
+        for e in ct.env.iter().flatten() {
+            if let Some(vf) = &e.value_from {
+                if let Some(cr) = &vf.config_map_key_ref {
+                    refs.push(("ConfigMap (env)", cr.name.clone(), or_dash(Some(cr.key.clone())), used.clone()));
+                }
+                if let Some(sr) = &vf.secret_key_ref {
+                    refs.push(("Secret (env)", sr.name.clone(), or_dash(Some(sr.key.clone())), used.clone()));
+                }
+            }
+        }
+        for e in ct.env_from.iter().flatten() {
+            if let Some(cm) = &e.config_map_ref {
+                refs.push(("ConfigMap (envFrom)", cm.name.clone(), DASH.into(), used.clone()));
+            }
+            if let Some(sr) = &e.secret_ref {
+                refs.push(("Secret (envFrom)", sr.name.clone(), DASH.into(), used.clone()));
+            }
+        }
+    }
+    refs
+}
+
+async fn pod_references(client: &Client, namespace: &str, pod: &Pod) -> Vec<Vec<Cell>> {
+    let spec = pod.spec.clone().unwrap_or_default();
+    let refs = collect_pod_refs(&spec);
+    if refs.is_empty() {
+        return Vec::new();
+    }
+
+    // Existence-check each referenced object once (get_metadata: never pull a
+    // Secret's contents for a yes/no).
+    let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), namespace);
+    let sec_api: Api<Secret> = Api::namespaced(client.clone(), namespace);
+    let mut cm_exists: BTreeMap<String, bool> = BTreeMap::new();
+    let mut sec_exists: BTreeMap<String, bool> = BTreeMap::new();
+
+    let refs: Vec<_> = refs
+        .into_iter()
+        .filter(|(_, name, _, _)| !name.is_empty() && name != DASH)
+        .collect();
+
+    let mut rows = Vec::with_capacity(refs.len());
+    for (kind, name, key, used) in refs {
+        let is_secret = kind.starts_with("Secret");
+        let exists = if is_secret {
+            let slot = sec_exists.entry(name.clone()).or_insert(false);
+            if !*slot {
+                *slot = sec_api.get_metadata(&name).await.is_ok();
+            }
+            *slot
+        } else {
+            let slot = cm_exists.entry(name.clone()).or_insert(false);
+            if !*slot {
+                *slot = cm_api.get_metadata(&name).await.is_ok();
+            }
+            *slot
+        };
+        let target = NavTarget::namespaced(
+            if is_secret { "secrets" } else { "configmaps" },
+            namespace,
+            name.clone(),
+        );
+        rows.push(vec![c(kind.to_string()), ref_cell(&name, exists, target), c(key), c(used)]);
+    }
+    rows
+}
+
 async fn gather_volumes(
     client: &Client,
     namespace: &str,
@@ -1612,6 +1763,276 @@ async fn gather_statefulset(client: Client, namespace: &str, name: &str) -> AppR
 }
 
 // ---------------------------------------------------------------------------
+// Storage kinds + ReplicaSets (B46)
+// ---------------------------------------------------------------------------
+
+/// Events for an object as a properties table's rows: TYPE, REASON, COUNT,
+/// MESSAGE, AGE — newest first, the same field-select the events tab uses.
+async fn object_events(client: &Client, namespace: &str, name: &str) -> Vec<Vec<Cell>> {
+    let api: Api<Event> = Api::namespaced(client.clone(), namespace);
+    let lp = ListParams::default()
+        .fields(&format!("involvedObject.name={name},involvedObject.namespace={namespace}"));
+    let mut list = match api.list(&lp).await {
+        Ok(l) => l.items,
+        Err(_) => return Vec::new(), // RBAC/transient: an empty events section
+    };
+    list.sort_by_key(|e| std::cmp::Reverse(event_last_seen(e)));
+    list.into_iter()
+        .map(|e| {
+            let warn = e.type_.as_deref() == Some("Warning");
+            vec![
+                Cell::new(e.type_.clone().unwrap_or_else(|| "Normal".into()), if warn { Tone::Bad } else { Tone::Good }),
+                Cell::new(e.reason.clone().unwrap_or_default(), Tone::Primary),
+                Cell::new(format!("×{}", e.count.unwrap_or(1)), Tone::Secondary),
+                Cell::new(e.message.clone().unwrap_or_default(), Tone::Secondary),
+                Cell::age(Some(event_last_seen(&e).to_rfc3339())),
+            ]
+        })
+        .collect()
+}
+
+/// Best "last seen" time for an event: lastTimestamp, else eventTime, else creation.
+fn event_last_seen(e: &Event) -> chrono::DateTime<chrono::Utc> {
+    if let Some(t) = &e.last_timestamp {
+        return t.0;
+    }
+    if let Some(t) = &e.event_time {
+        return t.0;
+    }
+    e.creation_timestamp().map(|t| t.0).unwrap_or_else(chrono::Utc::now)
+}
+
+/// Tone for a claim/volume phase, matching the tables' storageTone.
+fn phase_tone(phase: &str) -> Tone {
+    match phase {
+        "Bound" => Tone::Good,
+        "Available" => Tone::Secondary,
+        "Lost" | "Failed" => Tone::Bad,
+        _ => Tone::Warn, // Pending / Released
+    }
+}
+
+/// Properties for a PersistentVolumeClaim (B46): its state, volume and class as
+/// links, the pods that mount it (the reverse of a pod's Storage section), and
+/// its events.
+async fn gather_pvc(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
+    let api: Api<PersistentVolumeClaim> = Api::namespaced(client.clone(), namespace);
+    let pvc = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let spec = pvc.spec.clone().unwrap_or_default();
+    let status = pvc.status.clone().unwrap_or_default();
+    let mut props = Properties::default();
+
+    props.fields(
+        "Overview",
+        vec![
+            field_toned("status", or_dash(status.phase.clone()), phase_tone(status.phase.as_deref().unwrap_or(""))),
+            field(
+                "capacity",
+                status
+                    .capacity
+                    .as_ref()
+                    .and_then(|c| c.get("storage"))
+                    .map(|q| q.0.clone())
+                    .unwrap_or_else(|| DASH.into()),
+            ),
+            field("access modes", spec.access_modes.map(|a| a.join(", ")).unwrap_or_else(|| DASH.into())),
+            nav_field(
+                "storage class",
+                or_dash(spec.storage_class_name.clone()),
+                spec.storage_class_name
+                    .clone()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| NavTarget::cluster("storageclasses", s)),
+            ),
+            nav_field(
+                "volume",
+                or_dash(spec.volume_name.clone()),
+                spec.volume_name
+                    .clone()
+                    .filter(|v| !v.is_empty())
+                    .map(|v| NavTarget::cluster("persistentvolumes", v)),
+            ),
+        ],
+    );
+
+    // Who mounts this claim — the reverse of a pod's Storage section.
+    let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
+    let pod_list = pods.list(&ListParams::default()).await.map(|l| l.items).unwrap_or_default();
+    let mut rows = Vec::new();
+    for p in &pod_list {
+        let Some(pspec) = p.spec.clone() else { continue };
+        let pname = p.metadata.name.clone().unwrap_or_default();
+        let Some(vol) = pspec
+            .volumes
+            .iter()
+            .flatten()
+            .find(|v| v.persistent_volume_claim.as_ref().map(|c| c.claim_name.as_str()) == Some(name))
+        else {
+            continue;
+        };
+        for ct in &pspec.containers {
+            for m in ct.volume_mounts.iter().flatten() {
+                if m.name == vol.name {
+                    rows.push(vec![
+                        Cell::link(
+                            pname.clone(),
+                            Tone::Primary,
+                            Some(NavTarget::namespaced("pods", namespace, pname.clone())),
+                        ),
+                        c(ct.name.clone()),
+                        c(m.mount_path.clone()),
+                    ]);
+                }
+            }
+        }
+    }
+    props.push_table(
+        "Mounted by",
+        Some("no pods mount this claim"),
+        &["POD", "CONTAINER", "MOUNT PATH"],
+        rows,
+    );
+
+    props.push_table(
+        "Events",
+        Some("no events"),
+        &["TYPE", "REASON", "COUNT", "MESSAGE", "AGE"],
+        object_events(&client, namespace, name).await,
+    );
+
+    meta_sections(&mut props, &pvc);
+    Ok(props)
+}
+
+/// Properties for a PersistentVolume (B46): its reclaim state, and the claim it
+/// is bound to as a link. PVs are cluster-scoped, so `namespace` is only used to
+/// resolve the claim's own namespace.
+async fn gather_pv(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
+    let api: Api<PersistentVolume> = Api::all(client.clone());
+    let pv = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let spec = pv.spec.clone().unwrap_or_default();
+    let status = pv.status.clone().unwrap_or_default();
+    let mut props = Properties::default();
+
+    let claim_text = spec
+        .claim_ref
+        .as_ref()
+        .map(|c| format!("{}/{}", c.namespace.clone().unwrap_or_default(), c.name.clone().unwrap_or_default()))
+        .unwrap_or_else(|| DASH.into());
+    props.fields(
+        "Overview",
+        vec![
+            field_toned("status", or_dash(status.phase.clone()), phase_tone(status.phase.as_deref().unwrap_or(""))),
+            field(
+                "capacity",
+                spec.capacity
+                    .as_ref()
+                    .and_then(|c| c.get("storage"))
+                    .map(|q| q.0.clone())
+                    .unwrap_or_else(|| DASH.into()),
+            ),
+            field("access modes", spec.access_modes.map(|a| a.join(", ")).unwrap_or_else(|| DASH.into())),
+            field("reclaim policy", or_dash(spec.persistent_volume_reclaim_policy.clone())),
+            nav_field(
+                "storage class",
+                or_dash(spec.storage_class_name.clone()),
+                spec.storage_class_name
+                    .clone()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| NavTarget::cluster("storageclasses", s)),
+            ),
+            nav_field(
+                "claim",
+                claim_text,
+                spec.claim_ref.clone().map(|c| {
+                    NavTarget::namespaced(
+                        "persistentvolumeclaims",
+                        c.namespace.unwrap_or_else(|| namespace.to_string()),
+                        c.name.unwrap_or_default(),
+                    )
+                }),
+            ),
+        ],
+    );
+
+    meta_sections(&mut props, &pv);
+    Ok(props)
+}
+
+/// Properties for a ReplicaSet (B46): the revision generation's state, its
+/// owning Deployment, and the pods it owns.
+async fn gather_replicaset(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
+    let api: Api<ReplicaSet> = Api::namespaced(client.clone(), namespace);
+    let rs = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let spec = rs.spec.clone().unwrap_or_default();
+    let status = rs.status.clone().unwrap_or_default();
+    let desired = spec.replicas.unwrap_or(0);
+    let ready = status.ready_replicas.unwrap_or(0);
+    let mut props = Properties::default();
+
+    // The controller owner reference — a Deployment when this generation is
+    // managed by one (the usual case), any listed kind otherwise.
+    let (owner_text, owner_nav) = match rs
+        .metadata
+        .owner_references
+        .as_ref()
+        .and_then(|r| r.iter().find(|o| o.controller == Some(true)))
+    {
+        Some(owner) => (
+            format!("{}/{}", owner.kind, owner.name),
+            builtin_nav_id(&owner.kind)
+                .map(|nav| NavTarget::namespaced(nav, namespace, owner.name.clone())),
+        ),
+        None => (DASH.into(), None),
+    };
+
+    props.fields(
+        "Overview",
+        vec![
+            field_toned("ready", format!("{ready}/{desired}"), ready_tone(ready, desired)),
+            field("desired", desired.to_string()),
+            field("current", status.replicas.to_string()),
+            nav_field("owner", owner_text, owner_nav),
+        ],
+    );
+
+    // The pods this ReplicaSet owns, by owner uid (name reuse is real).
+    let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
+    let pod_list = pods.list(&ListParams::default()).await.map(|l| l.items).unwrap_or_default();
+    let rows: Vec<Vec<Cell>> = pod_list
+        .iter()
+        .filter(|p| {
+            p.metadata
+                .owner_references
+                .iter()
+                .flatten()
+                .any(|o| Some(&o.uid) == rs.metadata.uid.as_ref())
+        })
+        .map(|p| {
+            let pname = p.metadata.name.clone().unwrap_or_default();
+            let phase = p
+                .status
+                .as_ref()
+                .and_then(|s| s.phase.clone())
+                .unwrap_or_else(|| "Unknown".into());
+            let tone = match phase.as_str() {
+                "Running" => Tone::Good,
+                "Pending" | "ContainerCreating" => Tone::Warn,
+                _ => Tone::Secondary,
+            };
+            vec![
+                Cell::link(pname.clone(), Tone::Primary, Some(NavTarget::namespaced("pods", namespace, pname))),
+                Cell::new(phase, tone),
+            ]
+        })
+        .collect();
+    props.push_table("Pods", Some("no pods owned"), &["POD", "STATUS"], rows);
+
+    meta_sections(&mut props, &rs);
+    Ok(props)
+}
+
+// ---------------------------------------------------------------------------
 // Nodes (B18)
 // ---------------------------------------------------------------------------
 
@@ -1722,6 +2143,7 @@ async fn gather_node(client: Client, name: &str) -> AppResult<Properties> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     /// Ready/Available read green when True; the same status on a pressure
     /// condition reads red, because those inverted types mean the opposite.
@@ -1805,6 +2227,77 @@ mod tests {
         assert!(vrows.iter().any(|r| r[0].text == "replicas" && r[1].text == "3"));
     }
 
+    /// A release's rendered manifest yields its installed objects' kind/name
+    /// pairs — including a CRD kind we don't model — and a broken doc is skipped.
+    #[test]
+    fn manifest_objects_parses_kind_and_name() {
+        let manifest = "\
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traefik
+---
+not a yaml document
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gw
+";
+        assert_eq!(
+            manifest_objects(manifest),
+            vec![
+                ("Service".to_string(), "traefik".to_string()),
+                ("Deployment".to_string(), "traefik".to_string()),
+                ("Gateway".to_string(), "gw".to_string()),
+            ]
+        );
+    }
+
+    /// The release's Objects table links every kind we list; a CRD kind we don't
+    /// model renders as plain text rather than a dead link.
+    #[test]
+    fn helm_objects_table_links_listed_kinds() {
+        let rel = helm::Release {
+            name: "traefik".into(),
+            namespace: "kube-system".into(),
+            chart: "traefik-1.0.0".into(),
+            app_version: "v1".into(),
+            revision: 1,
+            status: "deployed".into(),
+            updated: "2026-06-01T00:00:00Z".into(),
+            first_deployed: "2026-06-01T00:00:00Z".into(),
+            description: "Install complete".into(),
+            config: serde_json::json!({}),
+            manifest: "\
+kind: Service
+metadata:
+  name: traefik
+---
+kind: Gateway
+metadata:
+  name: gw
+"
+            .into(),
+        };
+        let props = build_helm_properties(vec![rel]);
+        let objects = props.sections.iter().find(|s| s.title == "Objects").unwrap();
+        let rows = match &objects.body {
+            Body::Table { rows, .. } => rows,
+            _ => panic!("Objects is a table"),
+        };
+        assert_eq!(rows.len(), 2);
+        // Service → services nav; Gateway (a CRD we don't list) stays plain.
+        assert_eq!(rows[0][1].nav.as_ref().map(|t| t.kind.as_str()), Some("services"));
+        assert_eq!(rows[0][1].nav.as_ref().and_then(|t| t.namespace.as_deref()), Some("kube-system"));
+        assert!(rows[1][1].nav.is_none());
+    }
+
     /// An Ingress backend port is a number *or* a name; freya's only Ingress uses
     /// a name, so a number-only reading would silently show nothing.
     #[test]
@@ -1867,7 +2360,6 @@ mod tests {
     /// non-ConfigMap/Secret volume showed a bare em dash for its source.
     #[test]
     fn volume_source_names_inline_backings() {
-        use serde_json::json;
         let vol = |body: serde_json::Value| -> k8s_openapi::api::core::v1::Volume {
             serde_json::from_value(body).unwrap()
         };
@@ -1944,5 +2436,49 @@ mod tests {
             return; // no kubeconfig in this environment; nothing to assert
         };
         assert!(gather(client, "configmaps", "default", "x").await.is_err());
+    }
+
+    // ---- pod references (B46) ----
+
+    /// A pod's pull secrets and env/envFrom sources are collected with their
+    /// kind, the object name, the key (for keyed refs) and the using container.
+    #[test]
+    fn pod_reference_collection() {
+        let spec: PodSpec = serde_json::from_value(json!({
+            "imagePullSecrets": [{ "name": "registry-pull" }],
+            "containers": [
+                {
+                    "name": "api",
+                    "env": [
+                        { "name": "LOG_LEVEL", "valueFrom": { "configMapKeyRef": { "name": "app-config", "key": "log-level" } } },
+                        { "name": "DB_PASSWORD", "valueFrom": { "secretKeyRef": { "name": "db-creds", "key": "password" } } },
+                    ],
+                    "envFrom": [
+                        { "configMapRef": { "name": "app-config" } },
+                        { "secretRef": { "name": "db-creds" } },
+                    ],
+                },
+                { "name": "sidecar" },
+            ],
+        }))
+        .unwrap();
+
+        let refs = collect_pod_refs(&spec);
+        assert_eq!(refs.len(), 5);
+        assert_eq!(refs[0], ("image pull secret", "registry-pull".into(), "—".into(), "pod".into()));
+        assert_eq!(refs[1], ("ConfigMap (env)", "app-config".into(), "log-level".into(), "api".into()));
+        assert_eq!(refs[2], ("Secret (env)", "db-creds".into(), "password".into(), "api".into()));
+        assert_eq!(refs[3], ("ConfigMap (envFrom)", "app-config".into(), "—".into(), "api".into()));
+        assert_eq!(refs[4], ("Secret (envFrom)", "db-creds".into(), "—".into(), "api".into()));
+    }
+
+    /// A pod with no references collects none — the section's empty note covers it.
+    #[test]
+    fn pod_without_references_collects_none() {
+        let spec: PodSpec = serde_json::from_value(json!({
+            "containers": [{ "name": "app" }],
+        }))
+        .unwrap();
+        assert!(collect_pod_refs(&spec).is_empty());
     }
 }

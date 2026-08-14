@@ -186,13 +186,13 @@ panel** showing its claim and reclaim state; **ReplicaSet panel** showing its
 pods and owner Deployment.
 
 **Accept:**
-- [ ] A pod using a private registry shows its pull secret as a link; an env
+- [x] A pod using a private registry shows its pull secret as a link; an env
       var sourced from a ConfigMap links to it.
-- [ ] freya's `traefik` release lists the objects it installed, each a link
+- [x] freya's `traefik` release lists the objects it installed, each a link
       when the kind is listed.
-- [ ] A PVC panel answers "who mounts this" — verified against
+- [x] A PVC panel answers "who mounts this" — verified against
       `wiki-postgres-data` → the postgres pod.
-- [ ] `related_links_check` extended to walk the new panels; all links resolve.
+- [x] `related_links_check` extended to walk the new panels; all links resolve.
 
 ## P2 — later
 
@@ -400,6 +400,13 @@ B28–B43, in the commit messages of `feat/backlog-qol`.
   `helm_check`, `svc_forward_check`) now discover their own fixtures and skip
   with an explicit message when a cluster has none — verified green against both
   freya and the `dev/cluster/up.sh` kind cluster.
+- **B46 — Remaining reference gaps.** The pod panel's References section (image
+  pull secrets + env/envFrom ConfigMap/Secret sources, existence-checked); the
+  Helm release's Objects table (kind/name pairs parsed from the manifest);
+  and first panels for the storage kinds + ReplicaSets (PVC "mounted by",
+  PV claim/reclaim, ReplicaSet owner/pods). `related_links_check` now walks all
+  of them — 80 links, 0 broken on freya. Also existence-checked the Ingress
+  class link, which the harness proved dead on a cluster without the controller.
 - **B29 — Crash-loop debugging.** `previous` reads (terminate, never follow),
   since-windows, save-to-file written in Rust (13k lines / 4.8MB past the
   200-line ring buffer). Backlog premise about `previous` corrected in the
