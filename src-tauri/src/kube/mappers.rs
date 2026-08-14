@@ -8,7 +8,7 @@
 //! the frontend overlays from the separate metrics feed.
 
 use super::discovery::PrinterColumn;
-use super::dto::{Cell, InvolvedRef, PodMeta, PodResources, Row, Tone};
+use super::dto::{Cell, InvolvedRef, JobMeta, PodMeta, PodResources, Row, Tone};
 use super::jsonpath;
 use super::metrics::{parse_cpu_millis, parse_mem_bytes};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
@@ -375,6 +375,15 @@ pub fn map_job(j: &Job) -> Row {
         None => "—".to_string(),
     };
     let complete = succeeded >= completions;
+    // A job that terminated without succeeding has a `Failed` condition; the
+    // problems view (B32) keys on it because the COMPLETIONS cell alone can't
+    // tell a failed job from one still running.
+    let failed = j
+        .status
+        .as_ref()
+        .and_then(|s| s.conditions.as_ref())
+        .map(|cs| cs.iter().any(|c| c.type_ == "Failed" && c.status == "True"))
+        .unwrap_or(false);
     let cells = vec![
         name_cell(j),
         ns_cell(j),
@@ -382,7 +391,9 @@ pub fn map_job(j: &Job) -> Row {
         Cell::new(duration, Tone::Secondary),
         age_cell(j),
     ];
-    simple_row(j, cells)
+    let mut row = simple_row(j, cells);
+    row.job = Some(JobMeta { failed });
+    row
 }
 
 /// CronJobs: NAME, NAMESPACE, SCHEDULE, LAST RUN, AGE.
@@ -1526,5 +1537,45 @@ mod tests {
         let cluster_row = map_dynamic(&o, false, &[]);
         let texts: Vec<&str> = cluster_row.cells.iter().map(|c| c.text.as_str()).collect();
         assert_eq!(texts, ["letsencrypt-prod", "2026-08-01T00:00:00+00:00"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Job failure flag (B32)
+    // -----------------------------------------------------------------------
+
+    /// A job with a `Failed` condition carries it on the row, so the problems
+    /// view can tell a failed job from one still running (both show "0/1").
+    #[test]
+    fn job_carries_failed_flag() {
+        let j: Job = serde_json::from_value(json!({
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": { "name": "migrate", "namespace": "prod", "uid": "u1" },
+            "spec": { "completions": 1 },
+            "status": {
+                "succeeded": 0,
+                "startTime": "2026-08-01T00:00:00Z",
+                "completionTime": "2026-08-01T00:01:00Z",
+                "conditions": [{ "type": "Failed", "status": "True", "reason": "BackoffLimitExceeded" }],
+            },
+        }))
+        .unwrap();
+        let row = map_job(&j);
+        assert_eq!(row.job.map(|j| j.failed), Some(true));
+    }
+
+    /// A healthy (or still-running) job has no Failed condition.
+    #[test]
+    fn running_job_is_not_failed() {
+        let j: Job = serde_json::from_value(json!({
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": { "name": "migrate", "namespace": "prod", "uid": "u1" },
+            "spec": { "completions": 1 },
+            "status": { "succeeded": 0, "startTime": "2026-08-01T00:00:00Z" },
+        }))
+        .unwrap();
+        let row = map_job(&j);
+        assert_eq!(row.job.map(|j| j.failed), Some(false));
     }
 }

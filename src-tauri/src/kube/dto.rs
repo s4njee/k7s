@@ -156,6 +156,16 @@ pub struct InvolvedRef {
     pub api_version: Option<String>,
 }
 
+/// Extra fields carried only by job rows (B32). The problems view needs to know
+/// a job failed outright, which the COMPLETIONS cell can't say (a running job and
+/// a failed one both show "0/1" amber) — only the status conditions can.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct JobMeta {
+    /// The job has a `Failed` condition: it terminated without succeeding.
+    pub failed: bool,
+}
+
 /// Extra fields carried only by pod rows, used to drive the detail panel.
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -212,4 +222,7 @@ pub struct Row {
     /// For an Event row: the object it's about, for click-through (B33).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub involved: Option<InvolvedRef>,
+    /// Job status beyond the cells, for the problems view (B32).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job: Option<JobMeta>,
 }

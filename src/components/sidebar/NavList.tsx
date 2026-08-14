@@ -23,7 +23,7 @@ import {
   type NavGroup,
   type ResourceKind,
 } from "../../lib/kinds";
-import type { CustomKind } from "../../providers/types";
+import type { CustomKind, Row } from "../../providers/types";
 
 export function NavList() {
   const nav = useStore((s) => s.nav);
@@ -53,7 +53,11 @@ export function NavList() {
                   <span className={styles.navIcon}>{KIND_META[kind].icon}</span>
                   <span className={styles.navLabel}>{KIND_META[kind].label}</span>
                   {/* Live count = number of rows currently in the store for this kind. */}
-                  <span className={styles.navCount}>{rows[kind].length}</span>
+                  {kind === "problems" ? (
+                    <ProblemsBadge rows={rows.problems} />
+                  ) : (
+                    <span className={styles.navCount}>{rows[kind].length}</span>
+                  )}
                 </div>
               );
             })}
@@ -168,4 +172,23 @@ function CustomSection({
 /** Built-in kinds belonging to a group, in sidebar order. */
 function kindsInGroup(group: NavGroup): ResourceKind[] {
   return KIND_ORDER.filter((k) => KIND_META[k].group === group);
+}
+
+/**
+ * The problems count badge (B32): shown only when something's wrong, toned by
+ * the worst severity (red if any critical problem, amber otherwise). Zero
+ * problems renders nothing — the "deliberately quiet" state.
+ */
+function ProblemsBadge({ rows }: { rows: Row[] }) {
+  if (rows.length === 0) return null;
+  const worst = rows.some((r) => r.cells[0]?.tone === "err") ? "err" : "warn";
+  return (
+    <span
+      className={`${styles.problemBadge} ${
+        worst === "err" ? styles.problemBadgeErr : styles.problemBadgeWarn
+      }`}
+    >
+      {rows.length}
+    </span>
+  );
 }

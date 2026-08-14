@@ -6,8 +6,10 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildCustomRows, MOCK_CUSTOM_KINDS, workloadPods } from "./data";
-import { kindMeta } from "../../lib/kinds";
+import { buildCustomRows, buildKindRows, MOCK_CUSTOM_KINDS, workloadPods } from "./data";
+import { deriveProblems } from "../../lib/problems";
+import { kindMeta, KIND_ORDER } from "../../lib/kinds";
+import type { Row } from "../types";
 
 describe("buildCustomRows (B30 printer columns)", () => {
   it("aligns cells to the columns a kind's printer columns imply", () => {
@@ -57,5 +59,40 @@ describe("workloadPods (B31 log bundle)", () => {
     const pods = workloadPods("report-gen");
     expect(pods.length).toBe(2);
     expect(pods[0]).toMatch(/^report-gen-/);
+  });
+});
+
+describe("demo problems (B32)", () => {
+  /** All built-in kinds' demo rows, as the store would hold them. */
+  function mockRows(): Record<string, Row[]> {
+    const out: Record<string, Row[]> = {};
+    for (const kind of KIND_ORDER) {
+      if (kind === "problems") continue;
+      out[kind] = buildKindRows(kind);
+    }
+    return out;
+  }
+
+  it("derives the freya-style fixtures the mock was given", () => {
+    const problems = deriveProblems(mockRows());
+
+    // The demo data deliberately mirrors B32's freya story: a NotReady node, the
+    // crash-looper, a stuck Terminating pod, a long-Pending pod, a failed job,
+    // and Warning events.
+    expect(problems.some((r) => r.cells[1].text === "Node" && r.cells[2].text === "freya-node-07")).toBe(true);
+    expect(
+      problems.some((r) => r.cells[1].text === "Pod" && r.cells[3].text === "CrashLoopBackOff"),
+    ).toBe(true);
+    expect(problems.some((r) => r.cells[3].text.startsWith("stuck Terminating"))).toBe(true);
+    expect(problems.some((r) => r.cells[3].text.startsWith("Pending for"))).toBe(true);
+    expect(problems.some((r) => r.cells[1].text === "Job")).toBe(true);
+    expect(problems.some((r) => r.cells[1].text === "Event")).toBe(true);
+
+    // The freshly-Pending canary (38s) is below the threshold — the derivation
+    // must NOT flag it, so the threshold actually does something.
+    expect(problems.some((r) => r.cells[2].text === "valkyrie-api-canary-89f7c5d4b-nn2kp")).toBe(false);
+
+    // Everything is navigable.
+    for (const p of problems) expect(p.involved).toBeDefined();
   });
 });

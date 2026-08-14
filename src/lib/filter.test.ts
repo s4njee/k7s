@@ -92,6 +92,20 @@ describe("matchesFilter", () => {
     expect(matchesFilter(ev, parseFilter("failedmount"), "events")).toBe(true);
     expect(matchesFilter(ev, parseFilter("backoff"), "events")).toBe(false);
   });
+
+  it("matches problems across their cells — the reason is where you'd search (B32)", () => {
+    const prob = row({
+      name: "heimdall",
+      cells: [
+        { text: "error", tone: "err" },
+        { text: "Pod", tone: "primary" },
+        { text: "heimdall", tone: "secondary" },
+        { text: "CrashLoopBackOff", tone: "secondary" },
+      ],
+    });
+    expect(matchesFilter(prob, parseFilter("crashloop"), "problems")).toBe(true);
+    expect(matchesFilter(prob, parseFilter("postgres"), "problems")).toBe(false);
+  });
 });
 
 describe("selectorFilter", () => {

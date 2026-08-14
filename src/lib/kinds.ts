@@ -160,6 +160,15 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     columns: ["NAME", "PROVISIONER", "RECLAIM", "BINDING", "EXPANSION", "AGE"],
   },
   // ---- Cluster (cluster-scoped: no NAMESPACE column) ----
+  // First, because "is anything wrong?" is the first question a cluster view
+  // should answer (B32). A frontend-only aggregation over the other kinds' rows —
+  // its table renders what deriveProblems produces, and never opens a panel.
+  problems: {
+    group: "cluster",
+    label: "Problems",
+    icon: "✕",
+    columns: ["SEVERITY", "KIND", "OBJECT", "REASON", "AGE"],
+  },
   nodes: {
     group: "cluster",
     label: "Nodes",
@@ -198,6 +207,9 @@ export const KIND_ORDER = Object.keys(KIND_META) as ResourceKind[];
 
 /** Built-in kinds that are cluster-scoped and therefore ignore the namespace filter. */
 const CLUSTER_SCOPED: ReadonlySet<string> = new Set<string>([
+  // Problems span every namespace by design — "is anything wrong?" is a
+  // cluster-wide question, and a namespace filter would hide a NotReady node.
+  "problems",
   "nodes",
   "namespaces",
   "persistentvolumes",

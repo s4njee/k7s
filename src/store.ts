@@ -22,6 +22,7 @@ import type {
   Row,
 } from "./providers/types";
 import { hasLogs, KIND_ORDER } from "./lib/kinds";
+import { deriveProblems } from "./lib/problems";
 import { DEFAULT_SETTINGS, type Settings } from "./lib/settings";
 import { cachedTheme, prefersDark } from "./lib/theme";
 import { EMPTY_SELECTION, type SelectionState } from "./lib/selection";
@@ -420,7 +421,13 @@ export const useStore = create<AppState>((set) => ({
     ),
   setClusterStatus: (status) => set({ clusterStatus: status }),
   setWatchCount: (n) => set({ watchCount: n }),
-  setRows: (kind, rows) => set((s) => ({ rows: { ...s.rows, [kind]: rows } })),
+  setRows: (kind, rows) =>
+    set((s) => {
+      const next = { ...s.rows, [kind]: rows };
+      // Problems is a derived view (B32), so it's recomputed whenever any source
+      // kind updates. Cheap for realistic cluster sizes — a few hundred rows.
+      return { rows: { ...next, problems: deriveProblems(next) } };
+    }),
   setCustomKinds: (kinds) => set({ customKinds: kinds }),
   setPodMetrics: (m) => set({ podMetrics: m }),
   setNodeMetrics: (m) => set({ nodeMetrics: m }),

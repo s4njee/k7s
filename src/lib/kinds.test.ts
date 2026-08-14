@@ -299,6 +299,19 @@ describe("tabsFor", () => {
   });
 });
 
+describe("problems pseudo-kind (B32)", () => {
+  it("lives first in the Cluster group with the problem columns", () => {
+    expect(kindMeta("problems", CUSTOM)?.group).toBe("cluster");
+    expect(kindMeta("problems", CUSTOM)?.columns).toEqual([
+      "SEVERITY", "KIND", "OBJECT", "REASON", "AGE",
+    ]);
+  });
+
+  it("is cluster-scoped — the namespace filter must not hide a NotReady node", () => {
+    expect(isClusterScoped("problems", CUSTOM)).toBe(true);
+  });
+});
+
 describe("hasLogs (B31)", () => {
   it("is true for pods and the workload kinds", () => {
     expect(hasLogs("pods", true)).toBe(true);

@@ -126,9 +126,10 @@ problems renders a deliberately quiet "nothing wrong" state.
 **Accept:**
 - [ ] freya today lists: leo + mars NotReady, the wiki crash-looper, the stuck
       Terminating pod, the Pending postgres, cb8's FailedMount warnings — each
-      with a legible reason, worst first.
+      with a legible reason, worst first. *(needs a live freya check — the
+      demo data mirrors this story and is covered by tests)*
 - [ ] Clicking a problem lands on the object with the detail panel open.
-- [ ] The derivation is a pure function over store rows with vitest cases per
+- [x] The derivation is a pure function over store rows with vitest cases per
       source (including "healthy cluster → empty").
 
 ### B34b — Rollout undo
@@ -386,11 +387,10 @@ B28–B43, in the commit messages of `feat/backlog-qol`.
 - **B33 — Related-resource navigation.** Owner links resolving through
   ReplicaSets; workload → pods via label-selector filter syntax
   (`lib/filter.ts`); clickable events via Kind+group → nav id resolution.
-- **B32 — not done** (moved above). *B30 shipped — CRD printer columns
-  (jsonpath.rs subset, evaluated live by `map_dynamic`). B31 shipped — workload
-  log bundles (selector-resolved per-pod pumps, re-resolved on a 15s tick).
-  B44 shipped — pod CPU/MEM sparklines in the detail header (promql
-  `pod_history`, 2 range queries, degrade-to-nothing without Prometheus).*
+- **B32 — Problems view.** A `problems` pseudo-kind aggregating NotReady nodes,
+  bad/pending/terminating pods, degraded workloads, failed jobs and Warning
+  events over the store's rows; navigable rows, sidebar badge toned by severity.
+  *B30/B31/B44 shipped — see their backlog items above.*
 - **B29 — Crash-loop debugging.** `previous` reads (terminate, never follow),
   since-windows, save-to-file written in Rust (13k lines / 4.8MB past the
   200-line ring buffer). Backlog premise about `previous` corrected in the

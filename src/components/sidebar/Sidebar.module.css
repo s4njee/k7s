@@ -290,6 +290,25 @@
   color: var(--text-muted);
 }
 
+/* Problems count badge (B32): a soft pill toned by the worst severity. */
+.problemBadge {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  background: var(--bg-control);
+}
+.problemBadgeErr {
+  color: var(--status-err);
+  background: color-mix(in srgb, var(--status-err) 15%, transparent);
+}
+.problemBadgeWarn {
+  color: var(--status-warn);
+  background: color-mix(in srgb, var(--status-warn) 15%, transparent);
+}
+
 /* ---------- Watch footer ---------- */
 
 .footer {

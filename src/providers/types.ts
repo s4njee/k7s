@@ -34,7 +34,12 @@ export type ResourceKind =
   | "nodes"
   | "namespaces"
   | "events"
-  | "helm";
+  | "helm"
+  /**
+   * The problems pseudo-kind (B32): a frontend-only aggregation over the other
+   * kinds' rows. Not a real Kubernetes resource — it has no watcher and no YAML.
+   */
+  | "problems";
 
 /**
  * One `additionalPrinterColumn` a CRD declares for its kind (B30): a column the
@@ -179,6 +184,8 @@ export interface Row {
   selector?: Record<string, string>;
   /** Present only on Event rows: the object the event is about (B33). */
   involved?: InvolvedRef;
+  /** Job status beyond the cells, for the problems view (B32). */
+  job?: { failed: boolean };
 }
 
 /** A Kubernetes Event as shown in the detail panel's Events tab. */

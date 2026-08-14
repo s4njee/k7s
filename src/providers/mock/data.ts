@@ -41,6 +41,11 @@ export const MOCK_PODS: MockPod[] = [
   { name: "grafana-5f8d7c6b9-mm1xz", ns: "monitoring", ready: "1/1", restarts: 0, cpu: "34m", mem: "187Mi", age: "31d", status: "Running", node: "freya-node-06", containers: ["grafana"] },
   { name: "coredns-76f75df574-8rk2j", ns: "kube-system", ready: "1/1", restarts: 0, cpu: "12m", mem: "31Mi", age: "31d", status: "Running", node: "freya-node-01", containers: ["coredns"] },
   { name: "kube-proxy-x9d4m", ns: "kube-system", ready: "1/1", restarts: 0, cpu: "8m", mem: "24Mi", age: "31d", status: "Running", node: "freya-node-02", containers: ["kube-proxy"] },
+  // The problems view's demo fixtures (B32), mirroring freya's "things wrong":
+  // a pod stuck Terminating and a long-Pending postgres, both past their
+  // thresholds so the derivation flags them.
+  { name: "wiki-6b6d775f4-t0r4n", ns: "prod", ready: "0/1", restarts: 0, cpu: "—", mem: "—", age: "7m", status: "Terminating", node: "freya-node-02", containers: ["wiki"] },
+  { name: "wiki-postgres-0", ns: "prod", ready: "0/1", restarts: 0, cpu: "—", mem: "—", age: "31m", status: "Pending", node: "—", containers: ["postgres"] },
 ];
 
 /** Namespaces offered in the namespace dropdown (prototype order). */
@@ -65,9 +70,11 @@ interface RawRow {
   c: string[];
   ok?: boolean;
   warn?: boolean;
+  /** Red first data cell (e.g. a NotReady node) — the problems view's err tone. */
+  err?: boolean;
 }
 
-const R = (name: string, ns: string, c: string[], flags: { ok?: boolean; warn?: boolean } = {}): RawRow => ({ name, ns, c, ...flags });
+const R = (name: string, ns: string, c: string[], flags: { ok?: boolean; warn?: boolean; err?: boolean } = {}): RawRow => ({ name, ns, c, ...flags });
 
 /** Non-pod resource data keyed by kind (verbatim from the prototype). */
 export const MOCK_RESOURCES: Partial<Record<ResourceKind, RawRow[]>> = {
@@ -123,6 +130,8 @@ export const MOCK_RESOURCES: Partial<Record<ResourceKind, RawRow[]>> = {
     R("freya-node-04", "", ["Ready", "worker", "44%", "58%", "v1.31.2"], { ok: true }),
     R("freya-node-05", "", ["Ready", "worker", "29%", "66%", "v1.31.2"], { ok: true }),
     R("freya-node-06", "", ["Ready", "worker", "12%", "39%", "v1.31.2"], { ok: true }),
+    // NotReady — one of the problems view's demo fixtures (B32).
+    R("freya-node-07", "", ["NotReady", "worker", "—", "—", "v1.31.2"], { err: true }),
   ],
   namespaces: [
     R("prod", "", ["Active", "7", "31d"], { ok: true }),
@@ -133,10 +142,11 @@ export const MOCK_RESOURCES: Partial<Record<ResourceKind, RawRow[]>> = {
   ],
 };
 
-/** The prototype's status→color rule, expressed as a tone. */
+/** Status→tone, mirroring the backend's `status_tone` exactly (B32: the problems
+ *  derivation keys on a pod's tone, so demo and real mode must agree on it). */
 export function statusTone(status: string): Tone {
-  if (status === "Running" || status === "Ready" || status === "Active") return "ok";
-  if (status === "Pending") return "warn";
+  if (["Running", "Ready", "Active", "Completed", "Succeeded", "Bound"].includes(status)) return "ok";
+  if (["Pending", "ContainerCreating", "Terminating"].includes(status)) return "warn";
   return "err";
 }
 
@@ -684,6 +694,34 @@ function buildPvRows(): Row[] {
   }));
 }
 
+/** [name, ns, completions, duration, age, failed] — the failed flag is what
+ *  the problems view (B32) keys on, so it rides on the row. */
+const MOCK_JOBS: [string, string, string, string, string, boolean][] = [
+  ["db-migrate-v214", "prod", "1/1", "42s", "4d2h", false],
+  ["report-gen-28661", "prod", "1/1", "3m12s", "6h", false],
+  // A failed migration — one of the problems view's demo fixtures (B32).
+  ["db-migrate-v215", "prod", "0/1", "31s", "5m", true],
+];
+
+/** Build job rows: NAME, NAMESPACE, COMPLETIONS, DURATION, AGE, plus the failed
+ *  flag (a not-complete job is amber whether running or failed — the flag is
+ *  what tells them apart). */
+function buildJobRows(): Row[] {
+  return MOCK_JOBS.map(([name, ns, completions, duration, age, failed]) => ({
+    uid: `job:${ns}/${name}`,
+    name,
+    namespace: ns,
+    cells: [
+      { text: name, tone: "primary" },
+      { text: ns, tone: "muted" },
+      { text: completions, tone: failed ? "warn" : "secondary" },
+      { text: duration, tone: "secondary" },
+      { text: age, tone: "muted" },
+    ],
+    job: { failed },
+  }));
+}
+
 /** Build rows for a non-pod kind from MOCK_RESOURCES with the prototype's coloring. */
 export function buildKindRows(kind: ResourceKind): Row[] {
   if (kind === "pods") return buildPodRows();
@@ -695,6 +733,9 @@ export function buildKindRows(kind: ResourceKind): Row[] {
   if (kind === "serviceaccounts") return buildServiceAccountRows();
   if (kind === "ingressclasses") return buildIngressClassRows();
   if (kind === "replicasets") return buildReplicaSetRows();
+  // Jobs carry the failed flag the problems view keys on (B32), so they get a
+  // dedicated builder rather than the generic RawRow path.
+  if (kind === "jobs") return buildJobRows();
   const raw = MOCK_RESOURCES[kind] ?? [];
   const hasNamespaceCol = KIND_META[kind].columns[1] === "NAMESPACE";
 
@@ -706,6 +747,9 @@ export function buildKindRows(kind: ResourceKind): Row[] {
       // Healthy first data cell → green with a leading dot (e.g. node "● Ready").
       if (r.ok && i === 0) {
         cells.push({ text: v, tone: "ok", dot: true });
+      } else if (r.err && i === 0) {
+        // Failing first data cell → red with a dot (e.g. node "● NotReady").
+        cells.push({ text: v, tone: "err", dot: true });
       } else if (r.warn && v[0] === "0") {
         // Degraded numeric cell (e.g. deployment "0/1") → amber.
         cells.push({ text: v, tone: "warn" });

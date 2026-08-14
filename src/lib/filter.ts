@@ -66,7 +66,10 @@ export function matchesFilter(row: Row, f: ParsedFilter, nav: KindId): boolean {
     }
   }
   if (f.text === "") return true;
-  return nav === "events"
+  // Events and Problems have no meaningful NAME to match on (an event's name is
+  // an opaque id; a problem's name is the object, but its reason is where you'd
+  // search), so the text matches across the visible cells for both.
+  return nav === "events" || nav === "problems"
     ? row.cells.some((c) => c.text.toLowerCase().includes(f.text))
     : row.name.toLowerCase().includes(f.text);
 }

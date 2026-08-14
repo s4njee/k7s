@@ -66,10 +66,12 @@ export function ResourceTable() {
     [customKinds],
   );
 
-  // Whether a row responds to a click: every kind but events (always), and an
-  // event only when its target resolves.
+  // Whether a row responds to a click: every kind (always), except the
+  // navigate-only views — Events and Problems — which are clickable only when
+  // their target resolves.
   const rowClickable = useCallback(
-    (row: Row): boolean => (nav === "events" ? eventTarget(row) !== null : true),
+    (row: Row): boolean =>
+      nav === "events" || nav === "problems" ? eventTarget(row) !== null : true,
     [nav, eventTarget],
   );
 
@@ -94,7 +96,10 @@ export function ResourceTable() {
    */
   const onSelect = useCallback(
     (row: Row, mods?: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
-      if (nav === "events") {
+      // Events and Problems are navigate-only views (B32): clicking a row jumps
+      // to the object it's about rather than selecting it — a problem row has no
+      // panel of its own.
+      if (nav === "events" || nav === "problems") {
         const target = eventTarget(row);
         if (target) navigateTo(target);
         return;
@@ -174,8 +179,8 @@ export function ResourceTable() {
 
   const onRowContextMenu = useCallback(
     (e: React.MouseEvent, row: Row) => {
-      // Events navigate rather than act, so there is nothing to offer.
-      if (nav === "events") return;
+      // Events and Problems navigate rather than act, so there is nothing to offer.
+      if (nav === "events" || nav === "problems") return;
       e.preventDefault();
       // Right-clicking outside the selection collapses to this row; inside it,
       // the selection stands (see selectionForContextMenu). Read from the store
@@ -312,7 +317,13 @@ export function ResourceTable() {
           {win.padBottom > 0 && <tr style={{ height: win.padBottom }} />}
         </tbody>
         </table>
-        {rows.length === 0 && <div className={styles.empty}>no resources match filter</div>}
+        {rows.length === 0 && (
+          <div className={styles.empty}>
+            {/* Problems gets its own quiet all-clear, distinct from an empty
+                search — "nothing wrong" is the good outcome (B32). */}
+            {nav === "problems" ? "nothing wrong — cluster looks healthy" : "no resources match filter"}
+          </div>
+        )}
       </div>
 
       {/* Bulk-action failures (B39). In the table rather than the detail panel,
@@ -380,6 +391,7 @@ function columnWidth(header: string): string {
   switch (header) {
     case "NAME":
     case "MESSAGE":
+    case "REASON":
       return "22%";
     case "OBJECT":
     case "HOSTS":
