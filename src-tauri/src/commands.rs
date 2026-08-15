@@ -11,7 +11,8 @@ use crate::logging;
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
 use crate::kube::{
     batch, discovery, drain, exec, exporter, helm, logs, mappers, metrics, nodeshell, nodestats,
-    portforward, promql, properties, restart, topology, watchers, Cid, ClientManager, ResourceKind,
+    overview, portforward, promql, properties, restart, topology, watchers, Cid, ClientManager,
+    ResourceKind,
 };
 use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::apps::v1::Deployment;
@@ -337,6 +338,15 @@ pub async fn connect(
     };
     manager.set_connected(cid, kube_client, info.clone(), watcher_count).await;
     Ok(info)
+}
+
+/// Cluster-wide allocatable capacity for the Overview dashboard (B79). The
+/// frontend derives pod requests (from pod rows) and usage (from cluster-status
+/// percentages); this supplies the absolute allocatable that is only read here.
+#[tauri::command]
+pub async fn cluster_overview(cid: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<overview::ClusterOverview> {
+    let client = require_client(&mgr, &cid).await?;
+    overview::cluster_overview(client).await.map_err(|e| AppError::Kube(e.to_string()))
 }
 
 /// Tear down one cluster's connection: its watchers, pollers, streams and

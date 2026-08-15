@@ -12,7 +12,7 @@ import type { SinceOption } from "../lib/logview";
 import type { LogLine } from "../providers/types";
 
 export const initialNavigationState: NavigationState = {
-  nav: "pods",
+  nav: "overview",
   navByCid: {},
   namespace: "all",
   namespaceByCid: {},

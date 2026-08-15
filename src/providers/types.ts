@@ -43,7 +43,12 @@ export type ResourceKind =
    * The problems pseudo-kind (B32): a frontend-only aggregation over the other
    * kinds' rows. Not a real Kubernetes resource — it has no watcher and no YAML.
    */
-  | "problems";
+  | "problems"
+  /**
+   * The overview pseudo-kind (B79): a frontend-only dashboard — no watcher,
+   * no YAML, just a landing page after connect.
+   */
+  | "overview";
 
 /**
  * One `additionalPrinterColumn` a CRD declares for its kind (B30): a column the

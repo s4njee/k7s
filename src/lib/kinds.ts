@@ -193,6 +193,14 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     icon: "✕",
     columns: ["SEVERITY", "KIND", "OBJECT", "REASON", "AGE"],
   },
+  // The overview pseudo-kind (B79): a frontend-only dashboard — no watcher,
+  // no YAML, just a landing page after connect.
+  overview: {
+    group: "cluster",
+    label: "Overview",
+    icon: "◉",
+    columns: [],
+  },
   nodes: {
     group: "cluster",
     label: "Nodes",
@@ -234,6 +242,7 @@ const CLUSTER_SCOPED: ReadonlySet<string> = new Set<string>([
   // Problems span every namespace by design — "is anything wrong?" is a
   // cluster-wide question, and a namespace filter would hide a NotReady node.
   "problems",
+  "overview",
   "nodes",
   "namespaces",
   "persistentvolumes",

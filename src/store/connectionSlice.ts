@@ -71,7 +71,7 @@ export const createConnectionSlice: StateCreator<
         selectionByCid: old != null ? { ...s.selectionByCid, [old]: s.selection } : s.selectionByCid,
         detailByCid: old != null ? { ...s.detailByCid, [old]: detail } : s.detailByCid,
         // Restore the incoming cluster's state.
-        nav: s.navByCid[cid] ?? "pods",
+        nav: s.navByCid[cid] ?? "overview",
         namespace: s.namespaceByCid[cid] ?? "all",
         selection: s.selectionByCid[cid] ?? EMPTY_SELECTION,
         ...restoredDetail,

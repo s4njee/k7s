@@ -106,6 +106,7 @@ pub fn run() {
             commands::save_prefs,
             commands::connect,
             commands::disconnect,
+            commands::cluster_overview,
             commands::get_yaml,
             commands::get_diff,
             commands::apply_yaml,

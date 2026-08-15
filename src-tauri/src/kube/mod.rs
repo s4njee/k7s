@@ -19,6 +19,7 @@ pub mod mappers;
 pub mod metrics;
 pub mod nodeshell;
 pub mod nodestats;
+pub mod overview;
 pub mod portforward;
 pub mod promql;
 pub mod properties;
@@ -75,6 +76,8 @@ pub enum ResourceKind {
     Events,
     /// Helm releases (B26) — decoded from Helm's release Secrets; read-only.
     Helm,
+    /// The overview pseudo-kind (B79): a frontend-only dashboard.
+    Overview,
 }
 
 impl ResourceKind {

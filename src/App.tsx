@@ -18,12 +18,14 @@ import { TopBar } from "./components/topbar/TopBar";
 import { StatusBar } from "./components/statusbar/StatusBar";
 import { ResourceTable } from "./components/table/ResourceTable";
 import { DetailPanel } from "./components/detail/DetailPanel";
+import { ClusterOverview } from "./components/overview/ClusterOverview";
 import { ForwardsBar } from "./components/forwards/ForwardsBar";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { CreateYaml } from "./components/create/CreateYaml";
 import { CommandPalette } from "./components/palette/CommandPalette";
 
 export default function App() {
+  const nav = useStore((s) => s.nav);
   // Wire provider → store and connect on mount.
   useBootstrap();
   // App-level keyboard shortcuts (Esc cascade, detail tab cycling).
@@ -43,7 +45,7 @@ export default function App() {
       <div className={styles.main}>
         <TopBar />
         <div className={styles.content}>
-          <ResourceTable />
+          {nav === "overview" ? <ClusterOverview /> : <ResourceTable />}
           <DetailPanel />
         </div>
         <ForwardsBar />
