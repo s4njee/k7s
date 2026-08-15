@@ -3,21 +3,29 @@
  */
 
 import type { StateCreator } from "zustand";
-import type { AppState, DetailActions, DetailSliceState } from "./types";
+import type { AppState, DetailActions, DetailSliceState, DetailState } from "./types";
 import { selectionPatch } from "./navigationSlice";
 
+/** The default detail-panel fields (used for a cid with no retained state). */
+export function defaultDetailState(): DetailState {
+  return {
+    selectedRow: null,
+    activeTab: "logs",
+    logSearch: "",
+    containerIndex: 0,
+    showTimestamps: true,
+    following: true,
+    logBuffer: [],
+    logPrevious: false,
+    logSince: "all",
+    yamlEditing: false,
+    yamlDraft: "",
+  };
+}
+
 export const initialDetailState: DetailSliceState = {
-  selectedRow: null,
-  activeTab: "logs",
-  logSearch: "",
-  containerIndex: 0,
-  showTimestamps: true,
-  following: true,
-  logBuffer: [],
-  logPrevious: false,
-  logSince: "all",
-  yamlEditing: false,
-  yamlDraft: "",
+  ...defaultDetailState(),
+  detailByCid: {},
 };
 
 export const createDetailSlice: StateCreator<

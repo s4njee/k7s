@@ -11,7 +11,7 @@
 //! uses it to order and cap a stream that can otherwise run to thousands of rows.
 
 use super::discovery::{CustomKind, PrinterColumn};
-use super::{dto::Row, events, helm, mappers, ClientManager, ResourceKind, ResourceUpdate};
+use super::{dto::Row, helm, mappers, Cid, ClientManager, ResourceKind};
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
@@ -30,7 +30,8 @@ use kube::{Api, Client, Resource};
 use serde::de::DeserializeOwned;
 use std::fmt::Debug;
 use std::hash::Hash;
-use tauri::{AppHandle, Emitter};
+use std::sync::Arc;
+use tauri::Runtime;
 use tokio::time::{interval, Duration, MissedTickBehavior};
 
 /// Maximum snapshot emit rate per kind (coalesces bursts of watch events).
@@ -51,45 +52,49 @@ fn events_order(rows: Vec<Row>) -> Vec<Row> {
 
 /// Start watchers for every kind and register their tasks with the manager so
 /// they are aborted on disconnect/context-switch. Returns the number started.
-pub async fn spawn_all(mgr: &ClientManager, client: Client) -> usize {
+pub async fn spawn_all<R: Runtime>(mgr: Arc<ClientManager<R>>, cid: Cid, client: Client) -> usize {
     // Each line pairs a typed resource with its mapper (the column contract) and
     // a snapshot post-processor (ordering/capping; identity for most kinds).
-    spawn::<Pod>(mgr, &client, ResourceKind::Pods, mappers::map_pod, identity).await;
-    spawn::<Deployment>(mgr, &client, ResourceKind::Deployments, mappers::map_deployment, identity).await;
-    spawn::<ReplicaSet>(mgr, &client, ResourceKind::Replicasets, mappers::map_replicaset, identity).await;
-    spawn::<StatefulSet>(mgr, &client, ResourceKind::Statefulsets, mappers::map_statefulset, identity).await;
-    spawn::<DaemonSet>(mgr, &client, ResourceKind::Daemonsets, mappers::map_daemonset, identity).await;
-    spawn::<Job>(mgr, &client, ResourceKind::Jobs, mappers::map_job, identity).await;
-    spawn::<CronJob>(mgr, &client, ResourceKind::Cronjobs, mappers::map_cronjob, identity).await;
-    spawn::<Service>(mgr, &client, ResourceKind::Services, mappers::map_service, identity).await;
-    spawn::<Ingress>(mgr, &client, ResourceKind::Ingresses, mappers::map_ingress, identity).await;
-    spawn::<IngressClass>(mgr, &client, ResourceKind::Ingressclasses, mappers::map_ingressclass, identity).await;
-    spawn::<ConfigMap>(mgr, &client, ResourceKind::Configmaps, mappers::map_configmap, identity).await;
-    spawn::<Secret>(mgr, &client, ResourceKind::Secrets, mappers::map_secret, identity).await;
-    spawn::<ServiceAccount>(mgr, &client, ResourceKind::Serviceaccounts, mappers::map_serviceaccount, identity).await;
+    spawn::<_, Pod>(&mgr, &cid, &client, ResourceKind::Pods, mappers::map_pod, identity).await;
+    spawn::<_, Deployment>(&mgr, &cid, &client, ResourceKind::Deployments, mappers::map_deployment, identity).await;
+    spawn::<_, ReplicaSet>(&mgr, &cid, &client, ResourceKind::Replicasets, mappers::map_replicaset, identity).await;
+    spawn::<_, StatefulSet>(&mgr, &cid, &client, ResourceKind::Statefulsets, mappers::map_statefulset, identity).await;
+    spawn::<_, DaemonSet>(&mgr, &cid, &client, ResourceKind::Daemonsets, mappers::map_daemonset, identity).await;
+    spawn::<_, Job>(&mgr, &cid, &client, ResourceKind::Jobs, mappers::map_job, identity).await;
+    spawn::<_, CronJob>(&mgr, &cid, &client, ResourceKind::Cronjobs, mappers::map_cronjob, identity).await;
+    spawn::<_, Service>(&mgr, &cid, &client, ResourceKind::Services, mappers::map_service, identity).await;
+    spawn::<_, Ingress>(&mgr, &cid, &client, ResourceKind::Ingresses, mappers::map_ingress, identity).await;
+    spawn::<_, IngressClass>(&mgr, &cid, &client, ResourceKind::Ingressclasses, mappers::map_ingressclass, identity).await;
+    spawn::<_, ConfigMap>(&mgr, &cid, &client, ResourceKind::Configmaps, mappers::map_configmap, identity).await;
+    spawn::<_, Secret>(&mgr, &cid, &client, ResourceKind::Secrets, mappers::map_secret, identity).await;
+    spawn::<_, ServiceAccount>(&mgr, &cid, &client, ResourceKind::Serviceaccounts, mappers::map_serviceaccount, identity).await;
     // RBAC (B49).
-    spawn::<Role>(mgr, &client, ResourceKind::Roles, mappers::map_role, identity).await;
-    spawn::<ClusterRole>(mgr, &client, ResourceKind::Clusterroles, mappers::map_clusterrole, identity).await;
-    spawn::<RoleBinding>(mgr, &client, ResourceKind::Rolebindings, mappers::map_rolebinding, identity).await;
-    spawn::<ClusterRoleBinding>(mgr, &client, ResourceKind::Clusterrolebindings, mappers::map_clusterrolebinding, identity).await;
-    spawn::<PersistentVolumeClaim>(mgr, &client, ResourceKind::Persistentvolumeclaims, mappers::map_pvc, identity).await;
-    spawn::<PersistentVolume>(mgr, &client, ResourceKind::Persistentvolumes, mappers::map_pv, identity).await;
-    spawn::<StorageClass>(mgr, &client, ResourceKind::Storageclasses, mappers::map_storageclass, identity).await;
-    spawn::<Node>(mgr, &client, ResourceKind::Nodes, mappers::map_node, identity).await;
-    spawn::<Namespace>(mgr, &client, ResourceKind::Namespaces, mappers::map_namespace, identity).await;
+    spawn::<_, Role>(&mgr, &cid, &client, ResourceKind::Roles, mappers::map_role, identity).await;
+    spawn::<_, ClusterRole>(&mgr, &cid, &client, ResourceKind::Clusterroles, mappers::map_clusterrole, identity).await;
+    spawn::<_, RoleBinding>(&mgr, &cid, &client, ResourceKind::Rolebindings, mappers::map_rolebinding, identity).await;
+    spawn::<_, ClusterRoleBinding>(&mgr, &cid, &client, ResourceKind::Clusterrolebindings, mappers::map_clusterrolebinding, identity).await;
+    spawn::<_, PersistentVolumeClaim>(&mgr, &cid, &client, ResourceKind::Persistentvolumeclaims, mappers::map_pvc, identity).await;
+    spawn::<_, PersistentVolume>(&mgr, &cid, &client, ResourceKind::Persistentvolumes, mappers::map_pv, identity).await;
+    spawn::<_, StorageClass>(&mgr, &cid, &client, ResourceKind::Storageclasses, mappers::map_storageclass, identity).await;
+    spawn::<_, Node>(&mgr, &cid, &client, ResourceKind::Nodes, mappers::map_node, identity).await;
+    spawn::<_, Namespace>(&mgr, &cid, &client, ResourceKind::Namespaces, mappers::map_namespace, identity).await;
     // Cluster-wide events feed: ordered Warnings-first/newest and capped (B14).
-    spawn::<Event>(mgr, &client, ResourceKind::Events, mappers::map_event, events_order).await;
+    spawn::<_, Event>(&mgr, &cid, &client, ResourceKind::Events, mappers::map_event, events_order).await;
     // Helm releases, decoded from their Secrets (B26).
-    let app = mgr.app();
-    let helm_client = client.clone();
-    let handle = tokio::spawn(async move { run_helm_watcher(helm_client, app).await });
-    mgr.push_task(handle).await;
+    let handle = tokio::spawn({
+        let mgr = mgr.clone();
+        let cid = cid.clone();
+        let client = client.clone();
+        async move { run_helm_watcher(mgr, cid, client).await }
+    });
+    mgr.push_task(cid, handle).await;
     25
 }
 
 /// Spawn one watcher task and register it with the manager.
-async fn spawn<K>(
-    mgr: &ClientManager,
+async fn spawn<R: Runtime, K>(
+    mgr: &Arc<ClientManager<R>>,
+    cid: &Cid,
     client: &Client,
     kind: ResourceKind,
     map_fn: fn(&K) -> Row,
@@ -108,18 +113,20 @@ async fn spawn<K>(
         + Sync
         + 'static,
 {
-    let app = mgr.app();
-    let client = client.clone();
+    let mgr_task = mgr.clone();
+    let cid_task = cid.clone();
+    let client_task = client.clone();
     let handle = tokio::spawn(async move {
-        run_watcher::<K>(client, app, kind, map_fn, post_fn).await;
+        run_watcher::<R, K>(mgr_task, cid_task, client_task, kind, map_fn, post_fn).await;
     });
-    mgr.push_task(handle).await;
+    mgr.push_task(cid.clone(), handle).await;
 }
 
 /// Drive a reflector for `K` and emit debounced, post-processed snapshots for `kind`.
-async fn run_watcher<K>(
+async fn run_watcher<R: Runtime, K>(
+    mgr: Arc<ClientManager<R>>,
+    cid: Cid,
     client: Client,
-    app: AppHandle,
     kind: ResourceKind,
     map_fn: fn(&K) -> Row,
     post_fn: fn(Vec<Row>) -> Vec<Row>,
@@ -145,7 +152,7 @@ async fn run_watcher<K>(
         .default_backoff()
         .boxed();
 
-    pump(reader, stream, app, kind.id().to_string(), |o| Some(map_fn(o)), post_fn).await;
+    pump(mgr, cid, reader, stream, kind.id().to_string(), |o| Some(map_fn(o)), post_fn).await;
 }
 
 /// Ordering/reduction for the Helm feed: newest revision per release (B26).
@@ -160,16 +167,17 @@ fn helm_latest(rows: Vec<Row>) -> Vec<Row> {
 /// throw most of them away. It's separate from the Secrets kind on purpose: that
 /// one redacts and lists Secrets as Secrets, while this one decodes them into
 /// something else entirely.
-async fn run_helm_watcher(client: Client, app: AppHandle) {
+async fn run_helm_watcher<R: Runtime>(mgr: Arc<ClientManager<R>>, cid: Cid, client: Client) {
     let api: Api<Secret> = Api::all(client);
     let (reader, writer) = reflector::store::<Secret>();
     let cfg = watcher::Config::default().fields(&format!("type={}", helm::RELEASE_SECRET_TYPE));
     let stream = reflector(writer, watcher(api, cfg)).default_backoff().boxed();
 
     pump(
+        mgr,
+        cid,
         reader,
         stream,
-        app,
         ResourceKind::Helm.id().to_string(),
         helm::map_release,
         helm_latest,
@@ -181,8 +189,9 @@ async fn run_helm_watcher(client: Client, app: AppHandle) {
 /// on its own when the user navigates away. Unlike the built-ins these start
 /// lazily: freya alone has 44 CRDs, and watching them all on connect would open
 /// dozens of pointless streams.
-pub async fn spawn_custom(mgr: &ClientManager, client: Client, kind: &CustomKind) {
-    let app = mgr.app();
+pub async fn spawn_custom<R: Runtime>(mgr: &Arc<ClientManager<R>>, cid: &Cid, client: Client, kind: &CustomKind) {
+    let mgr_task = mgr.clone();
+    let cid_task = cid.clone();
     let id = kind.id.clone();
     let ar = kind.api_resource();
     let namespaced = kind.namespaced;
@@ -190,15 +199,16 @@ pub async fn spawn_custom(mgr: &ClientManager, client: Client, kind: &CustomKind
     // into the watcher lets every row evaluate them against its object.
     let columns = kind.printer_columns.clone();
     let handle = tokio::spawn(async move {
-        run_custom_watcher(client, app, id, ar, namespaced, columns).await;
+        run_custom_watcher(mgr_task, cid_task, client, id, ar, namespaced, columns).await;
     });
-    mgr.add_custom_watcher(kind.id.clone(), handle).await;
+    mgr.add_custom_watcher(cid.clone(), kind.id.clone(), handle).await;
 }
 
 /// Drive a `DynamicObject` reflector for one CRD-backed kind.
-async fn run_custom_watcher(
+async fn run_custom_watcher<R: Runtime>(
+    mgr: Arc<ClientManager<R>>,
+    cid: Cid,
     client: Client,
-    app: AppHandle,
     id: String,
     ar: ApiResource,
     namespaced: bool,
@@ -217,9 +227,10 @@ async fn run_custom_watcher(
         .boxed();
 
     pump(
+        mgr,
+        cid,
         reader,
         stream,
-        app,
         id,
         move |o| Some(mappers::map_dynamic(o, namespaced, &columns)),
         identity,
@@ -230,10 +241,11 @@ async fn run_custom_watcher(
 /// The shared watch loop: coalesce watch events, then emit a full post-processed
 /// snapshot at most once per [`DEBOUNCE`]. Generic over the object type so typed
 /// and dynamic watchers share one implementation.
-async fn pump<K>(
+async fn pump<R: Runtime, K>(
+    mgr: Arc<ClientManager<R>>,
+    cid: Cid,
     reader: reflector::Store<K>,
     mut stream: BoxStream<'static, Result<watcher::Event<K>, watcher::Error>>,
-    app: AppHandle,
     kind: String,
     // Option, not Row: the Helm watcher (B26) sees Secrets it can't decode, and a
     // watcher that must invent a row for every object it's handed would have to
@@ -268,11 +280,9 @@ async fn pump<K>(
                     let rows: Vec<Row> =
                         reader.state().iter().filter_map(|o| map_fn(o.as_ref())).collect();
                     let rows = post_fn(rows);
-                    // Emit failures are non-fatal (webview may be gone).
-                    let _ = app.emit(
-                        events::RESOURCE_UPDATE,
-                        ResourceUpdate { kind: kind.clone(), rows },
-                    );
+                    // The manager emits on `resource-update:{cid}` and caches the
+                    // snapshot for an instant re-switch (B76).
+                    mgr.emit_rows(&cid, kind.clone(), rows).await;
                 }
             }
         }

@@ -33,6 +33,60 @@
   border-color: var(--border-hover);
 }
 
+/* The cluster rail (B77): a compact row of connected-cluster chips above the
+   switcher button. Each chip shows a connection dot + coloured initials; the
+   active one is outlined, and a warn/err tint marks a cluster with problems. */
+.rail {
+  display: flex;
+  gap: 6px;
+  padding: 0 2px 8px;
+  flex-wrap: wrap;
+}
+.railChip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px 3px 5px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.railChip:hover {
+  border-color: var(--border-hover);
+}
+.railChipActive {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+/* A cluster with problems gets an amber (warn) or red (err) border tint. */
+.railChipProblem {
+  border-color: var(--status-warn);
+}
+.railChipProblem .railInitials,
+.railChipProblem .railDot {
+  filter: saturate(1.4);
+}
+.railDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.railInitials {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #0d0d0f;
+}
+
 /* 24×24 initials badge. */
 .badge {
   width: 24px;

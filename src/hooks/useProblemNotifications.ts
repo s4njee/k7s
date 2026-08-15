@@ -64,7 +64,8 @@ export function useProblemNotifications(): void {
         lastNotified.set(p.uid, now);
         pending = { kind, namespace: inv.namespace, name: inv.name };
         const reason = p.cells[3]?.text ?? p.cells[0]?.text ?? "problem";
-        void getProvider().notifyProblem({ kind, namespace: inv.namespace, name: inv.name }, reason);
+        const cid = s.activeCid ?? "";
+        void getProvider().notifyProblem(cid, { kind, namespace: inv.namespace, name: inv.name }, `[${cid}] ${reason}`);
       }
       // Drop cooldown entries old enough to be forgotten, so the map can't grow
       // without bound on a long-running session.

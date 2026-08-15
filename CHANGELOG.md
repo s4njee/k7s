@@ -41,6 +41,26 @@ and CI refuses a tag whose three versions disagree.
   audit` gates and Dependabot in CI; a SECURITY.md with a disclosure contact;
   and a regression test pinning that a hostile pod name renders as text, not
   HTML (there is no `dangerouslySetInnerHTML` anywhere).
+- Multi-cluster backend (B76): `ClientManager` is now keyed by cluster — several
+  contexts connect side-by-side, each with its own lifecycle (`disconnect(cid)`
+  tears down one cluster's watchers/streams/forwards, never anyone else's).
+  Every event channel is namespaced by cid (`resource-update:{cid}`,
+  `watch-status:{cid}`, `log-line:{cid}:{streamId}`, …) and every command takes
+  the cluster id; the frontend passes a single active cid, so switching reuses
+  a live connection (no teardown, the backend replays its retained snapshots).
+  The store stays single-cluster — the cid-keyed UI is B77. Watch budgets
+  deferred to B77. Manager lifecycle unit tests + a live `multi_cluster_check`
+  harness.
+- Multi-cluster UI (B77): the store is now cid-keyed (rows, metrics, forwards,
+  drains, problems, cluster status, nav/namespace/detail per cluster), so
+  switching between connected clusters is instant — no teardown, every panel
+  re-points at the selected cluster's retained data. The sidebar gains a compact
+  **cluster rail** (initial + colour, connection dot, worst-problem tint;
+  ⌘1–9 to switch), the Problems view has an "all clusters" scope, notifications
+  name their cluster, port-forwards and the detail header are badged by cluster,
+  Settings has a per-cluster default namespace, and demo mode now produces
+  per-cluster data (a same-named `default/web` pod with distinct status per
+  cluster — the no-leakage fixture).
 
 ## [0.5.0] - 2026-08-14
 

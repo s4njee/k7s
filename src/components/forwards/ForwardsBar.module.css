@@ -27,6 +27,10 @@
   flex: none;
 }
 /* A forward whose connections are failing (B16) — still listed, but flagged. */
+.clusterChip {
+  color: var(--accent);
+  font-weight: 600;
+}
 .itemError {
   border-color: var(--status-err);
 }

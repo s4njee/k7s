@@ -86,15 +86,16 @@ export class MockProvider implements DataProvider {
   // Live subscribers, retained so connect() can re-emit after a data reset (e.g.
   // the cluster switcher clears data on a context switch). The real backend
   // re-emits from its watchers/pollers; the mock re-emits from here.
-  private resourceCbs = new Set<(kind: KindId, rows: Row[]) => void>();
-  private statusCbs = new Set<(s: ClusterStatus) => void>();
-  private watchCbs = new Set<(n: number) => void>();
-  private customKindCbs = new Set<(k: CustomKind[]) => void>();
-  private forwardCbs = new Set<(f: ForwardInfo[]) => void>();
-  private drainCbs = new Set<(p: DrainProgress) => void>();
-  private nodeStatsCbs = new Set<(node: string, s: NodeSample) => void>();
-  private nodeStatsErrCbs = new Set<(e: NodeStatsError) => void>();
-  private podStatsCbs = new Set<(key: string, s: PodSample) => void>();
+  private currentContext: string | null = null;
+  private resourceCbs = new Set<(cid: string, kind: KindId, rows: Row[]) => void>();
+  private statusCbs = new Set<(cid: string, s: ClusterStatus) => void>();
+  private watchCbs = new Set<(cid: string, n: number) => void>();
+  private customKindCbs = new Set<(cid: string, k: CustomKind[]) => void>();
+  private forwardCbs = new Set<(cid: string, f: ForwardInfo[]) => void>();
+  private drainCbs = new Set<(cid: string, p: DrainProgress) => void>();
+  private nodeStatsCbs = new Set<(cid: string, node: string, s: NodeSample) => void>();
+  private nodeStatsErrCbs = new Set<(cid: string, e: NodeStatsError) => void>();
+  private podStatsCbs = new Set<(cid: string, key: string, s: PodSample) => void>();
   /** Live synthetic series per node (B27), cleared by unwatchNodeStats. */
   private nodeTimers = new Map<string, ReturnType<typeof setInterval>>();
   /** Live synthetic per-pod series, cleared by unwatchPodStats. */
@@ -108,10 +109,12 @@ export class MockProvider implements DataProvider {
   }
 
   async connect(context: string): Promise<ClusterInfo> {
-    // Re-emit all snapshots so a data reset (on switch) is repopulated.
+    // Re-emit all snapshots so a data reset (on switch) is repopulated (B77:
+    // routed to the connected cid so the store retains per-cluster data).
+    this.currentContext = context;
     this.emitAllRows();
-    for (const cb of this.statusCbs) cb(MOCK_STATUS);
-    for (const cb of this.watchCbs) cb(MOCK_WATCH_COUNT);
+    for (const cb of this.statusCbs) cb(context, MOCK_STATUS);
+    for (const cb of this.watchCbs) cb(context, MOCK_WATCH_COUNT);
     return { context, clusterName: context, server: "https://mock.local:6443", version: "v1.31" };
   }
 
@@ -154,8 +157,8 @@ export class MockProvider implements DataProvider {
   /** Emit a fresh snapshot of every kind to all resource subscribers. */
   private emitAllRows(): void {
     for (const kind of KIND_ORDER) {
-      const rows = buildKindRows(kind);
-      for (const cb of this.resourceCbs) cb(kind, rows);
+      const rows = buildKindRows(kind, this.currentContext ?? undefined);
+      for (const cb of this.resourceCbs) cb(this.currentContext ?? "", kind, rows);
     }
   }
 
@@ -287,7 +290,7 @@ export class MockProvider implements DataProvider {
   async retryJob(ref: ResourceRef): Promise<string> {
     return `${ref.name}-retry-${Date.now() % 100000}`;
   }
-  async notifyProblem(_ref: ResourceRef, _reason: string): Promise<void> {
+  async notifyProblem(_cid: string, _ref: ResourceRef, _reason: string): Promise<void> {
     // Demo mode is a browser tab; there's no native notification to show.
   }
   async createResource(
@@ -329,7 +332,7 @@ export class MockProvider implements DataProvider {
         });
       }
       const done = evicted >= total - 1 && failures.length > 0;
-      for (const cb of this.drainCbs) cb({ node, evicted, total, failures: [...failures], done });
+      for (const cb of this.drainCbs) cb(this.currentContext ?? "", { node, evicted, total, failures: [...failures], done });
       if (!done) setTimeout(tick, 400);
     };
     setTimeout(tick, 300);
@@ -348,11 +351,11 @@ export class MockProvider implements DataProvider {
   // subscriptions emit a single initial value. Each returns a no-op unsubscribe
   // (nothing keeps running that needs teardown).
 
-  onResourceUpdate(cb: (kind: KindId, rows: Row[]) => void): Unsub {
+  onResourceUpdate(cb: (cid: string, kind: KindId, rows: Row[]) => void): Unsub {
     this.resourceCbs.add(cb);
     // Emit asynchronously so subscribers finish wiring up before the first snapshot.
     queueMicrotask(() => {
-      for (const kind of KIND_ORDER) cb(kind, buildKindRows(kind));
+      for (const kind of KIND_ORDER) cb(this.currentContext ?? "", kind, buildKindRows(kind, this.currentContext ?? undefined));
     });
     return () => {
       this.resourceCbs.delete(cb);
@@ -369,9 +372,9 @@ export class MockProvider implements DataProvider {
     return () => {};
   }
 
-  onCustomKinds(cb: (kinds: CustomKind[]) => void): Unsub {
+  onCustomKinds(cb: (cid: string, kinds: CustomKind[]) => void): Unsub {
     this.customKindCbs.add(cb);
-    queueMicrotask(() => cb(MOCK_CUSTOM_KINDS));
+    queueMicrotask(() => cb(this.currentContext ?? "", MOCK_CUSTOM_KINDS));
     return () => {
       this.customKindCbs.delete(cb);
     };
@@ -379,54 +382,54 @@ export class MockProvider implements DataProvider {
 
   async watchCustomKind(id: string): Promise<void> {
     const rows = buildCustomRows(id);
-    for (const cb of this.resourceCbs) cb(id, rows);
+    for (const cb of this.resourceCbs) cb(this.currentContext ?? "", id, rows);
   }
 
   async unwatchCustomKind(_id: string): Promise<void> {
     // Nothing to tear down: the mock has no live streams.
   }
 
-  onPodMetrics(_cb: (metrics: PodMetricsMap) => void): Unsub {
+  onPodMetrics(_cb: (cid: string, metrics: PodMetricsMap) => void): Unsub {
     // Pod CPU/MEM are baked into the mock rows already, so no separate feed.
     return () => {};
   }
 
-  onNodeMetrics(_cb: (metrics: NodeMetricsMap) => void): Unsub {
+  onNodeMetrics(_cb: (cid: string, metrics: NodeMetricsMap) => void): Unsub {
     // Node CPU/MEM percentages are baked into the mock rows already.
     return () => {};
   }
 
-  onClusterStatus(cb: (status: ClusterStatus) => void): Unsub {
+  onClusterStatus(cb: (cid: string, status: ClusterStatus) => void): Unsub {
     this.statusCbs.add(cb);
-    queueMicrotask(() => cb(MOCK_STATUS));
+    queueMicrotask(() => cb(this.currentContext ?? "", MOCK_STATUS));
     return () => {
       this.statusCbs.delete(cb);
     };
   }
 
-  onWatchStatus(cb: (activeStreams: number) => void): Unsub {
+  onWatchStatus(cb: (cid: string, activeStreams: number) => void): Unsub {
     this.watchCbs.add(cb);
-    queueMicrotask(() => cb(MOCK_WATCH_COUNT));
+    queueMicrotask(() => cb(this.currentContext ?? "", MOCK_WATCH_COUNT));
     return () => {
       this.watchCbs.delete(cb);
     };
   }
 
-  onDrainProgress(cb: (p: DrainProgress) => void): Unsub {
+  onDrainProgress(cb: (cid: string, p: DrainProgress) => void): Unsub {
     this.drainCbs.add(cb);
     return () => {
       this.drainCbs.delete(cb);
     };
   }
 
-  onNodeStats(cb: (node: string, s: NodeSample) => void): Unsub {
+  onNodeStats(cb: (cid: string, node: string, s: NodeSample) => void): Unsub {
     this.nodeStatsCbs.add(cb);
     return () => {
       this.nodeStatsCbs.delete(cb);
     };
   }
 
-  onNodeStatsError(cb: (e: NodeStatsError) => void): Unsub {
+  onNodeStatsError(cb: (cid: string, e: NodeStatsError) => void): Unsub {
     this.nodeStatsErrCbs.add(cb);
     return () => {
       this.nodeStatsErrCbs.delete(cb);
@@ -507,7 +510,10 @@ export class MockProvider implements DataProvider {
 
     if (node.endsWith("06")) {
       this.nodeStatsErrCbs.forEach((cb) =>
-        cb({ node, message: `no node-exporter pod found on ${node} — install one, or its port isn't 9100` }),
+        cb(this.currentContext ?? "", {
+          node,
+          message: `no node-exporter pod found on ${node} — install one, or its port isn't 9100`,
+        }),
       );
       return;
     }
@@ -543,7 +549,7 @@ export class MockProvider implements DataProvider {
           { mountpoint: "/mnt/data", usedBytes: 9078e9, sizeBytes: 20059e9 },
         ],
       };
-      this.nodeStatsCbs.forEach((cb) => cb(node, sample));
+      this.nodeStatsCbs.forEach((cb) => cb(this.currentContext ?? "", node, sample));
     };
     // First point promptly so the tab isn't empty while you wait.
     setTimeout(tick, 200);
@@ -564,7 +570,7 @@ export class MockProvider implements DataProvider {
   // series on the same cadence a pod's Metrics tab would see from the real feed,
   // letting the tab be worked on without a cluster.
 
-  onPodStats(cb: (key: string, s: PodSample) => void): Unsub {
+  onPodStats(cb: (cid: string, key: string, s: PodSample) => void): Unsub {
     this.podStatsCbs.add(cb);
     return () => {
       this.podStatsCbs.delete(cb);
@@ -588,7 +594,7 @@ export class MockProvider implements DataProvider {
       cpu = clamp(cpu + (Math.random() - 0.5) * baseCpu * 0.18, Math.max(1, baseCpu * 0.4), baseCpu * 2.1);
       mem = clamp(mem + (Math.random() - 0.5) * baseMem * 0.12, baseMem * 0.5, baseMem * 2.0);
       const sample: PodSample = { ts: Date.now(), cpuMillis: Math.round(cpu), memBytes: Math.round(mem) };
-      this.podStatsCbs.forEach((cb) => cb(key, sample));
+      this.podStatsCbs.forEach((cb) => cb(this.currentContext ?? "", key, sample));
     };
     // First point promptly so the tab isn't empty while you wait.
     setTimeout(tick, 200);
@@ -726,6 +732,7 @@ export class MockProvider implements DataProvider {
     const isService = ref.kind === "services";
     const fwd: ForwardInfo = {
       id: `pf-${ref.name}-${remotePort}-${this.forwards.length}`,
+      cid: this.currentContext ?? "",
       namespace: ref.namespace ?? "",
       // A Service forward resolves to a backing pod; the mock fakes one so the
       // strip shows the same "service (via pod)" shape as the real thing (B16).
@@ -751,7 +758,7 @@ export class MockProvider implements DataProvider {
     return this.forwards;
   }
 
-  onForwards(cb: (forwards: ForwardInfo[]) => void): Unsub {
+  onForwards(cb: (cid: string, forwards: ForwardInfo[]) => void): Unsub {
     this.forwardCbs.add(cb);
     return () => {
       this.forwardCbs.delete(cb);
@@ -760,6 +767,6 @@ export class MockProvider implements DataProvider {
 
   /** Push the current forwards, mirroring the backend's forwards-update event. */
   private emitForwards(): void {
-    for (const cb of this.forwardCbs) cb([...this.forwards]);
+    for (const cb of this.forwardCbs) cb(this.currentContext ?? "", [...this.forwards]);
   }
 }

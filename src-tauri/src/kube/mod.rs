@@ -32,6 +32,11 @@ use serde::{Deserialize, Serialize};
 pub use dto::Row;
 pub use manager::ClientManager;
 
+/// A cluster identity, used to key per-cluster state and to namespace every
+/// event channel (B76). The kubeconfig context name — unique per kubeconfig,
+/// which is what the switcher and the imported-context map already key on.
+pub type Cid = String;
+
 /// The twelve resource kinds the app watches. Serializes to the same lowercase
 /// ids the frontend uses (see src/lib/kinds.ts).
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -131,10 +136,29 @@ pub mod events {
     /// One event carrying the node, rather than a per-node channel, so progress
     /// lands in the store and survives navigating away mid-drain.
     pub const DRAIN_PROGRESS: &str = "drain-progress";
-    /// Log lines for a stream: emitted as `log-line:{streamId}`.
+    /// Log lines for a stream: emitted as `log-line:{cid}:{streamId}`.
     pub const LOG_LINE_PREFIX: &str = "log-line:";
-    /// Stream end/error: emitted as `log-closed:{streamId}`.
+    /// Stream end/error: emitted as `log-closed:{cid}:{streamId}`.
     pub const LOG_CLOSED_PREFIX: &str = "log-closed:";
+    /// Shell stdout chunks: emitted as `shell-out:{cid}:{streamId}`.
+    pub const SHELL_OUT_PREFIX: &str = "shell-out:";
+    /// Shell session end/error: emitted as `shell-closed:{cid}:{streamId}`.
+    pub const SHELL_CLOSED_PREFIX: &str = "shell-closed:";
+
+    /// A per-cluster event channel: `{name}:{cid}` (B76). Cluster events are
+    /// namespaced by cid so multiple connected clusters never collide on the
+    /// wire — the frontend subscribes to the active cid's channel.
+    pub fn channel(name: &str, cid: &super::Cid) -> String {
+        format!("{name}:{cid}")
+    }
+
+    /// A per-cluster stream channel: `{prefix}{cid}:{stream}` — e.g.
+    /// `log-line:{cid}:{streamId}`. Stream ids are globally unique, so the cid
+    /// prefix is namespacing for the frontend's per-connect subscription, not
+    /// disambiguation.
+    pub fn stream_channel(prefix: &str, cid: &super::Cid, stream: &str) -> String {
+        format!("{prefix}{cid}:{stream}")
+    }
 }
 
 /// Payload for [`events::RESOURCE_UPDATE`].

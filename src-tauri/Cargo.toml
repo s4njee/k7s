@@ -98,6 +98,8 @@ flate2 = "1"
 [dev-dependencies]
 # Generates test certificates for the TLS parsing tests (B48); never in prod.
 rcgen = { version = "0.13", features = ["x509-parser"] }
+# Exposes `tauri::test::mock_app()` for the ClientManager lifecycle tests (B76).
+tauri = { version = "2", features = ["test"] }
 
 [features]
 # Reserved for future custom-protocol tweaks; kept so tauri.conf can reference it.

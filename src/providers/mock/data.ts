@@ -26,6 +26,25 @@ export interface MockPod {
   containers: string[];
 }
 
+/**
+ * B77 demo fixture: a same-named `default/web` pod present in every cluster with
+ * a *distinct* status per cluster (Running on freya, CrashLoopBackOff on the
+ * background clusters), so switching visibly changes the table — the no-leakage
+ * check. Background clusters also get an extra pod so the row sets differ.
+ */
+function perClusterPods(cid: string): MockPod[] {
+  const out = [...MOCK_PODS];
+  const web: MockPod =
+    cid === "freya"
+      ? { name: "web-6f9c7d5b4-abc12", ns: "default", ready: "1/1", restarts: 0, cpu: "120m", mem: "220Mi", age: "3h", status: "Running", node: "freya-node-01", containers: ["web"] }
+      : { name: "web-6f9c7d5b4-abc12", ns: "default", ready: "0/1", restarts: 9, cpu: "42m", mem: "186Mi", age: "3h", status: "CrashLoopBackOff", node: "—", containers: ["web"] };
+  out.push(web);
+  if (cid !== "freya") {
+    out.push({ name: "celery-worker-5f6a7b8c9-zz1aa", ns: "default", ready: "1/1", restarts: 0, cpu: "64m", mem: "140Mi", age: "1d", status: "Running", node: "freya-node-03", containers: ["celery-worker"] });
+  }
+  return out;
+}
+
 /** The 13 pods from the prototype, verbatim (order preserved). */
 export const MOCK_PODS: MockPod[] = [
   { name: "valkyrie-api-7d9f8b64d-x2k4n", ns: "prod", ready: "3/3", restarts: 0, cpu: "212m", mem: "486Mi", age: "4d2h", status: "Running", node: "freya-node-02", containers: ["valkyrie-api", "istio-proxy", "log-shipper"] },
@@ -175,8 +194,8 @@ export function mockPodUsage(key: string): { cpuMillis: number; memBytes: number
 }
 
 /** Build the Pods table rows with the prototype's exact per-cell coloring. */
-export function buildPodRows(): Row[] {
-  return stressPods(MOCK_PODS).map((p) => {
+export function buildPodRows(cid?: string): Row[] {
+  return stressPods(cid ? perClusterPods(cid) : MOCK_PODS).map((p) => {
     // READY "a/b" is amber when not all containers are ready (a===0 or a!==b).
     const readyDegraded = p.ready[0] === "0" || p.ready[0] !== p.ready[2];
     const meta: PodMeta = {
@@ -832,8 +851,8 @@ function buildJobRows(): Row[] {
 }
 
 /** Build rows for a non-pod kind from MOCK_RESOURCES with the prototype's coloring. */
-export function buildKindRows(kind: ResourceKind): Row[] {
-  if (kind === "pods") return buildPodRows();
+export function buildKindRows(kind: ResourceKind, cid?: string): Row[] {
+  if (kind === "pods") return buildPodRows(cid);
   if (kind === "events") return buildEventRows();
   if (kind === "helm") return buildHelmRows();
   if (kind === "persistentvolumeclaims") return buildPvcRows();

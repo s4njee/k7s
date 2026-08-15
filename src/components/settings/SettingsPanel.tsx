@@ -36,6 +36,10 @@ export function SettingsPanel() {
   const settings = useStore((s) => s.settings);
   const setSettings = useStore((s) => s.setSettings);
   const connected = useStore((s) => s.connection.phase === "connected");
+  const activeCid = useStore((s) => s.activeCid);
+  const clusterName = useStore((s) => s.connection.clusterName ?? s.activeCid);
+  const clusterNamespaces = useStore((s) => s.clusterNamespaces);
+  const setClusterNamespace = useStore((s) => s.setClusterNamespace);
 
   // Automatic updates (B72): plain store state, driven by lib/updates.ts.
   const updateStatus = useStore((s) => s.status);
@@ -178,6 +182,20 @@ export function SettingsPanel() {
                 placeholder="all"
               />
             </Row>
+
+            {activeCid && (
+              <Row
+                label={`Default namespace (${clusterName})`}
+                hint="per-cluster override, layered over the global default above"
+              >
+                <input
+                  className={styles.text}
+                  value={clusterNamespaces[activeCid] ?? ""}
+                  onChange={(e) => setClusterNamespace(activeCid, e.target.value)}
+                  placeholder="inherit global"
+                />
+              </Row>
+            )}
 
             <Row label="Notifications" hint="native notification when something goes wrong; never while the window is focused">
               <div

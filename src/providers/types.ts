@@ -397,6 +397,9 @@ export interface Prefs {
   importedFiles?: string[] | null;
   /** Bookmarks (B56) keyed by cluster context, so each context has its own list. */
   bookmarks?: Record<string, Bookmark[]> | null;
+  /** Per-cluster rail colour + default namespace (B77). */
+  clusterColors?: Record<string, string> | null;
+  clusterNamespaces?: Record<string, string> | null;
   // ---- settings (B23) ----
   // Flat rather than nested so an older prefs.json keeps loading: serde and
   // JSON.parse both just leave absent fields undefined, and sanitizeSettings
@@ -490,6 +493,8 @@ export interface NodeShellHandle extends ShellHandle {
 /** An active port-forward (B6). */
 export interface ForwardInfo {
   id: string;
+  /** The cluster this forward belongs to (B77) — the strip badges it. */
+  cid: string;
   namespace: string;
   /** The pod traffic reaches — for a Service forward, the one selected (B16). */
   pod: string;
@@ -656,7 +661,7 @@ export interface DataProvider {
    * Show a native notification that a problem appeared (B50). `ref.kind` is the
    * nav target a click should jump to; `reason` is the notification body.
    */
-  notifyProblem(ref: ResourceRef, reason: string): Promise<void>;
+  notifyProblem(cid: string, ref: ResourceRef, reason: string): Promise<void>;
 
   /**
    * Create an object from pasted YAML (B36). The manifest's apiVersion/kind
@@ -767,21 +772,23 @@ export interface DataProvider {
    * app opens its settings dialog on it. No payload.
    */
   onOpenSettings(cb: () => void): Unsub;
-  onResourceUpdate(cb: (kind: KindId, rows: Row[]) => void): Unsub;
+  /** Cluster callbacks lead with the cid (B77) — every provider event is routed
+   *  to the cluster it came from, and the store retains per-cid data. */
+  onResourceUpdate(cb: (cid: string, kind: KindId, rows: Row[]) => void): Unsub;
   /** CRD-backed kinds discovered on connect; re-emitted on every connect. */
-  onCustomKinds(cb: (kinds: CustomKind[]) => void): Unsub;
-  onPodMetrics(cb: (metrics: PodMetricsMap) => void): Unsub;
-  onNodeMetrics(cb: (metrics: NodeMetricsMap) => void): Unsub;
-  onClusterStatus(cb: (status: ClusterStatus) => void): Unsub;
-  onWatchStatus(cb: (activeStreams: number) => void): Unsub;
+  onCustomKinds(cb: (cid: string, kinds: CustomKind[]) => void): Unsub;
+  onPodMetrics(cb: (cid: string, metrics: PodMetricsMap) => void): Unsub;
+  onNodeMetrics(cb: (cid: string, metrics: NodeMetricsMap) => void): Unsub;
+  onClusterStatus(cb: (cid: string, status: ClusterStatus) => void): Unsub;
+  onWatchStatus(cb: (cid: string, activeStreams: number) => void): Unsub;
   /** Progress of running node drains (B20). */
-  onDrainProgress(cb: (progress: DrainProgress) => void): Unsub;
+  onDrainProgress(cb: (cid: string, progress: DrainProgress) => void): Unsub;
   /** node-exporter samples for nodes being watched (B27). */
-  onNodeStats(cb: (node: string, sample: NodeSample) => void): Unsub;
+  onNodeStats(cb: (cid: string, node: string, sample: NodeSample) => void): Unsub;
   /** Why a watched node has no samples (B27). */
-  onNodeStatsError(cb: (err: NodeStatsError) => void): Unsub;
+  onNodeStatsError(cb: (cid: string, err: NodeStatsError) => void): Unsub;
   /** Per-pod usage samples for pods whose Metrics tab is open, keyed "ns/name". */
-  onPodStats(cb: (key: string, sample: PodSample) => void): Unsub;
+  onPodStats(cb: (cid: string, key: string, sample: PodSample) => void): Unsub;
 
   // ---- log streaming ----
   startLogs(
@@ -845,5 +852,5 @@ export interface DataProvider {
   stopPortForward(id: string): Promise<void>;
   listPortForwards(): Promise<ForwardInfo[]>;
   /** Active forwards, pushed on add/remove/failure (B16). */
-  onForwards(cb: (forwards: ForwardInfo[]) => void): Unsub;
+  onForwards(cb: (cid: string, forwards: ForwardInfo[]) => void): Unsub;
 }

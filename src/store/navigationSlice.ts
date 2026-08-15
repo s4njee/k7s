@@ -13,7 +13,9 @@ import type { LogLine } from "../providers/types";
 
 export const initialNavigationState: NavigationState = {
   nav: "pods",
+  navByCid: {},
   namespace: "all",
+  namespaceByCid: {},
   tableFilter: "",
   sortCol: null,
   sortDir: "asc",

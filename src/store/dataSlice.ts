@@ -29,20 +29,31 @@ function omit<T>(obj: Record<string, T>, key: string): Record<string, T> {
 
 export const initialDataState: DataSliceState = {
   rows: emptyRows(),
+  rowsByCid: {},
   customKinds: [],
+  customKindsByCid: {},
   settings: { ...DEFAULT_SETTINGS, theme: cachedTheme() },
   selection: EMPTY_SELECTION,
+  selectionByCid: {},
   systemDark: prefersDark(),
   settingsOpen: false,
   createOpen: false,
   paletteOpen: false,
+  problemsScope: "active",
   podMetrics: {},
+  podMetricsByCid: {},
   nodeMetrics: {},
+  nodeMetricsByCid: {},
   portForwards: [],
+  portForwardsByCid: {},
   drains: {},
+  drainsByCid: {},
   nodeSamples: {},
+  nodeSamplesByCid: {},
   nodeStatsErrors: {},
+  nodeStatsErrorsByCid: {},
   podSamples: {},
+  podSamplesByCid: {},
 };
 
 export const createDataSlice: StateCreator<
@@ -53,56 +64,106 @@ export const createDataSlice: StateCreator<
 > = (set) => ({
   ...initialDataState,
 
-  setRows: (kind, rows) =>
+  setRows: (cid, kind, rows) =>
     set((s) => {
-      const next = { ...s.rows, [kind]: rows };
-      return { rows: { ...next, problems: deriveProblems(next) } };
+      const base = s.rowsByCid[cid] ?? emptyRows();
+      const nextMap = { ...s.rowsByCid, [cid]: { ...base, [kind]: rows } };
+      const patch: Partial<AppState> = { rowsByCid: nextMap };
+      if (cid === s.activeCid) {
+        // Problems are derived from the row set (B32) — retained per cid too.
+        const next = nextMap[cid];
+        patch.rows = { ...next, problems: deriveProblems(next) };
+      }
+      return patch;
     }),
 
-  setCustomKinds: (kinds) => set({ customKinds: kinds }),
-  setPodMetrics: (m) => set({ podMetrics: m }),
-  setNodeMetrics: (m) => set({ nodeMetrics: m }),
-  setPortForwards: (list) => set({ portForwards: list }),
-  setDrain: (p) => set((s) => ({ drains: { ...s.drains, [p.node]: p } })),
+  setCustomKinds: (cid, kinds) =>
+    set((s) => ({
+      customKindsByCid: { ...s.customKindsByCid, [cid]: kinds },
+      ...(cid === s.activeCid ? { customKinds: kinds } : {}),
+    })),
 
-  seedNodeSamples: (node, history) =>
+  setPodMetrics: (cid, m) =>
+    set((s) => ({
+      podMetricsByCid: { ...s.podMetricsByCid, [cid]: m },
+      ...(cid === s.activeCid ? { podMetrics: m } : {}),
+    })),
+
+  setNodeMetrics: (cid, m) =>
+    set((s) => ({
+      nodeMetricsByCid: { ...s.nodeMetricsByCid, [cid]: m },
+      ...(cid === s.activeCid ? { nodeMetrics: m } : {}),
+    })),
+
+  setPortForwards: (cid, list) =>
+    set((s) => ({
+      portForwardsByCid: { ...s.portForwardsByCid, [cid]: list },
+      ...(cid === s.activeCid ? { portForwards: list } : {}),
+    })),
+
+  setDrain: (cid, p) =>
+    set((s) => {
+      const base = s.drainsByCid[cid] ?? {};
+      const nextMap = { ...s.drainsByCid, [cid]: { ...base, [p.node]: p } };
+      const patch: Partial<AppState> = { drainsByCid: nextMap };
+      if (cid === s.activeCid) patch.drains = nextMap[cid];
+      return patch;
+    }),
+
+  seedNodeSamples: (cid, node, history) =>
     set((s) => {
       if (history.length === 0) return {};
-      const live = s.nodeSamples[node] ?? [];
+      const live = (s.nodeSamplesByCid[cid] ?? {})[node] ?? [];
       const oldestLive = live.length ? live[0].ts : Infinity;
       const merged = history.filter((h) => h.ts < oldestLive).concat(live);
-      return {
-        nodeSamples: {
-          ...s.nodeSamples,
-          [node]: merged.length > NODE_SAMPLE_CAP ? merged.slice(-NODE_SAMPLE_CAP) : merged,
-        },
+      const capped = merged.length > NODE_SAMPLE_CAP ? merged.slice(-NODE_SAMPLE_CAP) : merged;
+      const nextMap = {
+        ...s.nodeSamplesByCid,
+        [cid]: { ...(s.nodeSamplesByCid[cid] ?? {}), [node]: capped },
       };
+      const patch: Partial<AppState> = { nodeSamplesByCid: nextMap };
+      if (cid === s.activeCid) patch.nodeSamples = nextMap[cid] ?? {};
+      return patch;
     }),
 
-  addNodeSample: (node, sample) =>
+  addNodeSample: (cid, node, sample) =>
     set((s) => {
-      const next = (s.nodeSamples[node] ?? []).concat(sample);
-      return {
-        nodeSamples: {
-          ...s.nodeSamples,
-          [node]: next.length > NODE_SAMPLE_CAP ? next.slice(-NODE_SAMPLE_CAP) : next,
+      const base = s.nodeSamplesByCid[cid] ?? {};
+      const next = (base[node] ?? []).concat(sample);
+      const capped = next.length > NODE_SAMPLE_CAP ? next.slice(-NODE_SAMPLE_CAP) : next;
+      const nextMap = { ...s.nodeSamplesByCid, [cid]: { ...base, [node]: capped } };
+      const patch: Partial<AppState> = {
+        nodeSamplesByCid: nextMap,
+        nodeStatsErrorsByCid: {
+          ...s.nodeStatsErrorsByCid,
+          [cid]: omit(s.nodeStatsErrorsByCid[cid] ?? {}, node),
         },
-        nodeStatsErrors: omit(s.nodeStatsErrors, node),
       };
+      if (cid === s.activeCid) {
+        patch.nodeSamples = nextMap[cid] ?? {};
+        patch.nodeStatsErrors = omit(s.nodeStatsErrors, node);
+      }
+      return patch;
     }),
 
-  setNodeStatsError: (node, message) =>
-    set((s) => ({ nodeStatsErrors: { ...s.nodeStatsErrors, [node]: message } })),
-
-  addPodSample: (key, sample) =>
+  setNodeStatsError: (cid, node, message) =>
     set((s) => {
-      const next = (s.podSamples[key] ?? []).concat(sample);
-      return {
-        podSamples: {
-          ...s.podSamples,
-          [key]: next.length > POD_SAMPLE_CAP ? next.slice(-POD_SAMPLE_CAP) : next,
-        },
-      };
+      const base = s.nodeStatsErrorsByCid[cid] ?? {};
+      const nextMap = { ...s.nodeStatsErrorsByCid, [cid]: { ...base, [node]: message } };
+      const patch: Partial<AppState> = { nodeStatsErrorsByCid: nextMap };
+      if (cid === s.activeCid) patch.nodeStatsErrors = nextMap[cid] ?? {};
+      return patch;
+    }),
+
+  addPodSample: (cid, key, sample) =>
+    set((s) => {
+      const base = s.podSamplesByCid[cid] ?? {};
+      const next = (base[key] ?? []).concat(sample);
+      const capped = next.length > POD_SAMPLE_CAP ? next.slice(-POD_SAMPLE_CAP) : next;
+      const nextMap = { ...s.podSamplesByCid, [cid]: { ...base, [key]: capped } };
+      const patch: Partial<AppState> = { podSamplesByCid: nextMap };
+      if (cid === s.activeCid) patch.podSamples = nextMap[cid] ?? {};
+      return patch;
     }),
 
   setSettings: (patch) =>
@@ -121,22 +182,37 @@ export const createDataSlice: StateCreator<
   setSelection: (selection) => set({ selection }),
   clearSelection: () => set({ selection: EMPTY_SELECTION }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
+  setProblemsScope: (scope) => set({ problemsScope: scope }),
 
-  resetData: () =>
-    set({
-      rows: emptyRows(),
-      customKinds: [],
-      podMetrics: {},
-      nodeMetrics: {},
-      portForwards: [],
-      drains: {},
-      nodeSamples: {},
-      nodeStatsErrors: {},
-      podSamples: {},
-      selectedRow: null,
-      selection: EMPTY_SELECTION,
-      logBuffer: [],
-      clusterStatus: null,
-      openMenu: null,
+  resetData: (cid) =>
+    set((s) => {
+      const patch: Partial<AppState> = {
+        rowsByCid: omit(s.rowsByCid, cid),
+        customKindsByCid: omit(s.customKindsByCid, cid),
+        podMetricsByCid: omit(s.podMetricsByCid, cid),
+        nodeMetricsByCid: omit(s.nodeMetricsByCid, cid),
+        portForwardsByCid: omit(s.portForwardsByCid, cid),
+        drainsByCid: omit(s.drainsByCid, cid),
+        nodeSamplesByCid: omit(s.nodeSamplesByCid, cid),
+        nodeStatsErrorsByCid: omit(s.nodeStatsErrorsByCid, cid),
+        podSamplesByCid: omit(s.podSamplesByCid, cid),
+      };
+      if (cid === s.activeCid) {
+        patch.rows = emptyRows();
+        patch.customKinds = [];
+        patch.podMetrics = {};
+        patch.nodeMetrics = {};
+        patch.portForwards = [];
+        patch.drains = {};
+        patch.nodeSamples = {};
+        patch.nodeStatsErrors = {};
+        patch.podSamples = {};
+        patch.selectedRow = null;
+        patch.selection = EMPTY_SELECTION;
+        patch.logBuffer = [];
+        patch.clusterStatus = null;
+        patch.openMenu = null;
+      }
+      return patch;
     }),
 });

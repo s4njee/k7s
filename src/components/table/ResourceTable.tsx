@@ -33,7 +33,22 @@ export function ResourceTable() {
   const sortCol = useStore((s) => s.sortCol);
   const sortDir = useStore((s) => s.sortDir);
   const toggleSort = useStore((s) => s.toggleSort);
-  const allRows = useStore((s) => rowsFor(s.rows, nav));
+  const activeRows = useStore((s) => rowsFor(s.rows, nav));
+  const rowsByCid = useStore((s) => s.rowsByCid);
+  const problemsScope = useStore((s) => s.problemsScope);
+  // All-clusters problems scope (B77): merge every connected cluster's problems,
+  // each badged with a leading CLUSTER cell.
+  const allRows = useMemo(() => {
+    if (nav === "problems" && problemsScope === "all") {
+      return Object.entries(rowsByCid).flatMap(([cid, rows]) =>
+        (rows.problems ?? []).map((p) => ({
+          ...p,
+          cells: [{ text: cid, tone: "muted" as const }, ...p.cells],
+        })),
+      );
+    }
+    return activeRows;
+  }, [nav, problemsScope, rowsByCid, activeRows]);
   const podMetrics = useStore((s) => s.podMetrics);
   const nodeMetrics = useStore((s) => s.nodeMetrics);
   const podRows = useStore((s) => s.rows.pods);
@@ -48,7 +63,10 @@ export function ResourceTable() {
   const now = useNow();
 
   const meta = kindMeta(nav, customKinds);
-  const columns = meta?.columns ?? [];
+  const columns =
+    nav === "problems" && problemsScope === "all"
+      ? ["CLUSTER", ...(meta?.columns ?? [])]
+      : (meta?.columns ?? []);
 
   const eventTarget = useCallback(
     (row: Row): NavTarget | null => {

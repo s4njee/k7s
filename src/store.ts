@@ -7,7 +7,7 @@
 import { create } from "zustand";
 import { DEFAULT_SETTINGS } from "./lib/settings";
 import type { KindId, Row } from "./providers/types";
-import type { AppState, ConnectionState, DetailTab, OpenMenu, RowMap } from "./store/types";
+import type { AppState, Cid, ConnectionState, DetailTab, OpenMenu, RowMap } from "./store/types";
 import { createNavigationSlice } from "./store/navigationSlice";
 import { createConnectionSlice } from "./store/connectionSlice";
 import { createDataSlice, NODE_SAMPLE_CAP, POD_SAMPLE_CAP } from "./store/dataSlice";
@@ -15,7 +15,7 @@ import { createDetailSlice } from "./store/detailSlice";
 import { createUpdateSlice } from "./store/updateSlice";
 
 // Re-export all types and constants for backwards compatibility
-export type { AppState, ConnectionState, DetailTab, OpenMenu, RowMap };
+export type { AppState, Cid, ConnectionState, DetailTab, OpenMenu, RowMap };
 export { NODE_SAMPLE_CAP, POD_SAMPLE_CAP };
 
 /**

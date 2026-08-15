@@ -66,7 +66,7 @@ describe("MockProvider.drainNode", () => {
   it("reports progress and finishes on a PDB block", async () => {
     const provider = new MockProvider();
     const seen: DrainProgress[] = [];
-    provider.onDrainProgress((p) => seen.push(p));
+    provider.onDrainProgress((_cid, p) => seen.push(p));
 
     await provider.drainNode("freya-node-02");
     // The mock ticks over a couple of seconds; wait for the terminal event.

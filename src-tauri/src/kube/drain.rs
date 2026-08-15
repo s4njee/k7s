@@ -16,6 +16,7 @@
 //! to see which pods are stuck rather than watching a spinner.
 
 use super::events;
+use super::Cid;
 use crate::error::{AppError, AppResult};
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{Api, DeleteParams, EvictParams, ListParams, Patch, PatchParams};
@@ -60,7 +61,7 @@ pub async fn cordon(client: Client, node: &str) -> AppResult<()> {
 ///
 /// Assumes the node is already cordoned (see [`cordon`]) — otherwise the
 /// scheduler could place new pods on it while we're evicting.
-pub async fn run_drain(client: Client, app: AppHandle, node: String) {
+pub async fn run_drain(client: Client, app: AppHandle, cid: Cid, node: String) {
     let pods: Api<Pod> = Api::all(client.clone());
     // Only this node's pods. Field-selected server-side: a big cluster shouldn't
     // ship every pod over the wire to filter locally.
@@ -70,6 +71,7 @@ pub async fn run_drain(client: Client, app: AppHandle, node: String) {
         Err(e) => {
             emit(
                 &app,
+                &cid,
                 DrainProgress {
                     node,
                     evicted: 0,
@@ -90,7 +92,7 @@ pub async fn run_drain(client: Client, app: AppHandle, node: String) {
     let total = targets.len();
     let mut progress =
         DrainProgress { node: node.clone(), evicted: 0, total, failures: Vec::new(), done: false };
-    emit(&app, progress.clone());
+    emit(&app, &cid, progress.clone());
 
     let ep = EvictParams { delete_options: Some(DeleteParams::default()), ..Default::default() };
     for pod in targets {
@@ -116,16 +118,16 @@ pub async fn run_drain(client: Client, app: AppHandle, node: String) {
                 });
             }
         }
-        emit(&app, progress.clone());
+        emit(&app, &cid, progress.clone());
     }
 
     progress.done = true;
-    emit(&app, progress);
+    emit(&app, &cid, progress);
 }
 
 /// Emit progress (best-effort; the webview may be gone).
-fn emit(app: &AppHandle, p: DrainProgress) {
-    let _ = app.emit(events::DRAIN_PROGRESS, p);
+fn emit(app: &AppHandle, cid: &Cid, p: DrainProgress) {
+    let _ = app.emit(&events::channel(events::DRAIN_PROGRESS, cid), p);
 }
 
 /// True when this pod should be evicted as part of a drain.

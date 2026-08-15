@@ -77,29 +77,70 @@ export class TauriProvider implements DataProvider {
   // down to the pods being watched, rather than a dedicated backend stream: the
   // poller is already running, so this is a pure client-side fanout.
   private watchedPods = new Set<string>();
-  private podStatsCbs = new Set<(key: string, sample: PodSample) => void>();
-  /** Lazily attached on the first onPodStats subscription; lives for the app. */
-  private podMetricsFanout: Unsub | null = null;
+  private podStatsCbs = new Set<(cid: string, key: string, sample: PodSample) => void>();
+
+  // ---- clusters (B76/B77) ----
+  //
+  // The backend holds several clusters side-by-side; the provider tracks the
+  // *active* one (which command calls target) and subscribes to EVERY connected
+  // cluster's `{event}:{cid}` channels so the store retains background data.
+  // The on* callbacks below register a handler per channel; connect() adds the
+  // new cid's subscriptions and the store routes each event by cid.
+  private cid: string | null = null;
+  private subscribedCids = new Set<string>();
+  private clusterUnsubs: (() => void)[] = [];
+  private clusterHandlers: { event: string; handler: (cid: string, p: unknown) => void }[] = [];
+
+  /** Invoke a backend command with the active cid injected. Commands that don't
+   *  take one ignore it (serde drops unknown fields). */
+  private invokeCmd<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
+    return invoke<T>(cmd, { cid: this.cid, ...args });
+  }
+
+  /** Subscribe every registered cluster handler to `cid`'s `{event}:{cid}` channels. */
+  private subscribeCid(cid: string): void {
+    if (this.subscribedCids.has(cid)) return;
+    this.subscribedCids.add(cid);
+    for (const { event, handler } of this.clusterHandlers) {
+      this.clusterUnsubs.push(subscribe(`${event}:${cid}`, (p: unknown) => handler(cid, p)));
+    }
+  }
+
+  /** Register a cluster-channel handler; subscribed for every connected cid. */
+  private subscribeCluster<T>(event: string, handler: (cid: string, p: T) => void): Unsub {
+    const entry = { event, handler: handler as (cid: string, p: unknown) => void };
+    this.clusterHandlers.push(entry);
+    for (const cid of this.subscribedCids) this.subscribeCid(cid);
+    return () => {
+      const i = this.clusterHandlers.indexOf(entry);
+      if (i >= 0) this.clusterHandlers.splice(i, 1);
+    };
+  }
 
   // ---- one-shot commands ----
 
   listContexts(): Promise<ContextInfo[]> {
-    return invoke<ContextInfo[]>("list_contexts");
+    return this.invokeCmd<ContextInfo[]>("list_contexts");
   }
 
-  connect(context: string): Promise<ClusterInfo> {
-    return invoke<ClusterInfo>("connect", { context });
+  async connect(context: string): Promise<ClusterInfo> {
+    // Switch the active cid and add its channels (kept for every connected
+    // cluster), then invoke — the reuse path's replayed snapshots land on the
+    // new channels (B76).
+    this.cid = context;
+    this.subscribeCid(context);
+    return this.invokeCmd<ClusterInfo>("connect", { context });
   }
 
   restoreImports(paths: string[]): Promise<string[]> {
-    return invoke<string[]>("restore_imports", { paths });
+    return this.invokeCmd<string[]>("restore_imports", { paths });
   }
 
   async importKubeconfig(): Promise<ImportResult | null> {
     // Lazy-import the dialog plugin so it isn't pulled into demo bundles.
     const { open } = await import("@tauri-apps/plugin-dialog");
     // Pre-point the dialog at kubectl's default kubeconfig for one-click import.
-    const defaultPath = await invoke<string>("default_kubeconfig_path");
+    const defaultPath = await this.invokeCmd<string>("default_kubeconfig_path");
     const selected = await open({
       title: "Import kubeconfig",
       multiple: false,
@@ -108,18 +149,18 @@ export class TauriProvider implements DataProvider {
     });
     // User cancelled, or (defensively) a multi-selection came back.
     if (!selected || Array.isArray(selected)) return null;
-    const contexts = await invoke<ContextInfo[]>("import_kubeconfig", { path: selected });
+    const contexts = await this.invokeCmd<ContextInfo[]>("import_kubeconfig", { path: selected });
     // The path goes back to the caller so it can be persisted (B17); only the
     // provider knows it, since the picker lives here.
     return { contexts, path: selected };
   }
 
   exportContextKubeconfig(context: string): Promise<string> {
-    return invoke<string>("export_context_kubeconfig", { context });
+    return this.invokeCmd<string>("export_context_kubeconfig", { context });
   }
 
   getYaml(ref: ResourceRef): Promise<string> {
-    return invoke<string>("get_yaml", {
+    return this.invokeCmd<string>("get_yaml", {
       kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
@@ -127,7 +168,7 @@ export class TauriProvider implements DataProvider {
   }
 
   applyYaml(ref: ResourceRef, text: string): Promise<void> {
-    return invoke<void>("apply_yaml", {
+    return this.invokeCmd<void>("apply_yaml", {
       kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
@@ -136,7 +177,7 @@ export class TauriProvider implements DataProvider {
   }
 
   dryRunYaml(ref: ResourceRef, text: string): Promise<YamlDiff> {
-    return invoke<YamlDiff>("dry_run_yaml", {
+    return this.invokeCmd<YamlDiff>("dry_run_yaml", {
       kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
@@ -145,14 +186,14 @@ export class TauriProvider implements DataProvider {
   }
 
   getEvents(ref: ResourceRef): Promise<EventItem[]> {
-    return invoke<EventItem[]>("get_events", {
+    return this.invokeCmd<EventItem[]>("get_events", {
       namespace: ref.namespace ?? "",
       name: ref.name,
     });
   }
 
   getProperties(ref: ResourceRef): Promise<Properties> {
-    return invoke<Properties>("get_properties", {
+    return this.invokeCmd<Properties>("get_properties", {
       kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
@@ -162,7 +203,7 @@ export class TauriProvider implements DataProvider {
   copySecretValue(ref: ResourceRef, key: string): Promise<void> {
     // The value is decoded and written to the clipboard in Rust; the webview
     // never sees it (B37).
-    return invoke<void>("copy_secret_value", {
+    return this.invokeCmd<void>("copy_secret_value", {
       namespace: ref.namespace ?? "",
       name: ref.name,
       key,
@@ -170,7 +211,7 @@ export class TauriProvider implements DataProvider {
   }
 
   deleteResource(ref: ResourceRef): Promise<void> {
-    return invoke<void>("delete_resource", {
+    return this.invokeCmd<void>("delete_resource", {
       kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
@@ -178,7 +219,7 @@ export class TauriProvider implements DataProvider {
   }
 
   scaleResource(ref: ResourceRef, replicas: number): Promise<void> {
-    return invoke<void>("scale_resource", {
+    return this.invokeCmd<void>("scale_resource", {
       kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
@@ -187,14 +228,14 @@ export class TauriProvider implements DataProvider {
   }
 
   restartPod(ref: ResourceRef): Promise<void> {
-    return invoke<void>("restart_pod", {
+    return this.invokeCmd<void>("restart_pod", {
       namespace: ref.namespace ?? "",
       name: ref.name,
     });
   }
 
   restartRollout(ref: ResourceRef): Promise<void> {
-    return invoke<void>("restart_rollout", {
+    return this.invokeCmd<void>("restart_rollout", {
       kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
@@ -202,7 +243,7 @@ export class TauriProvider implements DataProvider {
   }
 
   undoRollout(ref: ResourceRef, revision: number): Promise<number> {
-    return invoke<number>("undo_rollout", {
+    return this.invokeCmd<number>("undo_rollout", {
       namespace: ref.namespace ?? "",
       name: ref.name,
       revision,
@@ -210,11 +251,11 @@ export class TauriProvider implements DataProvider {
   }
 
   setCordon(node: string, unschedulable: boolean): Promise<void> {
-    return invoke<void>("set_cordon", { name: node, unschedulable });
+    return this.invokeCmd<void>("set_cordon", { name: node, unschedulable });
   }
 
   setCronjobSuspend(ref: ResourceRef, suspended: boolean): Promise<void> {
-    return invoke<void>("set_cronjob_suspend", {
+    return this.invokeCmd<void>("set_cronjob_suspend", {
       namespace: ref.namespace ?? "",
       name: ref.name,
       suspended,
@@ -222,21 +263,21 @@ export class TauriProvider implements DataProvider {
   }
 
   runCronjob(ref: ResourceRef): Promise<string> {
-    return invoke<string>("run_cronjob", {
+    return this.invokeCmd<string>("run_cronjob", {
       namespace: ref.namespace ?? "",
       name: ref.name,
     });
   }
 
   retryJob(ref: ResourceRef): Promise<string> {
-    return invoke<string>("retry_job", {
+    return this.invokeCmd<string>("retry_job", {
       namespace: ref.namespace ?? "",
       name: ref.name,
     });
   }
 
-  notifyProblem(ref: ResourceRef, reason: string): Promise<void> {
-    return invoke<void>("notify_problem", {
+  notifyProblem(_cid: string, ref: ResourceRef, reason: string): Promise<void> {
+    return this.invokeCmd<void>("notify_problem", {
       kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
@@ -249,11 +290,11 @@ export class TauriProvider implements DataProvider {
     namespace: string,
     dryRun: boolean,
   ): Promise<{ proposed: string; created?: { kind: KindId; namespace?: string; name: string } }> {
-    return invoke("create_resource", { yaml, namespace, dryRun });
+    return this.invokeCmd("create_resource", { yaml, namespace, dryRun });
   }
 
   getDiff(ref: ResourceRef): Promise<{ live: string; baseline?: string }> {
-    return invoke("get_diff", {
+    return this.invokeCmd("get_diff", {
       kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
@@ -261,7 +302,7 @@ export class TauriProvider implements DataProvider {
   }
 
   getTopology(ref: ResourceRef): Promise<Topology> {
-    return invoke<Topology>("get_topology", {
+    return this.invokeCmd<Topology>("get_topology", {
       kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
@@ -269,7 +310,7 @@ export class TauriProvider implements DataProvider {
   }
 
   drainNode(node: string): Promise<void> {
-    return invoke<void>("drain_node", { name: node });
+    return this.invokeCmd<void>("drain_node", { name: node });
   }
 
   async setWindowTheme(theme: "dark" | "light"): Promise<void> {
@@ -287,19 +328,19 @@ export class TauriProvider implements DataProvider {
   // ---- node-exporter statistics (B27) ----
 
   nodeHistory(node: string): Promise<NodeSample[]> {
-    return invoke<NodeSample[]>("node_history", { node });
+    return this.invokeCmd<NodeSample[]>("node_history", { node });
   }
 
   podHistory(namespace: string, name: string): Promise<PodPoint[]> {
-    return invoke<PodPoint[]>("pod_history", { namespace, name });
+    return this.invokeCmd<PodPoint[]>("pod_history", { namespace, name });
   }
 
   watchNodeStats(node: string): Promise<void> {
-    return invoke<void>("watch_node_stats", { node });
+    return this.invokeCmd<void>("watch_node_stats", { node });
   }
 
   unwatchNodeStats(node: string): Promise<void> {
-    return invoke<void>("unwatch_node_stats", { node });
+    return this.invokeCmd<void>("unwatch_node_stats", { node });
   }
 
   // ---- per-pod statistics ----
@@ -315,11 +356,11 @@ export class TauriProvider implements DataProvider {
   }
 
   loadPrefs(): Promise<Prefs | null> {
-    return invoke<Prefs | null>("load_prefs");
+    return this.invokeCmd<Prefs | null>("load_prefs");
   }
 
   savePrefs(prefs: Prefs): Promise<void> {
-    return invoke<void>("save_prefs", { prefs });
+    return this.invokeCmd<void>("save_prefs", { prefs });
   }
 
   // ---- push subscriptions ----
@@ -327,11 +368,11 @@ export class TauriProvider implements DataProvider {
   // ---- custom (CRD-backed) kinds (B15) ----
 
   watchCustomKind(id: string): Promise<void> {
-    return invoke("watch_custom_kind", { kind: id });
+    return this.invokeCmd("watch_custom_kind", { kind: id });
   }
 
   unwatchCustomKind(id: string): Promise<void> {
-    return invoke("unwatch_custom_kind", { kind: id });
+    return this.invokeCmd("unwatch_custom_kind", { kind: id });
   }
 
   onOpenSettings(cb: () => void): Unsub {
@@ -339,61 +380,71 @@ export class TauriProvider implements DataProvider {
     return subscribe<unknown>("settings-open", () => cb());
   }
 
-  onCustomKinds(cb: (kinds: CustomKind[]) => void): Unsub {
-    return subscribe<CustomKind[]>("custom-kinds", cb);
+  onCustomKinds(cb: (cid: string, kinds: CustomKind[]) => void): Unsub {
+    return this.subscribeCluster<CustomKind[]>("custom-kinds", cb);
   }
 
-  onResourceUpdate(cb: (kind: KindId, rows: Row[]) => void): Unsub {
-    return subscribe<ResourceUpdatePayload>("resource-update", (p) => cb(p.kind, p.rows));
-  }
-
-  onPodMetrics(cb: (metrics: PodMetricsMap) => void): Unsub {
-    return subscribe<PodMetricsMap>("pod-metrics", cb);
-  }
-
-  onNodeMetrics(cb: (metrics: NodeMetricsMap) => void): Unsub {
-    return subscribe<NodeMetricsMap>("node-metrics", cb);
-  }
-
-  onClusterStatus(cb: (status: ClusterStatus) => void): Unsub {
-    return subscribe<ClusterStatus>("cluster-status", cb);
-  }
-
-  onWatchStatus(cb: (activeStreams: number) => void): Unsub {
-    return subscribe<number>("watch-status", cb);
-  }
-
-  onDrainProgress(cb: (progress: DrainProgress) => void): Unsub {
-    return subscribe<DrainProgress>("drain-progress", cb);
-  }
-
-  onNodeStats(cb: (node: string, sample: NodeSample) => void): Unsub {
-    return subscribe<{ node: string; sample: NodeSample }>("node-stats", (p) =>
-      cb(p.node, p.sample),
+  onResourceUpdate(cb: (cid: string, kind: KindId, rows: Row[]) => void): Unsub {
+    return this.subscribeCluster<ResourceUpdatePayload>("resource-update", (cid, p) =>
+      cb(cid, p.kind, p.rows),
     );
   }
 
-  onNodeStatsError(cb: (err: NodeStatsError) => void): Unsub {
-    return subscribe<NodeStatsError>("node-stats-error", cb);
+  onPodMetrics(cb: (cid: string, metrics: PodMetricsMap) => void): Unsub {
+    return this.subscribeCluster<PodMetricsMap>("pod-metrics", cb);
   }
 
-  onPodStats(cb: (key: string, sample: PodSample) => void): Unsub {
+  onNodeMetrics(cb: (cid: string, metrics: NodeMetricsMap) => void): Unsub {
+    return this.subscribeCluster<NodeMetricsMap>("node-metrics", cb);
+  }
+
+  onClusterStatus(cb: (cid: string, status: ClusterStatus) => void): Unsub {
+    return this.subscribeCluster<ClusterStatus>("cluster-status", cb);
+  }
+
+  onWatchStatus(cb: (cid: string, activeStreams: number) => void): Unsub {
+    return this.subscribeCluster<number>("watch-status", cb);
+  }
+
+  onDrainProgress(cb: (cid: string, progress: DrainProgress) => void): Unsub {
+    return this.subscribeCluster<DrainProgress>("drain-progress", cb);
+  }
+
+  onNodeStats(cb: (cid: string, node: string, sample: NodeSample) => void): Unsub {
+    return this.subscribeCluster<{ node: string; sample: NodeSample }>("node-stats", (cid, p) =>
+      cb(cid, p.node, p.sample),
+    );
+  }
+
+  onNodeStatsError(cb: (cid: string, err: NodeStatsError) => void): Unsub {
+    return this.subscribeCluster<NodeStatsError>("node-stats-error", cb);
+  }
+
+  onPodStats(cb: (cid: string, key: string, sample: PodSample) => void): Unsub {
     this.podStatsCbs.add(cb);
     // Attach the shared `pod-metrics` fanout on first use. The backend doesn't
     // timestamp samples, so each poll is stamped with its arrival time here.
-    this.podMetricsFanout ??= subscribe<PodMetricsMap>("pod-metrics", (map) => {
+    this.registerPodFanout();
+    return () => {
+      this.podStatsCbs.delete(cb);
+    };
+  }
+
+  /** One per-cid `pod-metrics` listener feeding every watched-pod callback. */
+  private podFanoutRegistered = false;
+  private registerPodFanout(): void {
+    if (this.podFanoutRegistered) return;
+    this.podFanoutRegistered = true;
+    this.subscribeCluster<PodMetricsMap>("pod-metrics", (cid, map) => {
       if (this.watchedPods.size === 0) return;
       const ts = Date.now();
       for (const key of this.watchedPods) {
         const m = map[key];
         if (!m) continue;
         const sample: PodSample = { ts, cpuMillis: m.cpuMillis, memBytes: m.memBytes };
-        for (const fn of this.podStatsCbs) fn(key, sample);
+        for (const fn of this.podStatsCbs) fn(cid, key, sample);
       }
     });
-    return () => {
-      this.podStatsCbs.delete(cb);
-    };
   }
 
   // ---- log streaming ----
@@ -407,7 +458,7 @@ export class TauriProvider implements DataProvider {
   ): Promise<LogHandle> {
     // Start the backend stream first so we know its id, then attach listeners to
     // the id-scoped events.
-    const streamId = await invoke<string>("start_log_stream", {
+    const streamId = await this.invokeCmd<string>("start_log_stream", {
       namespace: ref.namespace ?? "",
       pod: ref.name,
       container,
@@ -417,8 +468,8 @@ export class TauriProvider implements DataProvider {
       previous: opts.previous ?? false,
     });
 
-    const offLine = subscribe<{ lines: LogLine[] }>(`log-line:${streamId}`, (p) => onLines(p.lines));
-    const offClosed = subscribe<string>(`log-closed:${streamId}`, onClosed);
+    const offLine = subscribe<{ lines: LogLine[] }>(`log-line:${this.cid}:${streamId}`, (p) => onLines(p.lines));
+    const offClosed = subscribe<string>(`log-closed:${this.cid}:${streamId}`, onClosed);
 
     let stopped = false;
     return {
@@ -428,7 +479,7 @@ export class TauriProvider implements DataProvider {
         offLine();
         offClosed();
         // Fire-and-forget: cancel the backend task.
-        void invoke("stop_log_stream", { streamId });
+        void this.invokeCmd("stop_log_stream", { streamId });
       },
     };
   }
@@ -450,7 +501,7 @@ export class TauriProvider implements DataProvider {
     // The backend writes the file itself: a container's whole log can be tens of
     // megabytes, and there's no reason to drag that through the IPC bridge and
     // the webview's heap just to write it back out to disk.
-    const lines = await invoke<number>("export_logs", {
+    const lines = await this.invokeCmd<number>("export_logs", {
       namespace: ref.namespace ?? "",
       pod: ref.name,
       container,
@@ -469,7 +520,7 @@ export class TauriProvider implements DataProvider {
     onLines: (lines: LogLine[]) => void,
     onClosed: (reason: string) => void,
   ): Promise<LogHandle> {
-    const streamId = await invoke<string>("start_workload_logs", {
+    const streamId = await this.invokeCmd<string>("start_workload_logs", {
       kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
@@ -478,8 +529,8 @@ export class TauriProvider implements DataProvider {
       sinceSeconds: opts.sinceSeconds ?? null,
     });
 
-    const offLine = subscribe<{ lines: LogLine[] }>(`log-line:${streamId}`, (p) => onLines(p.lines));
-    const offClosed = subscribe<string>(`log-closed:${streamId}`, onClosed);
+    const offLine = subscribe<{ lines: LogLine[] }>(`log-line:${this.cid}:${streamId}`, (p) => onLines(p.lines));
+    const offClosed = subscribe<string>(`log-closed:${this.cid}:${streamId}`, onClosed);
 
     let stopped = false;
     return {
@@ -488,7 +539,7 @@ export class TauriProvider implements DataProvider {
         stopped = true;
         offLine();
         offClosed();
-        void invoke("stop_log_stream", { streamId });
+        void this.invokeCmd("stop_log_stream", { streamId });
       },
     };
   }
@@ -505,7 +556,7 @@ export class TauriProvider implements DataProvider {
     });
     if (!path) return null; // cancelled
 
-    const lines = await invoke<number>("export_workload_logs", {
+    const lines = await this.invokeCmd<number>("export_workload_logs", {
       kind: ref.kind,
       namespace: ref.namespace ?? "",
       name: ref.name,
@@ -523,25 +574,25 @@ export class TauriProvider implements DataProvider {
     onOutput: (data: string) => void,
     onClosed: (reason: string) => void,
   ): Promise<ShellHandle> {
-    const streamId = await invoke<string>("start_shell", {
+    const streamId = await this.invokeCmd<string>("start_shell", {
       namespace: ref.namespace ?? "",
       pod: ref.name,
       container,
     });
-    const offOut = subscribe<{ data: string }>(`shell-out:${streamId}`, (p) => onOutput(p.data));
-    const offClosed = subscribe<string>(`shell-closed:${streamId}`, onClosed);
+    const offOut = subscribe<{ data: string }>(`shell-out:${this.cid}:${streamId}`, (p) => onOutput(p.data));
+    const offClosed = subscribe<string>(`shell-closed:${this.cid}:${streamId}`, onClosed);
 
     let stopped = false;
     return {
-      input: (data: string) => void invoke("shell_input", { streamId, data }),
+      input: (data: string) => void this.invokeCmd("shell_input", { streamId, data }),
       resize: (cols: number, rows: number) =>
-        void invoke("shell_resize", { streamId, cols, rows }),
+        void this.invokeCmd("shell_resize", { streamId, cols, rows }),
       stop: () => {
         if (stopped) return;
         stopped = true;
         offOut();
         offClosed();
-        void invoke("stop_shell", { streamId });
+        void this.invokeCmd("stop_shell", { streamId });
       },
     };
   }
@@ -554,7 +605,7 @@ export class TauriProvider implements DataProvider {
     // This call is slow by nature: it creates the pod and waits for the kubelet to
     // start it (image pull included). The backend surfaces *why* it's stuck rather
     // than a bare timeout, so a rejection here is worth showing verbatim.
-    const info = await invoke<{ streamId: string; namespace: string; pod: string }>(
+    const info = await this.invokeCmd<{ streamId: string; namespace: string; pod: string }>(
       "start_node_shell",
       { node },
     );
@@ -568,9 +619,9 @@ export class TauriProvider implements DataProvider {
     return {
       namespace: info.namespace,
       pod: info.pod,
-      input: (data: string) => void invoke("shell_input", { streamId: info.streamId, data }),
+      input: (data: string) => void this.invokeCmd("shell_input", { streamId: info.streamId, data }),
       resize: (cols: number, rows: number) =>
-        void invoke("shell_resize", { streamId: info.streamId, cols, rows }),
+        void this.invokeCmd("shell_resize", { streamId: info.streamId, cols, rows }),
       stop: () => {
         if (stopped) return;
         stopped = true;
@@ -578,7 +629,7 @@ export class TauriProvider implements DataProvider {
         offClosed();
         // stop_node_shell, not stop_shell: this one also deletes the privileged
         // pod. Leaving that to the generic stop would strand it on the node.
-        void invoke("stop_node_shell", { streamId: info.streamId, pod: info.pod });
+        void this.invokeCmd("stop_node_shell", { streamId: info.streamId, pod: info.pod });
       },
     };
   }
@@ -589,28 +640,28 @@ export class TauriProvider implements DataProvider {
     // Services need a backing pod resolved first, so they take a different
     // command; `remotePort` is the service port there, not the pod's (B16).
     if (ref.kind === "services") {
-      return invoke<ForwardInfo>("start_service_port_forward", {
+      return this.invokeCmd<ForwardInfo>("start_service_port_forward", {
         namespace: ref.namespace ?? "",
         service: ref.name,
         remotePort,
       });
     }
-    return invoke<ForwardInfo>("start_port_forward", {
+    return this.invokeCmd<ForwardInfo>("start_port_forward", {
       namespace: ref.namespace ?? "",
       pod: ref.name,
       remotePort,
     });
   }
 
-  onForwards(cb: (forwards: ForwardInfo[]) => void): Unsub {
-    return subscribe<ForwardInfo[]>("forwards-update", cb);
+  onForwards(cb: (cid: string, forwards: ForwardInfo[]) => void): Unsub {
+    return this.subscribeCluster<ForwardInfo[]>("forwards-update", cb);
   }
 
   stopPortForward(id: string): Promise<void> {
-    return invoke<void>("stop_port_forward", { id });
+    return this.invokeCmd<void>("stop_port_forward", { id });
   }
 
   listPortForwards(): Promise<ForwardInfo[]> {
-    return invoke<ForwardInfo[]>("list_port_forwards");
+    return this.invokeCmd<ForwardInfo[]>("list_port_forwards");
   }
 }

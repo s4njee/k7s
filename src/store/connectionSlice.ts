@@ -1,18 +1,33 @@
 /**
- * Connection and cluster context state and actions.
+ * Connection and cluster context state and actions (B77).
+ *
+ * The store keeps per-cluster retention maps (`connections`, `clusterStatusByCid`,
+ * `rowsByCid`, …) plus *active* slices (`connection`, `clusterStatus`, `rows`, …)
+ * that always reflect `activeCid`. `setActiveCid` swaps the active slices to the
+ * target cluster's retained state — that's what makes switching instant: no data
+ * is torn down, every panel just re-points at the selected cluster's data.
  */
 
 import type { StateCreator } from "zustand";
 import type { AppState, ConnectionActions, ConnectionSliceState } from "./types";
 import { sameBookmark } from "../lib/bookmarks";
+import { EMPTY_SELECTION } from "../lib/selection";
+import { emptyRows } from "./dataSlice";
+import { defaultDetailState } from "./detailSlice";
 
 export const initialConnectionState: ConnectionSliceState = {
+  activeCid: null,
+  connections: {},
   connection: { phase: "idle", context: null, clusterName: null },
+  clusterStatusByCid: {},
   clusterStatus: null,
+  watchCountByCid: {},
   watchCount: 0,
   contexts: [],
   importedFiles: [],
   bookmarksByContext: {},
+  clusterColors: {},
+  clusterNamespaces: {},
 };
 
 export const createConnectionSlice: StateCreator<
@@ -23,7 +38,70 @@ export const createConnectionSlice: StateCreator<
 > = (set) => ({
   ...initialConnectionState,
 
-  setConnection: (c) => set((s) => ({ connection: { ...s.connection, ...c } })),
+  /**
+   * Switch the UI to another cluster: save the outgoing cluster's view state
+   * (nav, namespace, selection, detail) into its retention, then restore the
+   * incoming cluster's state across every slice. Data already flows into each
+   * cid's retention via the cluster setters, so background clusters stay current.
+   */
+  setActiveCid: (cid) =>
+    set((s) => {
+      if (cid === s.activeCid) return s;
+      const old = s.activeCid;
+      const restoredDetail = s.detailByCid[cid] ?? defaultDetailState();
+      // The outgoing cluster's detail-panel fields, for its retention slot.
+      const detail = {
+        selectedRow: s.selectedRow,
+        activeTab: s.activeTab,
+        logSearch: s.logSearch,
+        containerIndex: s.containerIndex,
+        showTimestamps: s.showTimestamps,
+        following: s.following,
+        logBuffer: s.logBuffer,
+        logPrevious: s.logPrevious,
+        logSince: s.logSince,
+        yamlEditing: s.yamlEditing,
+        yamlDraft: s.yamlDraft,
+      };
+      return {
+        activeCid: cid,
+        // Save the outgoing view state.
+        navByCid: old != null ? { ...s.navByCid, [old]: s.nav } : s.navByCid,
+        namespaceByCid: old != null ? { ...s.namespaceByCid, [old]: s.namespace } : s.namespaceByCid,
+        selectionByCid: old != null ? { ...s.selectionByCid, [old]: s.selection } : s.selectionByCid,
+        detailByCid: old != null ? { ...s.detailByCid, [old]: detail } : s.detailByCid,
+        // Restore the incoming cluster's state.
+        nav: s.navByCid[cid] ?? "pods",
+        namespace: s.namespaceByCid[cid] ?? "all",
+        selection: s.selectionByCid[cid] ?? EMPTY_SELECTION,
+        ...restoredDetail,
+        connection: s.connections[cid] ?? { phase: "idle", context: cid, clusterName: cid },
+        clusterStatus: s.clusterStatusByCid[cid] ?? null,
+        watchCount: s.watchCountByCid[cid] ?? 0,
+        rows: s.rowsByCid[cid] ?? emptyRows(),
+        customKinds: s.customKindsByCid[cid] ?? [],
+        podMetrics: s.podMetricsByCid[cid] ?? {},
+        nodeMetrics: s.nodeMetricsByCid[cid] ?? {},
+        portForwards: s.portForwardsByCid[cid] ?? [],
+        drains: s.drainsByCid[cid] ?? {},
+        nodeSamples: s.nodeSamplesByCid[cid] ?? {},
+        nodeStatsErrors: s.nodeStatsErrorsByCid[cid] ?? {},
+        podSamples: s.podSamplesByCid[cid] ?? {},
+      };
+    }),
+
+  setConnection: (cid, c) =>
+    set((s) => {
+      if (!cid) {
+        // Boot error before any cluster is active: only the active field.
+        return { connection: { ...s.connection, ...c } };
+      }
+      const next = { ...(s.connections[cid] ?? { phase: "idle", context: cid, clusterName: cid }), ...c };
+      const patch: Partial<AppState> = { connections: { ...s.connections, [cid]: next } };
+      if (cid === s.activeCid) patch.connection = next;
+      return patch;
+    }),
+
   setContexts: (contexts) => set({ contexts }),
   setImportedFiles: (paths) => set({ importedFiles: paths }),
 
@@ -34,7 +112,7 @@ export const createConnectionSlice: StateCreator<
 
   addBookmark: (bookmark) =>
     set((s) => {
-      const ctx = s.connection.context ?? "";
+      const ctx = s.activeCid ?? "";
       const list = s.bookmarksByContext[ctx] ?? [];
       if (list.some((b) => sameBookmark(b, bookmark))) return s;
       return {
@@ -44,7 +122,7 @@ export const createConnectionSlice: StateCreator<
 
   removeBookmark: (bookmark) =>
     set((s) => {
-      const ctx = s.connection.context ?? "";
+      const ctx = s.activeCid ?? "";
       const list = s.bookmarksByContext[ctx] ?? [];
       const next = list.filter((b) => !sameBookmark(b, bookmark));
       if (next.length === list.length) return s;
@@ -53,7 +131,7 @@ export const createConnectionSlice: StateCreator<
 
   toggleBookmark: (bookmark) =>
     set((s) => {
-      const ctx = s.connection.context ?? "";
+      const ctx = s.activeCid ?? "";
       const list = s.bookmarksByContext[ctx] ?? [];
       if (list.some((b) => sameBookmark(b, bookmark))) {
         return {
@@ -68,6 +146,20 @@ export const createConnectionSlice: StateCreator<
       };
     }),
 
-  setClusterStatus: (status) => set({ clusterStatus: status }),
-  setWatchCount: (n) => set({ watchCount: n }),
+  setClusterColor: (cid, color) =>
+    set((s) => ({ clusterColors: { ...s.clusterColors, [cid]: color } })),
+  setClusterNamespace: (cid, ns) =>
+    set((s) => ({ clusterNamespaces: { ...s.clusterNamespaces, [cid]: ns } })),
+
+  setClusterStatus: (cid, status) =>
+    set((s) => ({
+      clusterStatusByCid: { ...s.clusterStatusByCid, [cid]: status },
+      ...(cid === s.activeCid ? { clusterStatus: status } : {}),
+    })),
+
+  setWatchCount: (cid, n) =>
+    set((s) => ({
+      watchCountByCid: { ...s.watchCountByCid, [cid]: n },
+      ...(cid === s.activeCid ? { watchCount: n } : {}),
+    })),
 });

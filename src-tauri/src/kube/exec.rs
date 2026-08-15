@@ -1,15 +1,16 @@
 //! Interactive shell (exec) into a pod container (B4).
 //!
 //! Each session runs `exec` with a TTY and pumps three channels:
-//!   - container stdout  → emitted as `shell-out:{id}` (text chunks)
+//!   - container stdout  → emitted as `shell-out:{cid}:{id}` (text chunks)
 //!   - frontend stdin    → written to the container (via `shell_input`)
 //!   - terminal resize   → forwarded to the container (via `shell_resize`)
 //!
-//! On exit/error it emits `shell-closed:{id}`. The pump task owns the
+//! On exit/error it emits `shell-closed:{cid}:{id}`. The pump task owns the
 //! AttachedProcess, so aborting the task (on stop / disconnect) tears down the
 //! exec connection.
 
 use crate::error::AppError;
+use crate::kube::{events, Cid};
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{AttachParams, Api, TerminalSize};
 use kube::Client;
@@ -17,11 +18,6 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
-
-/// Prefix for stdout chunk events (`shell-out:{stream_id}`).
-pub const SHELL_OUT_PREFIX: &str = "shell-out:";
-/// Prefix for session-closed events (`shell-closed:{stream_id}`).
-pub const SHELL_CLOSED_PREFIX: &str = "shell-closed:";
 
 /// A stdout chunk sent to the frontend.
 #[derive(Serialize, Clone)]
@@ -58,6 +54,7 @@ pub fn shell_cmd(override_cmd: &str) -> Vec<String> {
 pub async fn run_shell(
     client: Client,
     app: AppHandle,
+    cid: Cid,
     stream_id: String,
     namespace: String,
     pod: String,
@@ -70,6 +67,7 @@ pub async fn run_shell(
     run_argv(
         client,
         app,
+        cid,
         stream_id,
         namespace,
         pod,
@@ -91,6 +89,7 @@ pub async fn run_shell(
 pub async fn run_argv(
     client: Client,
     app: AppHandle,
+    cid: Cid,
     stream_id: String,
     namespace: String,
     pod: String,
@@ -99,10 +98,11 @@ pub async fn run_argv(
     mut input_rx: mpsc::Receiver<Vec<u8>>,
     mut resize_rx: mpsc::Receiver<(u16, u16)>,
 ) {
-    let closed_event = format!("{}{}", SHELL_CLOSED_PREFIX, stream_id);
+    let closed_event = events::stream_channel(events::SHELL_CLOSED_PREFIX, &cid, &stream_id);
     let reason = match exec_pump(
         client,
         &app,
+        &cid,
         &stream_id,
         &namespace,
         &pod,
@@ -123,6 +123,7 @@ pub async fn run_argv(
 async fn exec_pump(
     client: Client,
     app: &AppHandle,
+    cid: &Cid,
     stream_id: &str,
     namespace: &str,
     pod: &str,
@@ -149,7 +150,7 @@ async fn exec_pump(
     // terminal_size() is a futures mpsc Sender (bounded); use try_send (non-async).
     let mut ts_tx = proc.terminal_size();
 
-    let out_event = format!("{}{}", SHELL_OUT_PREFIX, stream_id);
+    let out_event = events::stream_channel(events::SHELL_OUT_PREFIX, cid, stream_id);
     let mut buf = [0u8; 8192];
 
     loop {

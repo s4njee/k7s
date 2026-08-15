@@ -196,7 +196,7 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
         onForward={(port) =>
           void execute(async (row) => {
             const fwd = await getProvider().startPortForward(refOf(row), port);
-            setPortForwards(await getProvider().listPortForwards());
+            setPortForwards(useStore.getState().activeCid ?? "", await getProvider().listPortForwards());
             await copyToClipboard(`localhost:${fwd.localPort}`);
           }, false)
         }

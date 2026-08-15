@@ -163,3 +163,23 @@
   cursor: pointer;
   white-space: pre-wrap;
 }
+
+/* Problems "all clusters" scope toggle (B77). */
+.scopeToggle {
+  flex: none;
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.scopeToggle:hover {
+  border-color: var(--border-hover);
+}
+.scopeToggleOn {
+  border-color: var(--accent);
+  color: var(--accent);
+}

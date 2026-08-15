@@ -5,7 +5,7 @@
 //! and emits `log-line:{streamId}`. On end/error it emits `log-closed:{streamId}`.
 //! The parser (splitting the RFC3339 prefix and detecting a level) is unit-tested.
 
-use super::events;
+use super::{events, Cid};
 use crate::error::{AppError, AppResult};
 use chrono::{DateTime, Utc};
 use futures::{AsyncBufReadExt, StreamExt};
@@ -66,21 +66,23 @@ pub struct LogStreamOptions {
 /// Run a follow-log stream until the task is aborted or the stream ends.
 ///
 /// Emits `log-line:{stream_id}` batches and a final `log-closed:{stream_id}`.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_log_stream(
     client: Client,
     app: AppHandle,
+    cid: Cid,
     stream_id: String,
     namespace: String,
     pod: String,
     container: String,
     opts: LogStreamOptions,
 ) {
-    let closed_event = format!("{}{}", events::LOG_CLOSED_PREFIX, stream_id);
+    let closed_event = events::stream_channel(events::LOG_CLOSED_PREFIX, &cid, &stream_id);
     // Empty container = stream every container of the pod, interleaved (B7).
     let result = if container.is_empty() {
-        stream_all(client, &app, &stream_id, &namespace, &pod, opts).await
+        stream_all(client, &app, &cid, &stream_id, &namespace, &pod, opts).await
     } else {
-        stream_one(client, &app, &stream_id, &namespace, &pod, &container, opts).await
+        stream_one(client, &app, &cid, &stream_id, &namespace, &pod, &container, opts).await
     };
     match result {
         Ok(reason) => {
@@ -128,9 +130,11 @@ pub fn log_params(container: &str, opts: &LogStreamOptions) -> LogParams {
 }
 
 /// Stream a single container's logs, tagging each line with the container name.
+#[allow(clippy::too_many_arguments)]
 async fn stream_one(
     client: Client,
     app: &AppHandle,
+    cid: &Cid,
     stream_id: &str,
     namespace: &str,
     pod: &str,
@@ -144,7 +148,7 @@ async fn stream_one(
         .map_err(|e| AppError::Kube(e.to_string()))?;
     let mut lines = reader.lines();
 
-    let line_event = format!("{}{}", events::LOG_LINE_PREFIX, stream_id);
+    let line_event = events::stream_channel(events::LOG_LINE_PREFIX, cid, stream_id);
     let mut batch: Vec<LogLine> = Vec::new();
     let mut flush = interval(FLUSH);
 
@@ -176,6 +180,7 @@ async fn stream_one(
 async fn stream_all(
     client: Client,
     app: &AppHandle,
+    cid: &Cid,
     stream_id: &str,
     namespace: &str,
     pod: &str,
@@ -214,7 +219,7 @@ async fn stream_all(
     }
     drop(tx); // so rx closes once all readers finish
 
-    let line_event = format!("{}{}", events::LOG_LINE_PREFIX, stream_id);
+    let line_event = events::stream_channel(events::LOG_LINE_PREFIX, cid, stream_id);
     let mut batch: Vec<LogLine> = Vec::new();
     let mut flush = interval(FLUSH);
     loop {
@@ -243,17 +248,20 @@ const POD_RESOLVE: Duration = Duration::from_secs(15);
 /// pump per pod, interleaved into a single stream id. The pod set re-resolves
 /// on a slow tick; each line carries its `pod` (and `container`) so the UI can
 /// tag it. Emits `log-line:{id}` and a final `log-closed:{id}`.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_workload_log_stream(
     client: Client,
     app: AppHandle,
+    cid: Cid,
     stream_id: String,
     kind: String,
     namespace: String,
     name: String,
     opts: LogStreamOptions,
 ) {
-    let closed_event = format!("{}{}", events::LOG_CLOSED_PREFIX, stream_id);
-    let result = workload_stream(client, &app, &stream_id, &kind, &namespace, &name, opts).await;
+    let closed_event = events::stream_channel(events::LOG_CLOSED_PREFIX, &cid, &stream_id);
+    let result =
+        workload_stream(client, &app, &cid, &stream_id, &kind, &namespace, &name, opts).await;
     match result {
         Ok(reason) => {
             let _ = app.emit(&closed_event, reason);
@@ -269,9 +277,11 @@ pub async fn run_workload_log_stream(
 /// and multiplex every line into the stream's event. The stream lives until the
 /// manager aborts the task (tab close / disconnect); a pod set that shrinks to
 /// zero just leaves the stream following an empty set.
+#[allow(clippy::too_many_arguments)]
 async fn workload_stream(
     client: Client,
     app: &AppHandle,
+    cid: &Cid,
     stream_id: &str,
     kind: &str,
     namespace: &str,
@@ -287,7 +297,7 @@ async fn workload_stream(
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<LogLine>(256);
     let mut pumps: HashMap<String, JoinHandle<()>> = HashMap::new();
-    let line_event = format!("{}{}", events::LOG_LINE_PREFIX, stream_id);
+    let line_event = events::stream_channel(events::LOG_LINE_PREFIX, cid, stream_id);
     let mut batch: Vec<LogLine> = Vec::new();
     let mut flush = interval(FLUSH);
     let mut resolve = interval(POD_RESOLVE);

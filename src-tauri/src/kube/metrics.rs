@@ -10,14 +10,14 @@
 //! The two share the latest cluster CPU/MEM % via a small mutex so the status
 //! event can include them without re-fetching.
 
-use super::events;
+use super::{events, ClientManager, Cid};
 use k8s_openapi::api::core::v1::Node;
 use kube::api::{Api, ListParams};
 use kube::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{Emitter, Runtime};
 use tokio::sync::Mutex;
 use tokio::time::{interval, Duration, Instant};
 
@@ -63,7 +63,7 @@ struct NodeUsage {
 /// Cluster-wide status for the status bar / switcher.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct ClusterStatusPayload {
+pub(crate) struct ClusterStatusPayload {
     connected: bool,
     version: String,
     api_latency_ms: u64,
@@ -115,26 +115,29 @@ type SharedClusterPct = Arc<Mutex<Option<(f64, f64)>>>;
 
 /// Spawn the metrics + status pollers, returning their join handles for the
 /// manager to register (and abort on disconnect).
-pub fn spawn_pollers(
-    app: AppHandle,
+pub fn spawn_pollers<R: Runtime>(
+    mgr: Arc<ClientManager<R>>,
+    cid: Cid,
     client: Client,
     intervals: PollIntervals,
 ) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
     let shared: SharedClusterPct = Arc::new(Mutex::new(None));
 
     let metrics_task = tokio::spawn(metrics_loop(
-        app.clone(),
+        mgr.clone(),
+        cid.clone(),
         client.clone(),
         shared.clone(),
         intervals.metrics,
     ));
-    let status_task = tokio::spawn(status_loop(app, client, shared, intervals.status));
+    let status_task = tokio::spawn(status_loop(mgr, cid, client, shared, intervals.status));
     (metrics_task, status_task)
 }
 
 /// Poll pod/node metrics on an interval; emit events; track availability.
-async fn metrics_loop(
-    app: AppHandle,
+async fn metrics_loop<R: Runtime>(
+    mgr: Arc<ClientManager<R>>,
+    cid: Cid,
     client: Client,
     shared: SharedClusterPct,
     every: Duration,
@@ -158,8 +161,9 @@ async fn metrics_loop(
         match (pods, nodes) {
             (Ok(pod_map), Ok((node_map, cluster_pct))) => {
                 miss_streak = 0;
-                let _ = app.emit(events::POD_METRICS, &pod_map);
-                let _ = app.emit(events::NODE_METRICS, &node_map);
+                let app = mgr.app();
+                let _ = app.emit(&events::channel(events::POD_METRICS, &cid), &pod_map);
+                let _ = app.emit(&events::channel(events::NODE_METRICS, &cid), &node_map);
                 *shared.lock().await = Some(cluster_pct);
             }
             _ => {
@@ -241,7 +245,13 @@ async fn fetch_node_metrics(
 }
 
 /// Poll cluster status on an interval: version, latency, nodes ready, cpu/mem %.
-async fn status_loop(app: AppHandle, client: Client, shared: SharedClusterPct, every: Duration) {
+async fn status_loop<R: Runtime>(
+    mgr: Arc<ClientManager<R>>,
+    cid: Cid,
+    client: Client,
+    shared: SharedClusterPct,
+    every: Duration,
+) {
     let mut tick = interval(every);
     loop {
         tick.tick().await;
@@ -280,7 +290,7 @@ async fn status_loop(app: AppHandle, client: Client, shared: SharedClusterPct, e
             cpu_percent: cpu,
             mem_percent: mem,
         };
-        let _ = app.emit(events::CLUSTER_STATUS, payload);
+        mgr.emit_status(&cid, payload).await;
     }
 }
 

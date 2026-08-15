@@ -19,6 +19,7 @@ const NO_RESOURCES: PodResources = {
 // Reset to a clean slate before each test (Zustand store is a singleton).
 beforeEach(() => {
   useStore.setState({
+    activeCid: "test",
     logBuffer: [],
     selectedRow: null,
     nav: "pods",
@@ -301,21 +302,21 @@ describe("addPodSample", () => {
 
   it("appends samples per pod, oldest first", () => {
     const key = "prod/api-0";
-    useStore.getState().addPodSample(key, sample(1000));
-    useStore.getState().addPodSample(key, sample(2000));
+    useStore.getState().addPodSample("test", key, sample(1000));
+    useStore.getState().addPodSample("test", key, sample(2000));
     expect(useStore.getState().podSamples[key].map((s) => s.ts)).toEqual([1000, 2000]);
   });
 
   it("keeps each pod's series independent", () => {
-    useStore.getState().addPodSample("prod/a", sample(1));
-    useStore.getState().addPodSample("prod/b", sample(2));
+    useStore.getState().addPodSample("test", "prod/a", sample(1));
+    useStore.getState().addPodSample("test", "prod/b", sample(2));
     expect(useStore.getState().podSamples["prod/a"].map((s) => s.ts)).toEqual([1]);
     expect(useStore.getState().podSamples["prod/b"].map((s) => s.ts)).toEqual([2]);
   });
 
   it("caps the series at POD_SAMPLE_CAP, dropping the oldest", () => {
     const key = "prod/busy";
-    for (let i = 0; i < POD_SAMPLE_CAP + 25; i++) useStore.getState().addPodSample(key, sample(i));
+    for (let i = 0; i < POD_SAMPLE_CAP + 25; i++) useStore.getState().addPodSample("test", key, sample(i));
     const got = useStore.getState().podSamples[key];
     expect(got.length).toBe(POD_SAMPLE_CAP);
     // The window keeps the newest points; the oldest 25 fell off the front.
@@ -341,21 +342,21 @@ describe("seedNodeSamples (B38: Prometheus backfill)", () => {
   beforeEach(() => useStore.setState({ nodeSamples: {} }));
 
   it("seeds an empty series with history, oldest first", () => {
-    useStore.getState().seedNodeSamples("freya", [sample(1000), sample(2000)]);
+    useStore.getState().seedNodeSamples("test", "freya", [sample(1000), sample(2000)]);
     expect(useStore.getState().nodeSamples.freya.map((s) => s.ts)).toEqual([1000, 2000]);
   });
 
   it("puts history before live points", () => {
-    useStore.setState({ nodeSamples: { freya: [sample(5000)] } });
-    useStore.getState().seedNodeSamples("freya", [sample(3000), sample(4000)]);
+    useStore.setState({ nodeSamples: { freya: [sample(5000)] }, nodeSamplesByCid: { test: { freya: [sample(5000)] } } });
+    useStore.getState().seedNodeSamples("test", "freya", [sample(3000), sample(4000)]);
     expect(useStore.getState().nodeSamples.freya.map((s) => s.ts)).toEqual([3000, 4000, 5000]);
   });
 
   // The two sources overlap in time; the live scrape measures the value directly
   // rather than re-deriving it from a rate over a wider window, so it wins.
   it("drops history that overlaps a live point, keeping the live reading", () => {
-    useStore.setState({ nodeSamples: { freya: [sample(4000, 99)] } });
-    useStore.getState().seedNodeSamples("freya", [sample(3000, 1), sample(4000, 1), sample(5000, 1)]);
+    useStore.setState({ nodeSamples: { freya: [sample(4000, 99)] }, nodeSamplesByCid: { test: { freya: [sample(4000, 99)] } } });
+    useStore.getState().seedNodeSamples("test", "freya", [sample(3000, 1), sample(4000, 1), sample(5000, 1)]);
     const got = useStore.getState().nodeSamples.freya;
     expect(got.map((s) => s.ts)).toEqual([3000, 4000]);
     expect(got[1].cpuPercent).toBe(99);
@@ -363,13 +364,13 @@ describe("seedNodeSamples (B38: Prometheus backfill)", () => {
 
   it("is a no-op when there's no history — the common no-Prometheus case", () => {
     useStore.setState({ nodeSamples: { freya: [sample(1000)] } });
-    useStore.getState().seedNodeSamples("freya", []);
+    useStore.getState().seedNodeSamples("test", "freya", []);
     expect(useStore.getState().nodeSamples.freya.map((s) => s.ts)).toEqual([1000]);
   });
 
   it("caps the merged series so a long backfill can't grow it without bound", () => {
     const history = Array.from({ length: LOG_BUFFER_CAP * 3 }, (_, i) => sample(i));
-    useStore.getState().seedNodeSamples("freya", history);
+    useStore.getState().seedNodeSamples("test", "freya", history);
     expect(useStore.getState().nodeSamples.freya.length).toBeLessThanOrEqual(240);
   });
 });
@@ -422,7 +423,7 @@ describe("multi-row selection (B39)", () => {
     expect(useStore.getState().selection.selected).toEqual([]);
 
     useStore.getState().setSelection(armed);
-    useStore.getState().resetData();
+    useStore.getState().resetData("test");
     expect(useStore.getState().selection.selected).toEqual([]);
 
     useStore.getState().setSelection(armed);
@@ -441,7 +442,7 @@ describe("multi-row selection (B39)", () => {
 
 describe("bookmarks (B56)", () => {
   beforeEach(() => {
-    useStore.setState({ connection: { phase: "connected", context: "prod-cluster", clusterName: "prod" } });
+    useStore.setState({ activeCid: "prod-cluster", connection: { phase: "connected", context: "prod-cluster", clusterName: "prod" }, connections: { "prod-cluster": { phase: "connected", context: "prod-cluster", clusterName: "prod" } } });
     useStore.setState({ bookmarksByContext: {} });
   });
 
@@ -463,7 +464,8 @@ describe("bookmarks (B56)", () => {
 
   it("keeps each context's bookmarks separate", () => {
     useStore.getState().addBookmark({ kind: "pods", namespace: "prod", name: "wiki" });
-    useStore.setState({ connection: { phase: "connected", context: "other-cluster", clusterName: "other" } });
+    useStore.getState().setActiveCid("other-cluster");
+    useStore.getState().setConnection("other-cluster", { phase: "connected", context: "other-cluster", clusterName: "other" });
     useStore.getState().addBookmark({ kind: "pods", namespace: "prod", name: "api" });
     expect(useStore.getState().bookmarksByContext["prod-cluster"].length).toBe(1);
     expect(useStore.getState().bookmarksByContext["other-cluster"].length).toBe(1);

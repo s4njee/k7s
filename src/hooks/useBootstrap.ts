@@ -37,19 +37,20 @@ export function useBootstrap(): void {
     // cluster going unreachable flips the UI to disconnected, and recovery flips it
     // back — without a manual reconnect. Also clears stale metrics when the metrics
     // API disappears (cpuPercent goes null) so CPU/MEM fall back to "—".
-    const onClusterStatus = (status: Parameters<typeof setClusterStatus>[0]) => {
-      setClusterStatus(status);
-      const { connection, setConnection, setPodMetrics: setPM, setNodeMetrics: setNM } =
+    const onClusterStatus = (cid: string, status: Parameters<typeof setClusterStatus>[1]) => {
+      setClusterStatus(cid, status);
+      const { connections, setConnection, setPodMetrics: setPM, setNodeMetrics: setNM } =
         useStore.getState();
-      if (connection.phase === "connected" && !status.connected) {
-        setConnection({ phase: "error", error: "cluster unreachable" });
-      } else if (connection.phase === "error" && status.connected) {
-        setConnection({ phase: "connected", error: undefined });
+      const conn = connections[cid];
+      if (conn?.phase === "connected" && !status.connected) {
+        setConnection(cid, { phase: "error", error: "cluster unreachable" });
+      } else if (conn?.phase === "error" && status.connected) {
+        setConnection(cid, { phase: "connected", error: undefined });
       }
       if (status.cpuPercent == null) {
         // metrics-server gone: drop cached usage so nothing stale lingers.
-        setPM({});
-        setNM({});
+        setPM(cid, {});
+        setNM(cid, {});
       }
     };
 
@@ -72,13 +73,12 @@ export function useBootstrap(): void {
       // node-exporter samples (B27). Subscribed for the app's lifetime, but the
       // backend only emits for nodes whose Metrics tab is open.
       provider.onNodeStats(addNodeSample),
-      provider.onNodeStatsError((e) => setNodeStatsError(e.node, e.message)),
+      provider.onNodeStatsError((cid, e) => setNodeStatsError(cid, e.node, e.message)),
       // Per-pod samples, emitted only for the pod whose Metrics tab is open.
       provider.onPodStats(addPodSample),
     ];
 
     // Discover contexts, restore saved preferences, then connect (B11).
-    setConnection({ phase: "connecting" });
     void (async () => {
       try {
         // Prefs first: imported kubeconfigs must be re-registered *before* the
@@ -126,6 +126,9 @@ export function useBootstrap(): void {
           if (typeof prefs.showTimestamps === "boolean") restore.showTimestamps = prefs.showTimestamps;
           // Bookmarks are keyed by context, so each context keeps its own list (B56).
           if (prefs.bookmarks) restore.bookmarksByContext = prefs.bookmarks;
+          // Per-cluster rail colour + default namespace (B77).
+          if (prefs.clusterColors) restore.clusterColors = prefs.clusterColors;
+          if (prefs.clusterNamespaces) restore.clusterNamespaces = prefs.clusterNamespaces;
           if (Object.keys(restore).length) useStore.setState(restore);
         }
 
@@ -133,12 +136,12 @@ export function useBootstrap(): void {
         const saved = prefs?.context ? contexts.find((c) => c.name === prefs.context) : undefined;
         const target = saved ?? contexts.find((c) => c.current) ?? contexts[0];
         if (!target) {
-          setConnection({ phase: "error", error: "no kubeconfig contexts found" });
+          setConnection("", { phase: "error", error: "no kubeconfig contexts found" });
           return;
         }
         await connectTo(target.name);
       } catch (e) {
-        setConnection({ phase: "error", error: e instanceof Error ? e.message : String(e) });
+        setConnection("", { phase: "error", error: e instanceof Error ? e.message : String(e) });
       }
     })();
 
@@ -149,7 +152,7 @@ export function useBootstrap(): void {
       ? () => {}
       : useStore.subscribe((s) => {
           const prefs = {
-            context: s.connection.context,
+            context: s.activeCid,
             nav: s.nav,
             namespace: s.namespace,
             showTimestamps: s.showTimestamps,
@@ -157,6 +160,9 @@ export function useBootstrap(): void {
             importedFiles: s.importedFiles,
             // Bookmarks keyed by context (B56).
             bookmarks: s.bookmarksByContext,
+            // Per-cluster rail colour + default namespace (B77).
+            clusterColors: s.clusterColors,
+            clusterNamespaces: s.clusterNamespaces,
             // Settings (B23). The backend reads the poll intervals and shell
             // command straight out of this same file.
             ...s.settings,

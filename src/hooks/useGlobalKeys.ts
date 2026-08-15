@@ -28,6 +28,21 @@ export function useGlobalKeys(): void {
         return;
       }
 
+      // ⌘1–9 switch to the Nth connected cluster (B77). Safe while typing: the
+      // meta modifier is unambiguous, and digits alone are a legal filter char.
+      if (e.metaKey || e.ctrlKey) {
+        const n = Number(e.key);
+        if (n >= 1 && n <= 9) {
+          const cids = Object.keys(s.connections);
+          const target = cids[n - 1];
+          if (target && target !== s.activeCid) {
+            e.preventDefault();
+            s.setActiveCid(target);
+          }
+          return;
+        }
+      }
+
       // k9s muscle memory. Only outside a text field — it's a legal character.
       if (e.key === ":" && !typing && !s.paletteOpen) {
         e.preventDefault();

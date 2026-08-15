@@ -36,10 +36,10 @@ export type DetailTab =
 /** Which dropdown menu (if any) is currently open — only one at a time. */
 export type OpenMenu = "cluster" | "ns" | null;
 
-/** Connection lifecycle for the active cluster/context. */
+/** Connection lifecycle for a cluster/context. */
 export interface ConnectionState {
   phase: "idle" | "connecting" | "connected" | "error";
-  /** kubeconfig context name currently selected. */
+  /** kubeconfig context name. */
   context: string | null;
   /** Cluster display name (from connect result). */
   clusterName: string | null;
@@ -53,9 +53,20 @@ export interface ConnectionState {
  */
 export type RowMap = Record<string, Row[]>;
 
+/**
+ * The store holds per-cluster data (B77). Components read the *active* slice —
+ * `rows`, `connection`, `clusterStatus`, `nav`, … — which always reflects
+ * `activeCid`; the `*ByCid` maps retain every connected cluster's data so a
+ * switch back is instant and background clusters keep their problems/state.
+ */
+export type Cid = string;
+
 export interface NavigationState {
   nav: KindId;
+  /** Per-cluster retained nav, so switching back restores the view. */
+  navByCid: Record<Cid, KindId>;
   namespace: string;
+  namespaceByCid: Record<Cid, string>;
   tableFilter: string;
   sortCol: number | null;
   sortDir: "asc" | "desc";
@@ -75,55 +86,84 @@ export interface NavigationActions {
 }
 
 export interface ConnectionSliceState {
+  /** The cluster the UI is currently showing (B77). */
+  activeCid: Cid | null;
+  /** Every connected cluster's lifecycle, keyed by cid. */
+  connections: Record<Cid, ConnectionState>;
+  /** Active slice of [`ConnectionState`] — mirrors `connections[activeCid]`. */
   connection: ConnectionState;
+  /** Per-cluster cluster-status (retained for the rail / switching back). */
+  clusterStatusByCid: Record<Cid, ClusterStatus | null>;
+  /** Active slice of cluster-status. */
   clusterStatus: ClusterStatus | null;
+  watchCountByCid: Record<Cid, number>;
   watchCount: number;
   contexts: ContextInfo[];
   importedFiles: string[];
   bookmarksByContext: Record<string, Bookmark[]>;
+  /** Per-cluster rail colour (B77), user-set; defaults to a palette pick. */
+  clusterColors: Record<string, string>;
+  /** Per-cluster default namespace (B77), layered over the global setting. */
+  clusterNamespaces: Record<string, string>;
 }
 
 export interface ConnectionActions {
-  setConnection: (c: Partial<ConnectionState>) => void;
+  setActiveCid: (cid: Cid) => void;
+  setConnection: (cid: Cid, c: Partial<ConnectionState>) => void;
   setContexts: (contexts: ContextInfo[]) => void;
   setImportedFiles: (paths: string[]) => void;
   addImportedFile: (path: string) => void;
   addBookmark: (bookmark: Bookmark) => void;
   removeBookmark: (bookmark: Bookmark) => void;
   toggleBookmark: (bookmark: Bookmark) => void;
-  setClusterStatus: (s: ClusterStatus) => void;
-  setWatchCount: (n: number) => void;
+  setClusterColor: (cid: string, color: string) => void;
+  setClusterNamespace: (cid: string, ns: string) => void;
+  setClusterStatus: (cid: Cid, s: ClusterStatus) => void;
+  setWatchCount: (cid: Cid, n: number) => void;
 }
 
 export interface DataSliceState {
+  /** Active rows (see [`NavigationState`] for the per-cid pattern). */
   rows: RowMap;
+  rowsByCid: Record<Cid, RowMap>;
   customKinds: CustomKind[];
+  customKindsByCid: Record<Cid, CustomKind[]>;
   settings: Settings;
   selection: SelectionState;
+  selectionByCid: Record<Cid, SelectionState>;
   systemDark: boolean;
   settingsOpen: boolean;
   createOpen: boolean;
   paletteOpen: boolean;
+  /** Problems view scope (B77): the active cluster, or aggregated across all. */
+  problemsScope: "active" | "all";
   podMetrics: PodMetricsMap;
+  podMetricsByCid: Record<Cid, PodMetricsMap>;
   nodeMetrics: NodeMetricsMap;
+  nodeMetricsByCid: Record<Cid, NodeMetricsMap>;
   portForwards: ForwardInfo[];
+  portForwardsByCid: Record<Cid, ForwardInfo[]>;
   drains: Record<string, DrainProgress>;
+  drainsByCid: Record<Cid, Record<string, DrainProgress>>;
   nodeSamples: Record<string, NodeSample[]>;
+  nodeSamplesByCid: Record<Cid, Record<string, NodeSample[]>>;
   nodeStatsErrors: Record<string, string>;
+  nodeStatsErrorsByCid: Record<Cid, Record<string, string>>;
   podSamples: Record<string, PodSample[]>;
+  podSamplesByCid: Record<Cid, Record<string, PodSample[]>>;
 }
 
 export interface DataActions {
-  setRows: (kind: KindId, rows: Row[]) => void;
-  setCustomKinds: (kinds: CustomKind[]) => void;
-  setPodMetrics: (m: PodMetricsMap) => void;
-  setNodeMetrics: (m: NodeMetricsMap) => void;
-  setPortForwards: (list: ForwardInfo[]) => void;
-  setDrain: (progress: DrainProgress) => void;
-  seedNodeSamples: (node: string, history: NodeSample[]) => void;
-  addNodeSample: (node: string, sample: NodeSample) => void;
-  setNodeStatsError: (node: string, message: string) => void;
-  addPodSample: (key: string, sample: PodSample) => void;
+  setRows: (cid: Cid, kind: KindId, rows: Row[]) => void;
+  setCustomKinds: (cid: Cid, kinds: CustomKind[]) => void;
+  setPodMetrics: (cid: Cid, m: PodMetricsMap) => void;
+  setNodeMetrics: (cid: Cid, m: NodeMetricsMap) => void;
+  setPortForwards: (cid: Cid, list: ForwardInfo[]) => void;
+  setDrain: (cid: Cid, progress: DrainProgress) => void;
+  seedNodeSamples: (cid: Cid, node: string, history: NodeSample[]) => void;
+  addNodeSample: (cid: Cid, node: string, sample: NodeSample) => void;
+  setNodeStatsError: (cid: Cid, node: string, message: string) => void;
+  addPodSample: (cid: Cid, key: string, sample: PodSample) => void;
   setSettings: (patch: Partial<Settings>) => void;
   setSystemDark: (dark: boolean) => void;
   setSelection: (selection: SelectionState) => void;
@@ -131,10 +171,13 @@ export interface DataActions {
   setSettingsOpen: (open: boolean) => void;
   setCreateOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
-  resetData: () => void;
+  setProblemsScope: (scope: "active" | "all") => void;
+  /** Wipe one cluster's retained data (failed connect / rail removal). */
+  resetData: (cid: Cid) => void;
 }
 
-export interface DetailSliceState {
+/** The detail-panel fields for one cluster (the retained value of [`DetailSliceState`]). */
+export type DetailState = {
   selectedRow: Row | null;
   activeTab: DetailTab;
   logSearch: string;
@@ -146,6 +189,11 @@ export interface DetailSliceState {
   logSince: SinceOption;
   yamlEditing: boolean;
   yamlDraft: string;
+};
+
+export interface DetailSliceState extends DetailState {
+  /** Per-cluster retained detail, swapped on `setActiveCid`. */
+  detailByCid: Record<Cid, DetailState>;
 }
 
 export interface DetailActions {

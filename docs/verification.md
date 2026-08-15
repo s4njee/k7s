@@ -156,6 +156,40 @@ before building an HTTP client.
   detail header, palette, problems) follows the same `{name}` text pattern and
   is a quick manual pass.
 
+## Multi-cluster backend (B76)
+
+The manager now keys every connection by cluster; a live harness proves two
+contexts coexist and that disconnecting one leaves the other's watchers running:
+
+```bash
+KUBECONFIG=/path/to/kubeconfig cargo run --example multi_cluster_check
+```
+
+It skips cleanly (exit 0) with fewer than two contexts. The lifecycle is also
+unit-tested in `manager.rs` (two cids isolated, streams die with their cluster,
+refresh replays cached snapshots). The single-cluster UI is unchanged this
+release — the cid-keyed store is B77.
+
+## Multi-cluster UI (B77)
+
+The store is cid-keyed; the sidebar rail lists connected clusters. Demo mode has
+per-cluster data, so the acceptance is verifiable without a cluster:
+
+1. `VITE_DEMO=1 npm run dev`, connect freya, then switch to odin-staging from
+   the rail (or ⌘2).
+2. The pods table shows each cluster's own `default/web` pod — Running on freya,
+   CrashLoopBackOff on odin-staging (the no-leakage fixture).
+3. Switching back and forth is instant — no flicker, no wipe; the previous
+   cluster's data is retained.
+4. Odin-staging's rail chip is tinted (its crash-looping pod) and a native
+   notification names `[odin-staging]`.
+5. Open a port-forward on freya, switch to odin-staging — the forward strip
+   still shows the `freya` badge, and the detail header shows the cluster.
+
+Against a real kubeconfig with ≥2 contexts, the same flow exercises the live
+backend. The lifecycle is unit-tested in `store.test.ts` (per-cid setters route
+to retention + active slice) and the manager tests from B76.
+
 ## Known follow-ups (out of v1 scope, per plan.md)
 
 - Detail panel (YAML/Events) for non-pod kinds — pods-only in v1 by design.

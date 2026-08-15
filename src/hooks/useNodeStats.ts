@@ -30,7 +30,10 @@ export function useNodeStats(node: string | undefined): void {
     void provider
       .nodeHistory(node)
       .then((history) => {
-        if (!cancelled) useStore.getState().seedNodeSamples(node, history);
+        if (!cancelled) {
+        const { activeCid } = useStore.getState();
+        useStore.getState().seedNodeSamples(activeCid ?? "", node, history);
+      }
       })
       .catch(() => {
         // No history is a normal state, not an error worth showing: the live
@@ -42,7 +45,7 @@ export function useNodeStats(node: string | undefined): void {
       // failures (no exporter, forward refused) through onNodeStatsError instead,
       // since they happen after this call has returned.
       if (!cancelled) {
-        useStore.getState().setNodeStatsError(node, e instanceof Error ? e.message : String(e));
+        useStore.getState().setNodeStatsError(useStore.getState().activeCid ?? "", node, e instanceof Error ? e.message : String(e));
       }
     });
 

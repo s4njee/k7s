@@ -46,7 +46,8 @@ export function DetailPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   // The current context's bookmarks, for the ☆ toggle (B56).
-  const context = useStore((s) => s.connection.context ?? "");
+  const context = useStore((s) => s.activeCid ?? "");
+  const cluster = useStore((s) => s.connection.clusterName ?? s.activeCid ?? "");
   const bookmarks = useStore((s) => s.bookmarksByContext[context] ?? EMPTY_BOOKMARKS);
   const toggleBookmark = useStore((s) => s.toggleBookmark);
 
@@ -110,6 +111,9 @@ export function DetailPanel() {
         {isPod ? (
           <div className={styles.meta}>
             <span>
+              cluster: <span className={styles.metaVal}>{cluster}</span>
+            </span>
+            <span>
               ns: <span className={styles.metaVal}>{row.namespace}</span>
             </span>
             <span>
@@ -122,6 +126,9 @@ export function DetailPanel() {
           </div>
         ) : (
           <div className={styles.meta}>
+            <span>
+              cluster: <span className={styles.metaVal}>{cluster}</span>
+            </span>
             <span>
               kind: <span className={styles.metaVal}>{kindLabel}</span>
             </span>

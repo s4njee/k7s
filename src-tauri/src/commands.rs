@@ -11,7 +11,7 @@ use crate::logging;
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
 use crate::kube::{
     batch, discovery, drain, exec, exporter, helm, logs, mappers, metrics, nodeshell, nodestats,
-    portforward, promql, properties, restart, topology, watchers, ClientManager, ResourceKind,
+    portforward, promql, properties, restart, topology, watchers, Cid, ClientManager, ResourceKind,
 };
 use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::apps::v1::Deployment;
@@ -26,7 +26,7 @@ use kube::ResourceExt;
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{Emitter, State};
+use tauri::State;
 
 /// Monotonic counter for generating unique log-stream ids.
 static STREAM_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -282,10 +282,20 @@ pub async fn connect(
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<ClusterInfo> {
     let manager: Arc<ClientManager> = (*mgr).clone();
+    let cid: Cid = context.clone();
 
-    // Abort every task from the previous connection first (Story 6.1).
-    manager.reset().await;
+    // Reuse a live connection (B76): the manager re-emits its retained snapshots
+    // on `{event}:{cid}` and we hand back the cached info — the O(instant) switch.
+    // Other clusters are never touched.
+    if manager.is_connected(&cid).await {
+        manager.refresh(&cid).await;
+        return manager
+            .info(&cid)
+            .await
+            .ok_or_else(|| AppError::Other("connection state missing".into()));
+    }
 
+    // Fresh connection for this cid only.
     // If this context was imported from a specific file, build the client from
     // that file; otherwise use the default kubeconfig resolution.
     let (kube_client, server) = match manager.import_path(&context).await {
@@ -295,33 +305,46 @@ pub async fn connect(
     let version = client::probe_version(&kube_client).await?;
 
     // Start watchers for all kinds and register their tasks.
-    let watcher_count = watchers::spawn_all(&manager, kube_client.clone()).await;
+    let watcher_count =
+        watchers::spawn_all(manager.clone(), cid.clone(), kube_client.clone()).await;
 
     // Start the metrics + status pollers and register them too.
     // Poll intervals come from the user's settings (B23). Read at connect, so a
     // change takes effect on the next connection rather than restarting live
     // pollers for a value measured in seconds.
-    let (metrics_task, status_task) =
-        metrics::spawn_pollers(manager.app(), kube_client.clone(), poll_intervals(&manager.app()));
-    manager.push_task(metrics_task).await;
-    manager.push_task(status_task).await;
+    let (metrics_task, status_task) = metrics::spawn_pollers(
+        manager.clone(),
+        cid.clone(),
+        kube_client.clone(),
+        poll_intervals(&manager.app()),
+    );
+    manager.push_task(cid.clone(), metrics_task).await;
+    manager.push_task(cid.clone(), status_task).await;
 
     // Discover CRD-backed kinds and tell the frontend about them (B15). Their
     // watchers start lazily when the user opens one, so this only populates the
     // nav — a cluster with dozens of CRDs costs nothing until a kind is opened.
     let custom = discovery::discover(&kube_client).await;
-    manager.set_custom_kinds(custom.clone()).await;
-    let _ = manager.app().emit(crate::kube::events::CUSTOM_KINDS, custom);
+    manager.set_custom_kinds(cid.clone(), custom.clone()).await;
+    manager.emit_kinds(&cid, custom).await;
 
     // Record the live connection (also emits the initial watch-status count).
-    manager.set_connected(kube_client, watcher_count).await;
-
-    Ok(ClusterInfo {
+    let info = ClusterInfo {
         context: context.clone(),
         cluster_name: context,
         server,
         version,
-    })
+    };
+    manager.set_connected(cid, kube_client, info.clone(), watcher_count).await;
+    Ok(info)
+}
+
+/// Tear down one cluster's connection: its watchers, pollers, streams and
+/// forwards. Other connected clusters are untouched (B76).
+#[tauri::command]
+pub async fn disconnect(cid: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+    mgr.disconnect(&cid).await;
+    Ok(())
 }
 
 /// Map a frontend kind id to its `ApiResource` and whether it is namespaced. The
@@ -331,9 +354,9 @@ pub async fn connect(
 /// A custom (CRD-backed) kind id contains a slash ("group/plural", B15) and is
 /// resolved from the kinds discovered on connect, so YAML/delete/events work on
 /// CRDs through the same path as built-ins.
-async fn resource_for(kind: &str, mgr: &ClientManager) -> AppResult<(ApiResource, bool)> {
+async fn resource_for(kind: &str, cid: &Cid, mgr: &ClientManager) -> AppResult<(ApiResource, bool)> {
     if kind.contains('/') {
-        return match mgr.custom_kind(kind).await {
+        return match mgr.custom_kind(cid, kind).await {
             Some(ck) => Ok((ck.api_resource(), ck.namespaced)),
             None => Err(AppError::Other(format!("unknown custom kind: {kind}"))),
         };
@@ -373,9 +396,10 @@ async fn dynamic_api(
     client: kube::Client,
     kind: &str,
     namespace: &str,
+    cid: &Cid,
     mgr: &ClientManager,
 ) -> AppResult<Api<DynamicObject>> {
-    let (ar, namespaced) = resource_for(kind, mgr).await?;
+    let (ar, namespaced) = resource_for(kind, cid, mgr).await?;
     Ok(if namespaced {
         Api::namespaced_with(client, namespace, &ar)
     } else {
@@ -411,20 +435,20 @@ async fn helm_manifest(client: kube::Client, namespace: &str, name: &str) -> App
 /// Fetch an object's YAML for the detail panel (any kind). Strips
 /// `metadata.managedFields`; Secret values are redacted (see below).
 #[tauri::command]
-pub async fn get_yaml(
+pub async fn get_yaml(cid: String, 
     kind: String,
     namespace: String,
     name: String,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<String> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     // A Helm release isn't an API object, so there's nothing to GET: its YAML is
     // the manifest the chart rendered, which is what you actually want to read
     // (B26). Secret values in it are already redacted by the decoder.
     if kind == ResourceKind::Helm.id() {
         return helm_manifest(client, &namespace, &name).await;
     }
-    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
+    let api = dynamic_api(client, &kind, &namespace, &cid, &mgr).await?;
     let mut obj = api.get(&name).await?;
     // Drop server-managed noise before rendering.
     obj.metadata.managed_fields = None;
@@ -454,14 +478,14 @@ pub struct DiffPayload {
 /// server-side-apply managed fields. Neither present → `baseline: None`, and the
 /// UI shows a clean "no baseline" state.
 #[tauri::command]
-pub async fn get_diff(
+pub async fn get_diff(cid: String, 
     kind: String,
     namespace: String,
     name: String,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<DiffPayload> {
-    let client = require_client(&mgr).await?;
-    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
+    let api = dynamic_api(client, &kind, &namespace, &cid, &mgr).await?;
     let mut obj = api.get(&name).await?;
     // Never surface Secret values — in the live YAML or the baseline (a Secret's
     // last-applied annotation carries the raw data). `redact_secret` touches the
@@ -574,14 +598,14 @@ fn secret_value(secret: &k8s_openapi::api::core::v1::Secret, key: &str) -> Optio
 /// written entirely in Rust — it never crosses into the webview, so the UI only
 /// ever learns that the copy succeeded, not what it copied.
 #[tauri::command]
-pub async fn copy_secret_value(
+pub async fn copy_secret_value(cid: String, 
     namespace: String,
     name: String,
     key: String,
     app: tauri::AppHandle,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<()> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let api: Api<k8s_openapi::api::core::v1::Secret> = Api::namespaced(client, &namespace);
     let secret = api.get(&name).await?;
     let value = secret_value(&secret, &key)
@@ -624,17 +648,17 @@ pub async fn notify_problem(
 /// Apply edited YAML back to the cluster via replace (preserving resourceVersion
 /// from the edited text). API errors are returned verbatim for inline display.
 #[tauri::command]
-pub async fn apply_yaml(
+pub async fn apply_yaml(cid: String, 
     kind: String,
     namespace: String,
     name: String,
     yaml: String,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<()> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     ensure_writable(&kind)?;
     let obj: DynamicObject = serde_yaml::from_str(&yaml)?;
-    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
+    let api = dynamic_api(client, &kind, &namespace, &cid, &mgr).await?;
     // replace() requires the resourceVersion present in the fetched/edited object;
     // a stale value yields a 409 whose message we pass straight through.
     api.replace(&name, &PostParams::default(), &obj).await?;
@@ -685,17 +709,17 @@ pub struct YamlDiff {
 /// dropped, same serializer) so the diff shows real changes rather than
 /// formatting noise.
 #[tauri::command]
-pub async fn dry_run_yaml(
+pub async fn dry_run_yaml(cid: String, 
     kind: String,
     namespace: String,
     name: String,
     yaml: String,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<YamlDiff> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     ensure_writable(&kind)?;
     let obj: DynamicObject = serde_yaml::from_str(&yaml)?;
-    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
+    let api = dynamic_api(client, &kind, &namespace, &cid, &mgr).await?;
 
     let mut current = api.get(&name).await?;
     current.metadata.managed_fields = None;
@@ -745,17 +769,18 @@ pub async fn create_resource(
     namespace: String,
     dry_run: bool,
     mgr: State<'_, Arc<ClientManager>>,
+    cid: String,
 ) -> AppResult<CreateOutcome> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let mut obj: DynamicObject = serde_yaml::from_str(&yaml)?;
     let kind = obj.types.as_ref().map(|t| t.kind.clone()).unwrap_or_default();
     let api_version = obj.types.as_ref().map(|t| t.api_version.clone()).unwrap_or_default();
     if kind.is_empty() || api_version.is_empty() {
         return Err(AppError::Other("the manifest needs apiVersion and kind".into()));
     }
-    let nav = nav_for_manifest(&mgr, &kind, &api_version).await
+    let nav = nav_for_manifest(&mgr, &cid, &kind, &api_version).await
         .ok_or_else(|| AppError::Other(format!("cannot create a {kind}: it isn't a listed kind")))?;
-    let (ar, namespaced) = resource_for(&nav, &mgr).await?;
+    let (ar, namespaced) = resource_for(&nav, &cid, &mgr).await?;
     // The object's own namespace wins; else the supplied one. Cluster-scoped
     // kinds ignore both.
     let ns = if namespaced { obj.metadata.namespace.clone().unwrap_or(namespace) } else { String::new() };
@@ -788,40 +813,40 @@ pub async fn create_resource(
 
 /// Resolve a parsed manifest's Kind + apiVersion to a nav id: a built-in by its
 /// Kind, a CRD by Kind+group against the discovered kinds.
-async fn nav_for_manifest(mgr: &ClientManager, kind: &str, api_version: &str) -> Option<String> {
+async fn nav_for_manifest(mgr: &ClientManager, cid: &Cid, kind: &str, api_version: &str) -> Option<String> {
     if let Some(nav) = properties::builtin_nav_id(kind) {
         return Some(nav.to_string());
     }
     let group = api_version.split('/').next().unwrap_or_default();
-    mgr.custom_kind_by_name(group, kind).await.map(|k| k.id)
+    mgr.custom_kind_by_name(cid, group, kind).await.map(|k| k.id)
 }
 
 /// Delete a resource of any kind. The frontend confirms first; API errors are
 /// returned verbatim.
 #[tauri::command]
-pub async fn delete_resource(
+pub async fn delete_resource(cid: String, 
     kind: String,
     namespace: String,
     name: String,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<()> {
-    let client = require_client(&mgr).await?;
-    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
+    let api = dynamic_api(client, &kind, &namespace, &cid, &mgr).await?;
     api.delete(&name, &DeleteParams::default()).await?;
     Ok(())
 }
 
 /// Scale a Deployment/StatefulSet by patching `spec.replicas`.
 #[tauri::command]
-pub async fn scale_resource(
+pub async fn scale_resource(cid: String, 
     kind: String,
     namespace: String,
     name: String,
     replicas: i32,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<()> {
-    let client = require_client(&mgr).await?;
-    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
+    let api = dynamic_api(client, &kind, &namespace, &cid, &mgr).await?;
     let patch = Patch::Merge(serde_json::json!({ "spec": { "replicas": replicas } }));
     api.patch(&name, &PatchParams::default(), &patch).await?;
     Ok(())
@@ -833,9 +858,10 @@ pub async fn set_cordon(
     name: String,
     unschedulable: bool,
     mgr: State<'_, Arc<ClientManager>>,
+    cid: String,
 ) -> AppResult<()> {
-    let client = require_client(&mgr).await?;
-    let api = dynamic_api(client, "nodes", "", &mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
+    let api = dynamic_api(client, "nodes", "", &cid, &mgr).await?;
     let patch = Patch::Merge(serde_json::json!({ "spec": { "unschedulable": unschedulable } }));
     api.patch(&name, &PatchParams::default(), &patch).await?;
     Ok(())
@@ -847,12 +873,12 @@ pub async fn set_cordon(
 /// which is a delete, not a restart. The check happens here, where we have the
 /// full object, rather than trusting the frontend to have hidden the action.
 #[tauri::command]
-pub async fn restart_pod(
+pub async fn restart_pod(cid: String, 
     namespace: String,
     name: String,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<()> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let api: Api<k8s_openapi::api::core::v1::Pod> = Api::namespaced(client, &namespace);
     let pod = api.get(&name).await?;
     if !restart::has_controller(&pod) {
@@ -868,7 +894,7 @@ pub async fn restart_pod(
 /// rollout restart` does: patch the pod template's `restartedAt` annotation to
 /// now, which the controller rolls through its normal update strategy.
 #[tauri::command]
-pub async fn restart_rollout(
+pub async fn restart_rollout(cid: String, 
     kind: String,
     namespace: String,
     name: String,
@@ -877,8 +903,8 @@ pub async fn restart_rollout(
     if !restart::is_rollout_kind(&kind) {
         return Err(AppError::Other(format!("{kind} cannot be rollout-restarted")));
     }
-    let client = require_client(&mgr).await?;
-    let api = dynamic_api(client, &kind, &namespace, &mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
+    let api = dynamic_api(client, &kind, &namespace, &cid, &mgr).await?;
     let now = chrono::Utc::now().to_rfc3339();
     let patch = Patch::Merge(restart::restart_patch(&now));
     api.patch(&name, &PatchParams::default(), &patch).await?;
@@ -893,13 +919,13 @@ pub async fn restart_rollout(
 /// owned by uid, resolved by the `deployment.kubernetes.io/revision` annotation —
 /// and the copy is a single merge patch on `spec.template`.
 #[tauri::command]
-pub async fn undo_rollout(
+pub async fn undo_rollout(cid: String, 
     namespace: String,
     name: String,
     revision: i64,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<i64> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let api: Api<Deployment> = Api::namespaced(client.clone(), &namespace);
     let dep = api.get(&name).await?;
     let uid = dep.metadata.uid.as_deref().unwrap_or_default();
@@ -913,13 +939,13 @@ pub async fn undo_rollout(
 
 /// Suspend or resume a CronJob by patching `spec.suspend` (B47).
 #[tauri::command]
-pub async fn set_cronjob_suspend(
+pub async fn set_cronjob_suspend(cid: String, 
     namespace: String,
     name: String,
     suspended: bool,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<()> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let api: Api<CronJob> = Api::namespaced(client, &namespace);
     api.patch(&name, &PatchParams::default(), &Patch::Merge(batch::suspend_patch(suspended)))
         .await?;
@@ -930,12 +956,12 @@ pub async fn set_cronjob_suspend(
 /// mechanic of `kubectl create job --from=cronjob/x`. The Job is owned by
 /// nothing, so it can be deleted on its own. Returns the new Job's name.
 #[tauri::command]
-pub async fn run_cronjob(
+pub async fn run_cronjob(cid: String, 
     namespace: String,
     name: String,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<String> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let api: Api<CronJob> = Api::namespaced(client.clone(), &namespace);
     let cronjob = api.get(&name).await?;
     let seq = STREAM_SEQ.fetch_add(1, Ordering::Relaxed);
@@ -950,12 +976,12 @@ pub async fn run_cronjob(
 /// the controller-owned fields, so the retry is a fresh, unowned Job. Refuses a
 /// Job that hasn't failed. Returns the new Job's name.
 #[tauri::command]
-pub async fn retry_job(
+pub async fn retry_job(cid: String, 
     namespace: String,
     name: String,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<String> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let jobs: Api<Job> = Api::namespaced(client.clone(), &namespace);
     let job = jobs.get(&name).await?;
     let failed = job
@@ -980,26 +1006,26 @@ pub async fn retry_job(
 /// a cluster can define hundreds of CRDs, and watching them all on connect would
 /// open a stream per CRD for data nobody is looking at.
 #[tauri::command]
-pub async fn watch_custom_kind(kind: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+pub async fn watch_custom_kind(kind: String, cid: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
     let manager: Arc<ClientManager> = (*mgr).clone();
     // Already open — nothing to do (navigating back to a kind is common).
-    if manager.has_custom_watcher(&kind).await {
+    if manager.has_custom_watcher(&cid, &kind).await {
         return Ok(());
     }
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let ck = manager
-        .custom_kind(&kind)
+        .custom_kind(&cid, &kind)
         .await
         .ok_or_else(|| AppError::Other(format!("unknown custom kind: {kind}")))?;
-    watchers::spawn_custom(&manager, client, &ck).await;
+    watchers::spawn_custom(&manager, &cid, client, &ck).await;
     Ok(())
 }
 
 /// Stop watching a custom kind (B15). Idempotent: unknown ids are a no-op, so the
 /// frontend can call this unconditionally when navigating away.
 #[tauri::command]
-pub async fn unwatch_custom_kind(kind: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
-    mgr.remove_custom_watcher(&kind).await;
+pub async fn unwatch_custom_kind(kind: String, cid: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+    mgr.remove_custom_watcher(&cid, &kind).await;
     Ok(())
 }
 
@@ -1010,18 +1036,19 @@ pub async fn unwatch_custom_kind(kind: String, mgr: State<'_, Arc<ClientManager>
 /// connection-scoped task reporting via [`kube::events::DRAIN_PROGRESS`] — it can
 /// take minutes, so blocking the command on it would freeze the UI.
 #[tauri::command]
-pub async fn drain_node(name: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
-    let client = require_client(&mgr).await?;
+pub async fn drain_node(name: String, cid: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+    let client = require_client(&mgr, &cid).await?;
     let manager: Arc<ClientManager> = (*mgr).clone();
 
     // Cordon first: without it the scheduler could refill the node as we drain it.
     drain::cordon(client.clone(), &name).await?;
 
     let app = manager.app();
+    let cid_task = cid.clone();
     let task = tokio::spawn(async move {
-        drain::run_drain(client, app, name).await;
+        drain::run_drain(client, app, cid_task, name).await;
     });
-    manager.push_task(task).await;
+    manager.push_task(cid, task).await;
     Ok(())
 }
 
@@ -1036,8 +1063,9 @@ pub async fn drain_node(name: String, mgr: State<'_, Arc<ClientManager>>) -> App
 pub async fn node_history(
     node: String,
     mgr: State<'_, Arc<ClientManager>>,
+    cid: String,
 ) -> AppResult<Vec<exporter::NodeSample>> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let Some(svc) = promql::discover(&client).await else {
         return Ok(Vec::new());
     };
@@ -1058,8 +1086,9 @@ pub async fn pod_history(
     namespace: String,
     pod: String,
     mgr: State<'_, Arc<ClientManager>>,
+    cid: String,
 ) -> AppResult<Vec<promql::PodPoint>> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let Some(svc) = promql::discover(&client).await else {
         return Ok(Vec::new());
     };
@@ -1075,30 +1104,31 @@ pub async fn pod_history(
 /// are: each scrape moves a few hundred KB and holds a port-forward, which is not
 /// something to run for every node in the background.
 #[tauri::command]
-pub async fn watch_node_stats(node: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+pub async fn watch_node_stats(node: String, cid: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
     let manager: Arc<ClientManager> = (*mgr).clone();
-    if manager.has_node_scraper(&node).await {
+    if manager.has_node_scraper(&cid, &node).await {
         return Ok(());
     }
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let app = manager.app();
     // Reuses the metrics poll interval from settings (B23): it's the same question
     // ("how often should we ask the cluster how it's doing"), so it would be odd
     // for the plots to march to a different drum than the table's CPU column.
     let every = poll_intervals(&app).metrics;
     let n = node.clone();
+    let cid_task = cid.clone();
     let task = tokio::spawn(async move {
-        nodestats::run_node_stats(client, app, n, every).await;
+        nodestats::run_node_stats(client, app, cid_task, n, every).await;
     });
-    manager.add_node_scraper(node, task).await;
+    manager.add_node_scraper(cid, node, task).await;
     Ok(())
 }
 
 /// Stop scraping a node (B27). Idempotent, so the frontend can call it
 /// unconditionally when the tab closes; drops the port-forward with it.
 #[tauri::command]
-pub async fn unwatch_node_stats(node: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
-    mgr.remove_node_scraper(&node).await;
+pub async fn unwatch_node_stats(node: String, cid: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+    mgr.remove_node_scraper(&cid, &node).await;
     Ok(())
 }
 
@@ -1121,13 +1151,13 @@ pub struct EventItem {
 /// Errors for kinds with no gatherer — the frontend only offers the tab for the
 /// kinds that have one.
 #[tauri::command]
-pub async fn get_properties(
+pub async fn get_properties(cid: String, 
     kind: String,
     namespace: String,
     name: String,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<properties::Properties> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     properties::gather(client, &kind, &namespace, &name).await
 }
 
@@ -1138,9 +1168,10 @@ pub async fn get_topology(
     namespace: String,
     name: String,
     mgr: State<'_, Arc<ClientManager>>,
+    cid: String,
 ) -> AppResult<topology::Topology> {
-    let client = require_client(&mgr).await?;
-    let api = dynamic_api(client.clone(), &kind, &namespace, &mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
+    let api = dynamic_api(client.clone(), &kind, &namespace, &cid, &mgr).await?;
     let seed = api.get(&name).await?;
     let seed_kind = seed.types.as_ref().map(|t| t.kind.clone()).unwrap_or_default();
     topology::build(&client, &namespace, &seed_kind, &seed).await
@@ -1152,8 +1183,9 @@ pub async fn get_events(
     namespace: String,
     name: String,
     mgr: State<'_, Arc<ClientManager>>,
+    cid: String,
 ) -> AppResult<Vec<EventItem>> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let api: Api<Event> = Api::namespaced(client, &namespace);
     let lp = ListParams::default().fields(&format!(
         "involvedObject.name={name},involvedObject.namespace={namespace}"
@@ -1196,8 +1228,9 @@ pub async fn start_log_stream(
     since_seconds: Option<i64>,
     previous: bool,
     mgr: State<'_, Arc<ClientManager>>,
+    cid: String,
 ) -> AppResult<String> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let manager: Arc<ClientManager> = (*mgr).clone();
 
     // Unique id per stream (pod name + sequence).
@@ -1206,11 +1239,11 @@ pub async fn start_log_stream(
 
     let opts = logs::LogStreamOptions { tail, since_time, since_seconds, previous };
     let id_for_task = stream_id.clone();
+    let cid_task = cid.clone();
     let handle = tokio::spawn(async move {
-        logs::run_log_stream(client, app, id_for_task, namespace, pod, container, opts).await;
+        logs::run_log_stream(client, app, cid_task, id_for_task, namespace, pod, container, opts).await;
     });
-
-    manager.add_log(stream_id.clone(), handle).await;
+    manager.add_log(cid, stream_id.clone(), handle).await;
     Ok(stream_id)
 }
 
@@ -1226,7 +1259,7 @@ pub async fn start_log_stream(
 /// heap just to write it straight back out to disk.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-pub async fn export_logs(
+pub async fn export_logs(cid: String, 
     namespace: String,
     pod: String,
     container: String,
@@ -1235,7 +1268,7 @@ pub async fn export_logs(
     path: String,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<usize> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let api: Api<k8s_openapi::api::core::v1::Pod> = Api::namespaced(client.clone(), &namespace);
 
     // No tail: the whole thing. No follow: this must terminate.
@@ -1297,8 +1330,9 @@ pub async fn start_workload_logs(
     since_time: Option<String>,
     since_seconds: Option<i64>,
     mgr: State<'_, Arc<ClientManager>>,
+    cid: String,
 ) -> AppResult<String> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let manager: Arc<ClientManager> = (*mgr).clone();
 
     // A distinct id namespace ("wl-") so a workload bundle can't collide with a
@@ -1307,18 +1341,18 @@ pub async fn start_workload_logs(
     let app = manager.app();
     let opts = logs::LogStreamOptions { tail, since_time, since_seconds, previous: false };
     let id_for_task = stream_id.clone();
+    let cid_task = cid.clone();
     let handle = tokio::spawn(async move {
-        logs::run_workload_log_stream(client, app, id_for_task, kind, namespace, name, opts).await;
+        logs::run_workload_log_stream(client, app, cid_task, id_for_task, kind, namespace, name, opts).await;
     });
-
-    manager.add_log(stream_id.clone(), handle).await;
+    manager.add_log(cid, stream_id.clone(), handle).await;
     Ok(stream_id)
 }
 
 /// Write the full logs of every pod a workload selects to `path` (B31), labelled
 /// by pod and container — the save path for a workload stream.
 #[tauri::command]
-pub async fn export_workload_logs(
+pub async fn export_workload_logs(cid: String, 
     kind: String,
     namespace: String,
     name: String,
@@ -1326,7 +1360,7 @@ pub async fn export_workload_logs(
     path: String,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<usize> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let text = logs::export_workload_text(client, &kind, &namespace, &name, since_seconds).await?;
     let lines = text.lines().count();
     std::fs::write(&path, text).map_err(|e| AppError::Other(format!("could not write {path}: {e}")))?;
@@ -1344,8 +1378,9 @@ pub async fn start_shell(
     pod: String,
     container: String,
     mgr: State<'_, Arc<ClientManager>>,
+    cid: String,
 ) -> AppResult<String> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let manager: Arc<ClientManager> = (*mgr).clone();
 
     let id = format!("sh-{}-{}", pod, STREAM_SEQ.fetch_add(1, Ordering::Relaxed));
@@ -1356,10 +1391,12 @@ pub async fn start_shell(
     // open rather than needing a reconnect (B23).
     let shell_override = read_prefs(&app).shell_command.unwrap_or_default();
     let id_for_task = id.clone();
+    let cid_task = cid.clone();
     let task = tokio::spawn(async move {
         exec::run_shell(
             client,
             app,
+            cid_task,
             id_for_task,
             namespace,
             pod,
@@ -1372,7 +1409,7 @@ pub async fn start_shell(
     });
 
     manager
-        .add_shell(id.clone(), ShellSession { task, input_tx, resize_tx })
+        .add_shell(cid, id.clone(), ShellSession { task, input_tx, resize_tx })
         .await;
     Ok(id)
 }
@@ -1448,8 +1485,9 @@ async fn delete_debug_pod(api: &Api<k8s_openapi::api::core::v1::Pod>, name: &str
 pub async fn start_node_shell(
     node: String,
     mgr: State<'_, Arc<ClientManager>>,
+    cid: String,
 ) -> AppResult<NodeShellInfo> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let manager: Arc<ClientManager> = (*mgr).clone();
     let api: Api<k8s_openapi::api::core::v1::Pod> =
         Api::namespaced(client.clone(), nodeshell::DEBUG_NAMESPACE);
@@ -1489,10 +1527,12 @@ pub async fn start_node_shell(
     let (resize_tx, resize_rx) = mpsc::channel::<(u16, u16)>(8);
     let id_for_task = id.clone();
     let pod_for_task = pod_name.clone();
+    let cid_task = cid.clone();
     let task = tokio::spawn(async move {
         exec::run_argv(
             client,
             app,
+            cid_task,
             id_for_task,
             nodeshell::DEBUG_NAMESPACE.to_string(),
             pod_for_task,
@@ -1503,8 +1543,7 @@ pub async fn start_node_shell(
         )
         .await;
     });
-
-    manager.add_shell(id.clone(), ShellSession { task, input_tx, resize_tx }).await;
+    manager.add_shell(cid, id.clone(), ShellSession { task, input_tx, resize_tx }).await;
     Ok(NodeShellInfo {
         stream_id: id,
         namespace: nodeshell::DEBUG_NAMESPACE.to_string(),
@@ -1520,13 +1559,13 @@ pub async fn start_node_shell(
 /// `activeDeadlineSeconds` remains the backstop for the case where this never runs
 /// at all.
 #[tauri::command]
-pub async fn stop_node_shell(
+pub async fn stop_node_shell(cid: String, 
     stream_id: String,
     pod: String,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<()> {
     mgr.remove_shell(&stream_id).await;
-    if let Some(client) = mgr.client().await {
+    if let Some(client) = mgr.client(&cid).await {
         let api: Api<k8s_openapi::api::core::v1::Pod> =
             Api::namespaced(client, nodeshell::DEBUG_NAMESPACE);
         delete_debug_pod(&api, &pod).await;
@@ -1576,14 +1615,15 @@ pub async fn start_port_forward(
     pod: String,
     remote_port: u16,
     mgr: State<'_, Arc<ClientManager>>,
+    cid: String,
 ) -> AppResult<ForwardDto> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let manager: Arc<ClientManager> = (*mgr).clone();
 
     // Fail fast with a clear message if the pod is gone.
     portforward::ensure_pod(client.clone(), &namespace, &pod).await?;
 
-    spawn_forward(manager, client, namespace, pod, None, remote_port).await
+    spawn_forward(manager, client, cid, namespace, pod, None, remote_port).await
 }
 
 /// Start forwarding a *Service* port (B16): pick a Ready backing pod and resolve
@@ -1597,22 +1637,25 @@ pub async fn start_service_port_forward(
     service: String,
     remote_port: u16,
     mgr: State<'_, Arc<ClientManager>>,
+    cid: String,
 ) -> AppResult<ForwardDto> {
-    let client = require_client(&mgr).await?;
+    let client = require_client(&mgr, &cid).await?;
     let manager: Arc<ClientManager> = (*mgr).clone();
 
     let (pod, target_port) =
         portforward::resolve_service(client.clone(), &namespace, &service, remote_port).await?;
 
-    spawn_forward(manager, client, namespace, pod, Some((service, remote_port)), target_port).await
+    spawn_forward(manager, client, cid, namespace, pod, Some((service, remote_port)), target_port).await
 }
 
 /// Bind a local listener, spawn the forward's accept loop, and register it.
 /// Shared by the pod and Service paths — by this point a Service forward *is* a
 /// pod forward.
+#[allow(clippy::too_many_arguments)]
 async fn spawn_forward(
     manager: Arc<ClientManager>,
     client: kube::Client,
+    cid: Cid,
     namespace: String,
     pod: String,
     // For a Service forward: its name and the port the user asked for.
@@ -1645,6 +1688,7 @@ async fn spawn_forward(
     let id = format!("pf-{}-{}", label, STREAM_SEQ.fetch_add(1, Ordering::Relaxed));
     let dto = ForwardDto {
         id: id.clone(),
+        cid: cid.clone(),
         namespace,
         pod,
         service: service_name,
@@ -1653,7 +1697,7 @@ async fn spawn_forward(
         local_port,
         error: None,
     };
-    manager.add_forward(dto.clone(), task).await;
+    manager.add_forward(cid.clone(), dto.clone(), task).await;
 
     // Relay per-connection failures onto the forward for the UI. Ends on its own
     // when the forward task is aborted and drops the sender.
@@ -1663,7 +1707,7 @@ async fn spawn_forward(
             relay_mgr.set_forward_error(&id, e).await;
         }
     });
-    manager.push_task(relay).await;
+    manager.push_task(cid.clone(), relay).await;
 
     Ok(dto)
 }
@@ -1677,8 +1721,8 @@ pub async fn stop_port_forward(id: String, mgr: State<'_, Arc<ClientManager>>) -
 
 /// List active port-forwards.
 #[tauri::command]
-pub async fn list_port_forwards(mgr: State<'_, Arc<ClientManager>>) -> AppResult<Vec<ForwardDto>> {
-    Ok(mgr.list_forwards().await)
+pub async fn list_port_forwards(cid: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<Vec<ForwardDto>> {
+    Ok(mgr.list_forwards(&cid).await)
 }
 
 /// Forward a frontend (React/window) error to the backend log and, when armed,
@@ -1715,8 +1759,8 @@ pub fn export_diagnostics(
 // --------------------------------------------------------------------------
 
 /// Get the active client or a friendly "not connected" error.
-async fn require_client(mgr: &ClientManager) -> AppResult<kube::Client> {
-    mgr.client()
+async fn require_client(mgr: &ClientManager, cid: &Cid) -> AppResult<kube::Client> {
+    mgr.client(cid)
         .await
         .ok_or_else(|| AppError::NotFound("not connected to a cluster".into()))
 }

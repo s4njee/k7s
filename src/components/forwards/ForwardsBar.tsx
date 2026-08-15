@@ -22,7 +22,7 @@ export function ForwardsBar() {
 
   const stop = async (id: string) => {
     await getProvider().stopPortForward(id);
-    setPortForwards(await getProvider().listPortForwards());
+    setPortForwards(useStore.getState().activeCid ?? "", await getProvider().listPortForwards());
   };
 
   return (
@@ -34,6 +34,9 @@ export function ForwardsBar() {
           className={`${styles.item} ${f.error ? styles.itemError : ""}`}
           title={tooltip(f)}
         >
+          <span className={styles.clusterChip} title="cluster">
+            {f.cid}
+          </span>
           <span
             className={styles.local}
             title="copy address"
