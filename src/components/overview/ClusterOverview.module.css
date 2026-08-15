@@ -1,0 +1,366 @@
+/* Cluster overview dashboard (B79). */
+
+.overview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  max-width: 100%;
+  overflow-y: auto;
+}
+
+.section {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+/* Gauges */
+.gauges {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gaugeHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.gaugeLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gaugePct {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.gaugeBar {
+  height: 10px;
+  background: var(--bg-control);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.gaugeFill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.3s ease;
+}
+
+.gaugeFill.req {
+  background: var(--accent);
+  opacity: 0.6;
+}
+
+.gaugeFill.use {
+  background: var(--status-ok);
+  opacity: 0.8;
+}
+
+.gaugeFooter {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Node grid */
+.nodeGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.nodeTile {
+  padding: 12px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+  border-left: 3px solid;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.nodeTile:hover {
+  border-color: var(--border-hover);
+  box-shadow: 0 2px 8px var(--shadow-menu);
+}
+
+.nodeName {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nodeMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+/* Problems digest */
+.problemList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.problemItem {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-control);
+  border-radius: var(--radius-sm);
+  align-items: center;
+}
+
+.problemSeverity {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  width: 44px;
+  flex-shrink: 0;
+}
+
+.problemKind {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  min-width: 60px;
+}
+
+.problemObj {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.problemReason {
+  font-size: 10px;
+  color: var(--text-muted);
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty {
+  color: var(--text-muted);
+  font-style: italic;
+  text-align: center;
+  padding: 16px;
+}
+
+/* Sparkline */
+.sparkline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-control);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-control);
+}
+
+.sparklineCount {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--status-warn);
+}
+
+.sparklineLabel {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Workload counts */
+.workloadCounts {
+  display: flex;
+  gap: 24px;
+}
+
+.count {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+  min-width: 80px;
+}
+
+.countVal {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.countLabel {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Top consumers */
+.consumerList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.consumerItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+}
+
+.consumerName {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  min-width: 180px;
+}
+
+.consumerCpu,
+.consumerMem {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.consumerCpu::before {
+  content: "cpu: ";
+  color: var(--text-muted);
+}
+
+.consumerMem::before {
+  content: " mem: ";
+  color: var(--text-muted);
+}
+
+/* Empty state */
+.empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 24px;
+}
+
+/* Gauge utility */
+.gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gaugeHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.gaugeLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gaugeValue {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.gaugeBar {
+  height: 10px;
+  background: var(--bg-control);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.gaugeFill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.3s ease;
+}
+
+.gaugeFill.req {
+  background: var(--accent);
+  opacity: 0.6;
+}
+
+.gaugeFill.use {
+  background: var(--status-ok);
+  opacity: 0.8;
+}
+
+.gaugeFooter {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Tone colors */
+.toneErr {
+  color: var(--status-err);
+}
+.toneWarn {
+  color: var(--status-warn);
+}
+.toneOk {
+  color: var(--status-ok);
+}
+.toneMuted {
+  color: var(--text-muted);
+}

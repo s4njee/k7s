@@ -108,6 +108,7 @@ impl ResourceKind {
             ResourceKind::Namespaces => "namespaces",
             ResourceKind::Events => "events",
             ResourceKind::Helm => "helm",
+            ResourceKind::Overview => "overview",
         }
     }
 }
