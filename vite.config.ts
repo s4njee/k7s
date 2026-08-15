@@ -25,5 +25,7 @@ export default defineConfig({
     environment: "jsdom",
     // Only unit-test the frontend; Rust has its own `cargo test`.
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    // jest-dom matchers + browser-API stubs for the RTL component tests (B83).
+    setupFiles: ["src/test/setup.ts"],
   },
 });
