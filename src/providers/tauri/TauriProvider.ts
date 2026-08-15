@@ -15,6 +15,7 @@ import type {
   ClusterStatus,
   ContextInfo,
   DataProvider,
+  DrainPreview,
   DrainProgress,
   NodeSample,
   PodPoint,
@@ -345,6 +346,10 @@ export class TauriProvider implements DataProvider {
 
   drainNode(node: string): Promise<void> {
     return this.invokeCmd<void>("drain_node", { name: node });
+  }
+
+  drainPreview(node: string): Promise<DrainPreview> {
+    return this.invokeCmd<DrainPreview>("drain_preview", { name: node });
   }
 
   async setWindowTheme(theme: "dark" | "light"): Promise<void> {

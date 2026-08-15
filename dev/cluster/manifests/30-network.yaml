@@ -69,3 +69,26 @@ spec:
                 name: valkyrie-api
                 port:
                   number: 8080
+---
+# A NetworkPolicy that selects bifrost-gateway and lets it egress to
+# valkyrie-api. kind's default CNI (kindnet) doesn't enforce NetworkPolicies, so
+# this is inert at the data plane — it exists so the table and the pod panel's
+# "which NetworkPolicies select this pod" join have real objects to show.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bifrost-egress
+  namespace: prod
+spec:
+  podSelector:
+    matchLabels:
+      app: bifrost-gateway
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: valkyrie-api
+      ports:
+        - protocol: TCP
+          port: 8080

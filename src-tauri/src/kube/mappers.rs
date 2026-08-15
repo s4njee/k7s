@@ -11,16 +11,26 @@ use super::discovery::PrinterColumn;
 use super::dto::{Cell, CronMeta, InvolvedRef, JobMeta, NavTarget, PodMeta, PodResources, Row, Tone};
 use super::jsonpath;
 use super::metrics::{parse_cpu_millis, parse_mem_bytes};
+use k8s_openapi::api::admissionregistration::v1::{
+    MutatingWebhookConfiguration, ValidatingWebhookConfiguration,
+};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
+use k8s_openapi::api::autoscaling::v2::{
+    HorizontalPodAutoscaler, HorizontalPodAutoscalerStatus, MetricTarget, MetricValueStatus,
+};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Secret, Service,
-    ServiceAccount,
+    ConfigMap, LimitRange, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod,
+    ResourceQuota, Secret, Service, ServiceAccount,
 };
-use k8s_openapi::api::networking::v1::{Ingress, IngressClass};
+use k8s_openapi::api::networking::v1::{Ingress, IngressClass, NetworkPolicy};
+use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::api::rbac::v1::{ClusterRole, ClusterRoleBinding, Role, RoleBinding};
 use k8s_openapi::api::storage::v1::StorageClass;
+use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
+use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 use kube::ResourceExt;
+use std::collections::BTreeMap;
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -98,6 +108,162 @@ pub fn humanize_duration(mut secs: i64) -> String {
 /// Seconds between an RFC3339-ish k8s `Time` and now (clamped at 0).
 fn secs_since(t: &k8s_openapi::apimachinery::pkg::apis::meta::v1::Time) -> i64 {
     (chrono::Utc::now() - t.0).num_seconds().max(0)
+}
+
+/// Render an IntOrString ("25%" or "1") — PDB minAvailable/maxUnavailable.
+fn int_or_string(v: &IntOrString) -> String {
+    match v {
+        IntOrString::Int(i) => i.to_string(),
+        IntOrString::String(s) => s.clone(),
+    }
+}
+
+/// "app=valkyrie-api,version=v2" for a matchLabels map (kubernetes selector text).
+fn match_labels_text(labels: &BTreeMap<String, String>) -> String {
+    labels
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Target text for one HPA metric, kubectl-style ("80%", "500m").
+fn metric_target_text(target: &MetricTarget) -> String {
+    match target.type_.as_str() {
+        "Utilization" => {
+            target.average_utilization.map(|u| format!("{u}%")).unwrap_or_else(|| "—".into())
+        }
+        "AverageValue" => target.average_value.as_ref().map(|q| q.0.clone()).unwrap_or_else(|| "—".into()),
+        "Value" => target.value.as_ref().map(|q| q.0.clone()).unwrap_or_else(|| "—".into()),
+        _ => "—".into(),
+    }
+}
+
+/// Current-value text for an HPA metric, kubectl-style; "<unknown>" when the
+/// metrics stack hasn't reported (e.g. no metrics-server on the cluster).
+fn metric_value_text(v: &MetricValueStatus) -> String {
+    if let Some(u) = v.average_utilization {
+        return format!("{u}%");
+    }
+    if let Some(q) = v.average_value.as_ref() {
+        return q.0.clone();
+    }
+    if let Some(q) = v.value.as_ref() {
+        return q.0.clone();
+    }
+    "<unknown>".into()
+}
+
+/// "cpu: 55%/80%, memory: 128Mi/256Mi" — current/target per spec metric, the way
+/// `kubectl get hpa` renders the TARGETS column. Falls back to "<unknown>" for a
+/// metric with no current reading.
+fn hpa_targets(hpa: &HorizontalPodAutoscaler) -> String {
+    let Some(spec) = hpa.spec.as_ref() else { return "—".into() };
+    let Some(metrics) = spec.metrics.as_ref() else { return "—".into() };
+    if metrics.is_empty() {
+        return "—".into();
+    }
+    let current = hpa.status.as_ref().and_then(|s| s.current_metrics.as_ref());
+    metrics
+        .iter()
+        .map(|m| {
+            let name = hpa_metric_name(m);
+            let target = hpa_metric_target(m);
+            let current_txt = current
+                .and_then(|cm| cm.iter().find(|c| c.type_ == m.type_))
+                .map(hpa_metric_current)
+                .unwrap_or_else(|| "<unknown>".into());
+            if name.is_empty() {
+                format!("{current_txt}/{target}")
+            } else {
+                format!("{name}: {current_txt}/{target}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The metric's display name: the resource name for Resource/ContainerResource,
+/// the described object for Object, the metric name for Pods/External.
+fn hpa_metric_name(m: &k8s_openapi::api::autoscaling::v2::MetricSpec) -> String {
+    match m.type_.as_str() {
+        "Resource" => m.resource.as_ref().map(|r| r.name.clone()).unwrap_or_default(),
+        "ContainerResource" => {
+            m.container_resource.as_ref().map(|r| r.name.clone()).unwrap_or_default()
+        }
+        "Object" => m.object.as_ref().map(|o| o.described_object.name.clone()).unwrap_or_default(),
+        "Pods" => m.pods.as_ref().map(|p| p.metric.name.clone()).unwrap_or_default(),
+        "External" => m.external.as_ref().map(|e| e.metric.name.clone()).unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+/// Target text for a spec metric's target.
+fn hpa_metric_target(m: &k8s_openapi::api::autoscaling::v2::MetricSpec) -> String {
+    let target = match m.type_.as_str() {
+        "Resource" => m.resource.as_ref().map(|r| &r.target),
+        "ContainerResource" => m.container_resource.as_ref().map(|r| &r.target),
+        "Pods" => m.pods.as_ref().map(|p| &p.target),
+        "Object" => m.object.as_ref().map(|o| &o.target),
+        "External" => m.external.as_ref().map(|e| &e.target),
+        _ => None,
+    };
+    target.map(metric_target_text).unwrap_or_else(|| "—".into())
+}
+
+/// Current-value text for a status metric.
+fn hpa_metric_current(c: &k8s_openapi::api::autoscaling::v2::MetricStatus) -> String {
+    let current = match c.type_.as_str() {
+        "Resource" => c.resource.as_ref().map(|r| &r.current),
+        "ContainerResource" => c.container_resource.as_ref().map(|r| &r.current),
+        "Pods" => c.pods.as_ref().map(|p| &p.current),
+        "Object" => c.object.as_ref().map(|o| &o.current),
+        "External" => c.external.as_ref().map(|e| &e.current),
+        _ => None,
+    };
+    current.map(metric_value_text).unwrap_or_else(|| "<unknown>".into())
+}
+
+/// The HPA's REPLICAS-cell tone: amber when a condition says scaling is held
+/// back (ScalingLimited=True or AbleToScale=False), muted when no status yet.
+fn hpa_replicas_tone(status: Option<&HorizontalPodAutoscalerStatus>) -> Tone {
+    let Some(status) = status else { return Tone::Muted };
+    let cond = |t: &str, want: &str| {
+        status
+            .conditions
+            .as_ref()
+            .map(|cs| cs.iter().any(|c| c.type_ == t && c.status == want))
+            .unwrap_or(false)
+    };
+    if cond("ScalingLimited", "True") || cond("AbleToScale", "False") {
+        Tone::Warn
+    } else {
+        Tone::Secondary
+    }
+}
+
+/// "cpu: 180m/4, memory: 280Mi/8Gi" — used/hard for a ResourceQuota's hard map,
+/// partitioned into the request-tracked side (false) or the limit-tracked side
+/// (true), the way `kubectl get resourcequota -o wide` splits REQUEST and LIMIT.
+fn quota_side(
+    hard: Option<&BTreeMap<String, Quantity>>,
+    used: Option<&BTreeMap<String, Quantity>>,
+    limits: bool,
+) -> String {
+    let Some(hard) = hard else { return "—".into() };
+    let mut parts: Vec<String> = Vec::new();
+    for (k, v) in hard {
+        if k.starts_with("limits.") != limits {
+            continue;
+        }
+        let u = used.and_then(|u| u.get(k)).map(|q| q.0.as_str()).unwrap_or("0");
+        parts.push(format!("{k}: {u}/{v}", v = v.0));
+    }
+    if parts.is_empty() {
+        "—".into()
+    } else {
+        parts.join(", ")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -425,6 +591,70 @@ pub fn map_cronjob(c: &CronJob) -> Row {
 // Network
 // ---------------------------------------------------------------------------
 
+/// HorizontalPodAutoscalers: NAME, NAMESPACE, REFERENCE, TARGETS, MINPODS,
+/// MAXPODS, REPLICAS, AGE. (B80)
+pub fn map_hpa(hpa: &HorizontalPodAutoscaler) -> Row {
+    let spec = hpa.spec.as_ref();
+    let status = hpa.status.as_ref();
+    // kubectl prints the scaleTargetRef as "Deployment/valkyrie-api" (PascalCase).
+    let reference = spec
+        .map(|s| &s.scale_target_ref)
+        .map(|t| format!("{}/{}", t.kind, t.name))
+        .unwrap_or_else(|| "—".into());
+    let targets = hpa_targets(hpa);
+    let min = spec.and_then(|s| s.min_replicas).unwrap_or(1);
+    let max = spec.map(|s| s.max_replicas).unwrap_or(0);
+    // kubectl shows 0 when the controller hasn't reported a replica count.
+    let replicas = status.and_then(|s| s.current_replicas).unwrap_or(0);
+    let cells = vec![
+        name_cell(hpa),
+        ns_cell(hpa),
+        Cell::new(reference, Tone::Secondary),
+        Cell::new(targets, Tone::Secondary),
+        Cell::new(min.to_string(), Tone::Secondary),
+        Cell::new(max.to_string(), Tone::Secondary),
+        Cell::new(replicas.to_string(), hpa_replicas_tone(status)),
+        age_cell(hpa),
+    ];
+    simple_row(hpa, cells)
+}
+
+/// PodDisruptionBudgets: NAME, NAMESPACE, MIN AVAILABLE, MAX UNAVAILABLE,
+/// CURRENT HEALTHY, DISRUPTIONS ALLOWED, AGE. (B61)
+pub fn map_pdb(pdb: &PodDisruptionBudget) -> Row {
+    let spec = pdb.spec.as_ref();
+    let min_available = spec
+        .and_then(|s| s.min_available.as_ref())
+        .map(int_or_string)
+        .unwrap_or_else(|| "—".into());
+    let max_unavailable = spec
+        .and_then(|s| s.max_unavailable.as_ref())
+        .map(int_or_string)
+        .unwrap_or_else(|| "—".into());
+    let status = pdb.status.as_ref();
+    let current_healthy = status.map(|s| s.current_healthy).unwrap_or(0);
+    let desired_healthy = status.map(|s| s.desired_healthy).unwrap_or(0);
+    let disruptions = status.map(|s| s.disruptions_allowed).unwrap_or(0);
+    let cells = vec![
+        name_cell(pdb),
+        ns_cell(pdb),
+        Cell::new(min_available, Tone::Secondary),
+        Cell::new(max_unavailable, Tone::Secondary),
+        // Fewer healthy than the budget wants is the thing worth looking at.
+        Cell::new(
+            current_healthy.to_string(),
+            if current_healthy < desired_healthy { Tone::Warn } else { Tone::Secondary },
+        ),
+        // 0 allowed means no pod covered by this budget can be evicted right now.
+        Cell::new(disruptions.to_string(), if disruptions == 0 { Tone::Warn } else { Tone::Secondary }),
+        age_cell(pdb),
+    ];
+    let mut row = simple_row(pdb, cells);
+    // The selector is what "which PDBs select this pod" and the drain preview join on.
+    row.selector = spec.and_then(|s| s.selector.as_ref()).and_then(|sel| sel.match_labels.clone());
+    row
+}
+
 /// Services: NAME, NAMESPACE, TYPE, CLUSTER-IP, PORTS, AGE.
 pub fn map_service(svc: &Service) -> Row {
     let spec = svc.spec.as_ref();
@@ -521,6 +751,27 @@ pub fn map_ingressclass(ic: &IngressClass) -> Row {
     }
 }
 
+/// NetworkPolicies: NAME, NAMESPACE, POD-SELECTOR, AGE. (B80)
+pub fn map_networkpolicy(np: &NetworkPolicy) -> Row {
+    // An empty selector matches every pod in the namespace — kubectl prints
+    // "<none>" for it, but that reads as "no selection"; "—" keeps the app's
+    // none-language and the properties panel spells out "all pods".
+    let selector = np.spec.as_ref().map(|s| &s.pod_selector);
+    let text = selector
+        .and_then(|sel| sel.match_labels.as_ref())
+        .map(match_labels_text)
+        .unwrap_or_else(|| "—".into());
+    let cells = vec![
+        name_cell(np),
+        ns_cell(np),
+        Cell::new(text, Tone::Secondary),
+        age_cell(np),
+    ];
+    let mut row = simple_row(np, cells);
+    row.selector = selector.and_then(|sel| sel.match_labels.clone());
+    row
+}
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -551,6 +802,54 @@ pub fn map_secret(sec: &Secret) -> Row {
         age_cell(sec),
     ];
     simple_row(sec, cells)
+}
+
+/// ResourceQuotas: NAME, NAMESPACE, REQUEST, LIMIT, AGE. (B80)
+/// REQUEST/LIMIT show used/hard per resource like `kubectl get resourcequota
+/// -o wide` — the quota fill at a glance, before you open the panel.
+pub fn map_resourcequota(rq: &ResourceQuota) -> Row {
+    let hard = rq.spec.as_ref().and_then(|s| s.hard.as_ref());
+    let used = rq.status.as_ref().and_then(|s| s.used.as_ref());
+    simple_row(
+        rq,
+        vec![
+            name_cell(rq),
+            ns_cell(rq),
+            Cell::new(quota_side(hard, used, false), Tone::Secondary),
+            Cell::new(quota_side(hard, used, true), Tone::Secondary),
+            age_cell(rq),
+        ],
+    )
+}
+
+/// LimitRanges: NAME, NAMESPACE, TYPES, AGE. (B80)
+/// kubectl's default for a LimitRange is just NAME + CREATED AT; the types the
+/// range constrains (Container, Pod, PersistentVolumeClaim…) is the useful half.
+pub fn map_limitrange(lr: &LimitRange) -> Row {
+    let types = lr
+        .spec
+        .as_ref()
+        .map(|s| {
+            let mut seen: Vec<String> = Vec::new();
+            for l in &s.limits {
+                let t = l.type_.clone();
+                if !t.is_empty() && !seen.contains(&t) {
+                    seen.push(t);
+                }
+            }
+            seen.join(", ")
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "—".into());
+    simple_row(
+        lr,
+        vec![
+            name_cell(lr),
+            ns_cell(lr),
+            Cell::new(types, Tone::Secondary),
+            age_cell(lr),
+        ],
+    )
 }
 
 /// ServiceAccounts: NAME, NAMESPACE, SECRETS, AGE.
@@ -927,6 +1226,33 @@ pub fn map_namespace(ns: &Namespace) -> Row {
         name: ns.name_any(),
         namespace: None,
         cells,
+        ..Default::default()
+    }
+}
+
+/// MutatingWebhookConfigurations: NAME, WEBHOOKS, AGE. Cluster-scoped. (B80)
+pub fn map_mutatingwebhookconfiguration(w: &MutatingWebhookConfiguration) -> Row {
+    let count = w.webhooks.as_ref().map(|ws| ws.len()).unwrap_or(0);
+    webhook_config_row(w, count)
+}
+
+/// ValidatingWebhookConfigurations: NAME, WEBHOOKS, AGE. Cluster-scoped. (B80)
+pub fn map_validatingwebhookconfiguration(w: &ValidatingWebhookConfiguration) -> Row {
+    let count = w.webhooks.as_ref().map(|ws| ws.len()).unwrap_or(0);
+    webhook_config_row(w, count)
+}
+
+/// Shared row for the two admission-webhook kinds (cluster-scoped: no namespace).
+fn webhook_config_row<K: ResourceExt>(obj: &K, webhooks: usize) -> Row {
+    Row {
+        uid: uid_of(obj),
+        name: obj.name_any(),
+        namespace: None,
+        cells: vec![
+            name_cell(obj),
+            Cell::new(webhooks.to_string(), Tone::Secondary),
+            age_cell(obj),
+        ],
         ..Default::default()
     }
 }
@@ -1758,5 +2084,165 @@ mod tests {
         .unwrap();
         let row = map_job(&j);
         assert_eq!(row.job.map(|j| j.failed), Some(false));
+    }
+
+    // ---- B80 kind sweep ----
+
+    /// HPA rows fill the 8-column contract and mirror kubectl's TARGETS text.
+    #[test]
+    fn hpa_row_matches_column_contract() {
+        let h: HorizontalPodAutoscaler = serde_json::from_value(json!({
+            "apiVersion": "autoscaling/v2",
+            "kind": "HorizontalPodAutoscaler",
+            "metadata": { "name": "api", "namespace": "prod", "uid": "u1",
+                          "creationTimestamp": "2026-08-01T00:00:00Z" },
+            "spec": {
+                "scaleTargetRef": { "apiVersion": "apps/v1", "kind": "Deployment", "name": "api" },
+                "minReplicas": 1,
+                "maxReplicas": 5,
+                "metrics": [ { "type": "Resource", "resource":
+                    { "name": "cpu", "target": { "type": "Utilization", "averageUtilization": 80 } } } ]
+            },
+            "status": { "desiredReplicas": 2 }
+        })).unwrap();
+        let row = map_hpa(&h);
+        // NAME,NAMESPACE,REFERENCE,TARGETS,MINPODS,MAXPODS,REPLICAS,AGE
+        assert_eq!(row.cells.len(), 8);
+        assert_eq!(row.cells[2].text, "Deployment/api");
+        assert_eq!(row.cells[3].text, "cpu: <unknown>/80%");
+        assert_eq!(row.cells[4].text, "1");
+        assert_eq!(row.cells[5].text, "5");
+        assert_eq!(row.cells[6].text, "0");
+        assert_eq!(row.cells[6].tone, Tone::Secondary, "no limiting condition");
+    }
+
+    /// With a current metric reported, TARGETS shows it kubectl-style.
+    #[test]
+    fn hpa_shows_current_metrics() {
+        let h: HorizontalPodAutoscaler = serde_json::from_value(json!({
+            "spec": {
+                "scaleTargetRef": { "apiVersion": "apps/v1", "kind": "Deployment", "name": "api" },
+                "minReplicas": 1, "maxReplicas": 5,
+                "metrics": [ { "type": "Resource", "resource":
+                    { "name": "cpu", "target": { "type": "Utilization", "averageUtilization": 80 } } } ]
+            },
+            "status": {
+                "desiredReplicas": 2,
+                "currentMetrics": [ { "type": "Resource", "resource":
+                    { "name": "cpu", "current": { "averageUtilization": 55 } } } ]
+            }
+        })).unwrap();
+        let row = map_hpa(&h);
+        assert_eq!(row.cells[3].text, "cpu: 55%/80%");
+    }
+
+    /// ScalingLimited=True reads amber — the HPA is being held back.
+    #[test]
+    fn hpa_scaling_limited_tones_warn() {
+        let h: HorizontalPodAutoscaler = serde_json::from_value(json!({
+            "spec": {
+                "scaleTargetRef": { "apiVersion": "apps/v1", "kind": "Deployment", "name": "api" },
+                "minReplicas": 1, "maxReplicas": 5
+            },
+            "status": {
+                "currentReplicas": 5, "desiredReplicas": 5,
+                "conditions": [ { "type": "ScalingLimited", "status": "True",
+                    "reason": "TooManyReplicas", "message": "desired count exceeds max" } ]
+            }
+        })).unwrap();
+        let row = map_hpa(&h);
+        assert_eq!(row.cells[6].tone, Tone::Warn);
+    }
+
+    /// PDB rows fill B61's 7-column contract; 0 disruptions allowed reads amber.
+    #[test]
+    fn pdb_row_matches_column_contract() {
+        let p: PodDisruptionBudget = serde_json::from_value(json!({
+            "apiVersion": "policy/v1",
+            "kind": "PodDisruptionBudget",
+            "metadata": { "name": "db", "namespace": "prod", "uid": "u1",
+                          "creationTimestamp": "2026-08-01T00:00:00Z" },
+            "spec": { "minAvailable": 2, "selector": { "matchLabels": { "app": "db" } } },
+            "status": { "currentHealthy": 2, "desiredHealthy": 2, "disruptionsAllowed": 0 }
+        })).unwrap();
+        let row = map_pdb(&p);
+        // NAME,NAMESPACE,MIN AVAILABLE,MAX UNAVAILABLE,CURRENT HEALTHY,DISRUPTIONS ALLOWED,AGE
+        assert_eq!(row.cells.len(), 7);
+        assert_eq!(row.cells[2].text, "2");
+        assert_eq!(row.cells[3].text, "—", "maxUnavailable unset");
+        assert_eq!(row.cells[4].text, "2");
+        assert_eq!(row.cells[5].text, "0");
+        assert_eq!(row.cells[5].tone, Tone::Warn, "nothing can be evicted");
+        assert_eq!(row.selector.as_ref().and_then(|m| m.get("app")), Some(&"db".to_string()));
+    }
+
+    /// NetworkPolicy rows show the pod selector.
+    #[test]
+    fn networkpolicy_row_shows_selector() {
+        let np: NetworkPolicy = serde_json::from_value(json!({
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "NetworkPolicy",
+            "metadata": { "name": "egress", "namespace": "prod", "uid": "u1",
+                          "creationTimestamp": "2026-08-01T00:00:00Z" },
+            "spec": { "podSelector": { "matchLabels": { "app": "web" } }, "policyTypes": ["Egress"] }
+        })).unwrap();
+        let row = map_networkpolicy(&np);
+        assert_eq!(row.cells.len(), 4);
+        assert_eq!(row.cells[2].text, "app=web");
+        assert_eq!(row.selector.as_ref().and_then(|m| m.get("app")), Some(&"web".to_string()));
+    }
+
+    /// ResourceQuota REQUEST/LIMIT mirror `kubectl get -o wide` (used/hard).
+    #[test]
+    fn resourcequota_row_shows_used_over_hard() {
+        let rq: ResourceQuota = serde_json::from_value(json!({
+            "apiVersion": "v1",
+            "kind": "ResourceQuota",
+            "metadata": { "name": "q", "namespace": "prod", "uid": "u1",
+                          "creationTimestamp": "2026-08-01T00:00:00Z" },
+            "spec": { "hard": { "requests.cpu": "4", "limits.cpu": "8" } },
+            "status": { "used": { "requests.cpu": "180m", "limits.cpu": "2" } }
+        })).unwrap();
+        let row = map_resourcequota(&rq);
+        assert_eq!(row.cells.len(), 5);
+        assert_eq!(row.cells[2].text, "requests.cpu: 180m/4");
+        assert_eq!(row.cells[3].text, "limits.cpu: 2/8");
+    }
+
+    /// LimitRange rows show the distinct constrained types.
+    #[test]
+    fn limitrange_row_shows_types() {
+        let lr: LimitRange = serde_json::from_value(json!({
+            "apiVersion": "v1",
+            "kind": "LimitRange",
+            "metadata": { "name": "limits", "namespace": "prod", "uid": "u1",
+                          "creationTimestamp": "2026-08-01T00:00:00Z" },
+            "spec": { "limits": [
+                { "type": "Container", "default": { "cpu": "500m" } },
+                { "type": "Container" },
+                { "type": "PersistentVolumeClaim" }
+            ] }
+        })).unwrap();
+        let row = map_limitrange(&lr);
+        assert_eq!(row.cells.len(), 4);
+        assert_eq!(row.cells[2].text, "Container, PersistentVolumeClaim");
+    }
+
+    /// Webhook configs are cluster-scoped (no NAMESPACE cell) with a WEBHOOKS count.
+    #[test]
+    fn webhook_config_rows_are_cluster_scoped() {
+        let w: MutatingWebhookConfiguration = serde_json::from_value(json!({
+            "apiVersion": "admissionregistration.k8s.io/v1",
+            "kind": "MutatingWebhookConfiguration",
+            "metadata": { "name": "mutation", "uid": "u1", "creationTimestamp": "2026-08-01T00:00:00Z" },
+            "webhooks": [
+                { "name": "mutation.example.io", "sideEffects": "None",
+                  "clientConfig": { "url": "https://hook" }, "admissionReviewVersions": ["v1"] }
+            ]
+        })).unwrap();
+        let row = map_mutatingwebhookconfiguration(&w);
+        assert_eq!(row.cells.len(), 3);
+        assert_eq!(row.cells[1].text, "1");
+        assert!(row.namespace.is_none());
     }
 }

@@ -82,6 +82,22 @@ export function mockProperties(ref: ResourceRef): Properties | null {
       return roleBindingProperties(ref);
     case "clusterrolebindings":
       return clusterRoleBindingProperties(ref);
+    // B80 kind sweep.
+    case "horizontalpodautoscalers":
+      return hpaProperties(ref);
+    case "poddisruptionbudgets":
+      return pdbProperties(ref);
+    case "networkpolicies":
+      return networkPolicyProperties(ref);
+    case "resourcequotas":
+      return resourceQuotaProperties(ref);
+    case "limitranges":
+      return limitRangeProperties(ref);
+    case "mutatingwebhookconfigurations":
+    case "validatingwebhookconfigurations":
+      return webhookConfigProperties(ref);
+    case "namespaces":
+      return namespaceProperties(ref);
     default:
       return null;
   }
@@ -460,6 +476,24 @@ function podProperties(ref: ResourceRef): Properties {
         [[link(app, "services", app, ref.namespace, "primary"), c("ClusterIP"), c("10.96.14.22"), c("8080/TCP")]],
         "no services select this pod",
       ),
+      // B80: which PDBs cover this pod, which NetworkPolicies select it — the
+      // joins that answer "why won't this drain" and "why can't this connect".
+      table(
+        "PodDisruptionBudgets",
+        ["NAME", "MIN AVAILABLE", "MAX UNAVAILABLE", "DISRUPTIONS ALLOWED"],
+        stateful
+          ? [[link("yggdrasil-db", "poddisruptionbudgets", "yggdrasil-db", ref.namespace), c("2"), c("—"), c("0", "warn")]]
+          : [],
+        "no PodDisruptionBudget selects this pod",
+      ),
+      table(
+        "NetworkPolicies",
+        ["NAME", "POD-SELECTOR", "AGE"],
+        app === "bifrost-gateway"
+          ? [[link("bifrost-egress", "networkpolicies", "bifrost-egress", ref.namespace), c("app=bifrost-gateway"), age(daysAgo(31))]]
+          : [],
+        "no NetworkPolicy selects this pod",
+      ),
       table(
         "Other volumes",
         ["VOLUME", "KIND", "SOURCE", "MOUNTED AT"],
@@ -697,6 +731,193 @@ function nodeProperties(ref: ResourceRef): Properties {
         ["kubernetes.io/hostname", ref.name],
         ...(control ? ([["node-role.kubernetes.io/control-plane", ""]] as [string, string][]) : []),
       ]),
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// B80 kind sweep
+// ---------------------------------------------------------------------------
+
+/** Mock HPA panel: the scale target, metric target/current, and conditions. */
+function hpaProperties(ref: ResourceRef): Properties {
+  return {
+    sections: [
+      fields("Overview", [
+        {
+          label: "scale target",
+          value: link("Deployment/valkyrie-api", "deployments", "valkyrie-api", ref.namespace, "primary"),
+          nav: { kind: "deployments", namespace: ref.namespace, name: "valkyrie-api" },
+        },
+        f("min replicas", "1"),
+        f("max replicas", "5"),
+        f("current replicas", "0"),
+        f("desired replicas", "2"),
+        f("last scale time", daysAgo(1)),
+      ]),
+      table(
+        "Metrics",
+        ["TYPE", "NAME", "TARGET", "CURRENT"],
+        [[n("Resource"), c("cpu"), c("80%"), c("<unknown>")]],
+        "no metrics configured",
+      ),
+      table(
+        "Conditions",
+        ["TYPE", "STATUS", "REASON", "MESSAGE", "SINCE"],
+        [
+          [n("AbleToScale"), c("True", "ok"), c("ScaleDownStabilized"), c("recent recommendations were higher than current one"), age(daysAgo(1))],
+          [n("ScalingActive"), c("True", "ok"), c("ValidMetricFound"), c("the HPA was able to successfully calculate a replica count"), age(daysAgo(1))],
+        ],
+        "no conditions reported",
+      ),
+      chips("Labels", [["app", "valkyrie-api"]]),
+    ],
+  };
+}
+
+/** Mock PDB panel: the disruption math and the pods it covers. */
+function pdbProperties(ref: ResourceRef): Properties {
+  return {
+    sections: [
+      fields("Overview", [
+        f("min available", "2"),
+        f("max unavailable", "—"),
+        f("current healthy", "2"),
+        f("desired healthy", "2"),
+        f("disruptions allowed", "0", "warn"),
+        f("selector", "app=yggdrasil-db"),
+      ]),
+      table(
+        "Pods covered",
+        ["NAME", "PHASE"],
+        [
+          [link("yggdrasil-db-0", "pods", "yggdrasil-db-0", ref.namespace), c("Running", "ok")],
+          [link("yggdrasil-db-1", "pods", "yggdrasil-db-1", ref.namespace), c("Running", "ok")],
+        ],
+        "no pods match this budget's selector",
+      ),
+      chips("Labels", [["app", "yggdrasil-db"]]),
+    ],
+  };
+}
+
+/** Mock NetworkPolicy panel: selector, pods selected, and the rule summary. */
+function networkPolicyProperties(ref: ResourceRef): Properties {
+  return {
+    sections: [
+      fields("Overview", [
+        f("pod selector", "app=bifrost-gateway"),
+        f("policy types", "Egress"),
+        f("ingress rules", "0"),
+        f("egress rules", "1"),
+      ]),
+      table(
+        "Pods selected",
+        ["NAME", "PHASE"],
+        [[link("bifrost-gateway-7d9f6", "pods", "bifrost-gateway-7d9f6", ref.namespace), c("Running", "ok")]],
+        "no pods match this policy's selector",
+      ),
+      table("Ingress rules", ["FROM", "PORTS"], [], "no ingress rules (nothing may reach the selected pods)"),
+      table(
+        "Egress rules",
+        ["TO", "PORTS"],
+        [[c("pods app=valkyrie-api"), c("8080/TCP")]],
+        "no egress rules (selected pods may reach nothing)",
+      ),
+      chips("Labels", [["app", "bifrost-gateway"]]),
+    ],
+  };
+}
+
+/** Mock ResourceQuota panel: used/hard per resource. */
+function resourceQuotaProperties(_ref: ResourceRef): Properties {
+  return {
+    sections: [
+      fields("Overview", [f("hard resources", "5"), f("scopes", "—")]),
+      table(
+        "Usage",
+        ["RESOURCE", "HARD", "USED"],
+        [
+          [n("count/pods"), c("50"), c("13")],
+          [n("requests.cpu"), c("4"), c("180m")],
+          [n("requests.memory"), c("8Gi"), c("280Mi")],
+          [n("limits.cpu"), c("8"), c("0")],
+          [n("limits.memory"), c("16Gi"), c("0")],
+        ],
+        "no hard limits declared",
+      ),
+      chips("Labels", [["app.kubernetes.io/part-of", "freya"]]),
+    ],
+  };
+}
+
+/** Mock LimitRange panel: the per-type constraints. */
+function limitRangeProperties(_ref: ResourceRef): Properties {
+  return {
+    sections: [
+      table(
+        "Limits",
+        ["TYPE", "MIN", "MAX", "DEFAULT", "DEFAULT REQUEST"],
+        [[n("Container"), c("—"), c("cpu=4,memory=8Gi"), c("cpu=500m,memory=512Mi"), c("cpu=25m,memory=32Mi")]],
+        "no limits declared",
+      ),
+      chips("Labels", [["app.kubernetes.io/part-of", "freya"]]),
+    ],
+  };
+}
+
+/** Mock webhook-config panel, shared by the mutating and validating kinds. */
+function webhookConfigProperties(_ref: ResourceRef): Properties {
+  return {
+    sections: [
+      fields("Overview", [f("webhooks", "1")]),
+      table(
+        "Webhooks",
+        ["NAME", "SERVICE/URL", "FAILURE POLICY", "MATCH POLICY", "RULES", "OPERATIONS"],
+        [
+          [
+            n("fixture.k7s.dev"),
+            c("monitoring/k7s-fixture-webhook (not found)", "warn"),
+            c("Ignore"),
+            c("Equivalent"),
+            c("pods"),
+            c("CREATE,UPDATE"),
+          ],
+        ],
+        "no webhooks declared",
+      ),
+      chips("Labels", [["app.kubernetes.io/part-of", "k7s-fixture"]]),
+    ],
+  };
+}
+
+/** Mock Namespace panel: the quota fill (B80). */
+function namespaceProperties(ref: ResourceRef): Properties {
+  // A namespace's ref is cluster-scoped, so its name IS the namespace name —
+  // the quota lives in it.
+  const ns = ref.name;
+  return {
+    sections: [
+      fields("Overview", [f("status", "Active")]),
+      table(
+        "Resource quotas",
+        ["QUOTA", "RESOURCE", "HARD", "USED"],
+        [
+          [link("prod-quota", "resourcequotas", "prod-quota", ns), n("count/pods"), c("50"), c("13")],
+          [link("prod-quota", "resourcequotas", "prod-quota", ns), n("requests.cpu"), c("4"), c("180m")],
+          [link("prod-quota", "resourcequotas", "prod-quota", ns), n("requests.memory"), c("8Gi"), c("280Mi")],
+          [link("prod-quota", "resourcequotas", "prod-quota", ns), n("limits.cpu"), c("8"), c("0")],
+          [link("prod-quota", "resourcequotas", "prod-quota", ns), n("limits.memory"), c("16Gi"), c("0")],
+        ],
+        "no resource quotas in this namespace",
+      ),
+      table(
+        "Limit ranges",
+        ["NAME", "TYPES", "AGE"],
+        [[link("prod-limits", "limitranges", "prod-limits", ns), c("Container"), age(daysAgo(31))]],
+        "no limit ranges in this namespace",
+      ),
+      chips("Labels", [["kubernetes.io/metadata.name", ref.name]]),
     ],
   };
 }

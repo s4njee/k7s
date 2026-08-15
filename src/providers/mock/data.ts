@@ -155,6 +155,34 @@ export const MOCK_RESOURCES: Partial<Record<ResourceKind, RawRow[]>> = {
     R("kube-system", "", ["Active", "2", "31d"], { ok: true }),
     R("default", "", ["Active", "0", "31d"], { ok: true }),
   ],
+  // B80 kind sweep — mirrors the fixture cluster (no metrics-server, so the HPA
+  // has no current reading and the PDB can't be disrupted).
+  horizontalpodautoscalers: [
+    R("valkyrie-api", "prod", ["Deployment/valkyrie-api", "cpu: <unknown>/80%", "1", "5", "0", "4d2h"]),
+  ],
+  poddisruptionbudgets: [
+    // disruptions allowed 0: the yggdrasil-db story the drain preview also shows.
+    R("yggdrasil-db", "prod", ["2", "—", "2", "0", "31d"], { warn: true }),
+  ],
+  networkpolicies: [
+    R("bifrost-egress", "prod", ["app=bifrost-gateway", "31d"]),
+  ],
+  resourcequotas: [
+    R("prod-quota", "prod", [
+      "count/pods: 13/50, requests.cpu: 180m/4, requests.memory: 280Mi/8Gi",
+      "limits.cpu: 0/8, limits.memory: 0/16Gi",
+      "31d",
+    ]),
+  ],
+  limitranges: [
+    R("prod-limits", "prod", ["Container", "31d"]),
+  ],
+  mutatingwebhookconfigurations: [
+    R("k7s-fixture-mutating", "", ["1", "31d"]),
+  ],
+  validatingwebhookconfigurations: [
+    R("k7s-fixture-validating", "", ["1", "31d"]),
+  ],
 };
 
 /** Status→tone, mirroring the backend's `status_tone` exactly (B32: the problems

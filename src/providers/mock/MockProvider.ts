@@ -11,6 +11,7 @@ import type {
   ContextInfo,
   DataProvider,
   DrainFailure,
+  DrainPreview,
   DrainProgress,
   NodeSample,
   NodeStatsError,
@@ -336,6 +337,30 @@ export class MockProvider implements DataProvider {
       if (!done) setTimeout(tick, 400);
     };
     setTimeout(tick, 300);
+  }
+
+  /**
+   * The preview shown before confirming a drain (B61/B80): yggdrasil-db's PDB
+   * can't be disrupted on the single-node fixture, matching the block the mock
+   * drain itself fakes above.
+   */
+  async drainPreview(node: string): Promise<DrainPreview> {
+    return {
+      node,
+      podCount: 6,
+      pdbs: [
+        {
+          name: "yggdrasil-db",
+          namespace: "prod",
+          minAvailable: "2",
+          maxUnavailable: "—",
+          currentHealthy: 2,
+          desiredHealthy: 2,
+          disruptionsAllowed: 0,
+          pods: ["prod/yggdrasil-db-0", "prod/yggdrasil-db-1"],
+        },
+      ],
+    };
   }
 
   // Demo mode doesn't persist anything.

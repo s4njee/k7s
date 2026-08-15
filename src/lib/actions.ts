@@ -206,6 +206,14 @@ export function plural(kind: KindId, n: number): string {
     configmaps: "configmap",
     secrets: "secret",
     ingresses: "ingress",
+    // B80 kind sweep (delete works on all of these via the generic path).
+    horizontalpodautoscalers: "horizontalpodautoscaler",
+    poddisruptionbudgets: "poddisruptionbudget",
+    networkpolicies: "networkpolicy",
+    resourcequotas: "resourcequota",
+    limitranges: "limitrange",
+    mutatingwebhookconfigurations: "mutatingwebhookconfiguration",
+    validatingwebhookconfigurations: "validatingwebhookconfiguration",
   };
   // Custom kinds are "group/plural" ids; the plural half is the readable part.
   const base = singular[kind] ?? kind.split("/").pop() ?? String(kind);

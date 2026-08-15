@@ -19,9 +19,13 @@ use super::events;
 use super::Cid;
 use crate::error::{AppError, AppResult};
 use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::policy::v1::PodDisruptionBudget;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
+use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 use kube::api::{Api, DeleteParams, EvictParams, ListParams, Patch, PatchParams};
 use kube::{Client, ResourceExt};
 use serde::Serialize;
+use std::collections::BTreeMap;
 use tauri::{AppHandle, Emitter};
 
 /// A pod that could not be evicted, and why.
@@ -45,6 +49,116 @@ pub struct DrainProgress {
     pub failures: Vec<DrainFailure>,
     /// False while still working; true once every pod has been attempted.
     pub done: bool,
+}
+
+/// One PodDisruptionBudget's contribution to a drain preview (B61/B80): the
+/// current disruption math, plus which of the node's pods it constrains.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PdbPreview {
+    pub name: String,
+    pub namespace: String,
+    pub min_available: String,
+    pub max_unavailable: String,
+    pub current_healthy: i32,
+    pub desired_healthy: i32,
+    pub disruptions_allowed: i32,
+    /// The node's evictable pods this PDB covers ("prod/yggdrasil-db-0").
+    pub pods: Vec<String>,
+}
+
+/// What draining a node would touch, before any eviction — shown in the drain
+/// confirm dialog so the user sees whether it will stall on a PDB *before*
+/// committing (B61). Best-effort: an RBAC denial on pods or PDBs degrades to an
+/// empty preview rather than an error, so the dialog stays usable everywhere.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DrainPreview {
+    pub node: String,
+    /// Evictable pods on the node (DaemonSet/mirror/finished pods excluded).
+    pub pod_count: usize,
+    /// The PDBs those pods are subject to, with their current disruption math.
+    pub pdbs: Vec<PdbPreview>,
+}
+
+/// Render an IntOrString ("25%" or "1").
+fn int_or_string(v: &IntOrString) -> String {
+    match v {
+        IntOrString::Int(i) => i.to_string(),
+        IntOrString::String(s) => s.clone(),
+    }
+}
+
+/// True when a PDB's selector matches the pod's labels (matchLabels only; the
+/// eviction API the drain uses applies the same selector server-side).
+fn selector_matches(selector: &LabelSelector, pod: &Pod) -> bool {
+    match selector.match_labels.as_ref() {
+        // An empty selector covers every pod in the namespace.
+        Some(labels) if labels.is_empty() => true,
+        Some(labels) => pod
+            .metadata
+            .labels
+            .as_ref()
+            .map(|pl| labels.iter().all(|(k, v)| pl.get(k).map(|lv| lv == v).unwrap_or(false)))
+            .unwrap_or(false),
+        // A null selector matches nothing.
+        None => false,
+    }
+}
+
+/// Preview a drain: the node's evictable pods and the PDBs whose budget would
+/// constrain their eviction. Read-only; cordons nothing and evicts nothing.
+pub async fn preview(client: Client, node: &str) -> AppResult<DrainPreview> {
+    let pods_api: Api<Pod> = Api::all(client.clone());
+    let lp = ListParams::default().fields(&format!("spec.nodeName={node}"));
+    let Ok(list) = pods_api.list(&lp).await else {
+        return Ok(DrainPreview { node: node.into(), pod_count: 0, pdbs: Vec::new() });
+    };
+
+    // Group evictable pods by namespace so each namespace's PDBs are listed once.
+    let mut by_ns: BTreeMap<String, Vec<Pod>> = BTreeMap::new();
+    for pod in list.items.into_iter().filter(is_evictable) {
+        by_ns.entry(pod.namespace().unwrap_or_default()).or_default().push(pod);
+    }
+    let pod_count: usize = by_ns.values().map(|v| v.len()).sum();
+
+    let mut pdbs: Vec<PdbPreview> = Vec::new();
+    let pdb_api: Api<PodDisruptionBudget> = Api::all(client.clone());
+    if let Ok(pdb_list) = pdb_api.list(&ListParams::default()).await {
+        for pdb in pdb_list.items {
+            let spec = match pdb.spec.as_ref() {
+                Some(s) => s,
+                None => continue,
+            };
+            let Some(selector) = spec.selector.as_ref() else { continue };
+            let ns = pdb.namespace().unwrap_or_default();
+            let covered: Vec<String> = by_ns
+                .get(&ns)
+                .map(|pods| {
+                    pods.iter()
+                        .filter(|p| selector_matches(selector, p))
+                        .map(|p| format!("{ns}/{}", p.name_any()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if covered.is_empty() {
+                continue;
+            }
+            let status = pdb.status.as_ref();
+            pdbs.push(PdbPreview {
+                name: pdb.name_any(),
+                namespace: ns,
+                min_available: spec.min_available.as_ref().map(int_or_string).unwrap_or_else(|| "—".into()),
+                max_unavailable: spec.max_unavailable.as_ref().map(int_or_string).unwrap_or_else(|| "—".into()),
+                current_healthy: status.map(|s| s.current_healthy).unwrap_or(0),
+                desired_healthy: status.map(|s| s.desired_healthy).unwrap_or(0),
+                disruptions_allowed: status.map(|s| s.disruptions_allowed).unwrap_or(0),
+                pods: covered,
+            });
+        }
+    }
+
+    Ok(DrainPreview { node: node.into(), pod_count, pdbs })
 }
 
 /// Cordon a node so nothing new schedules onto it.
@@ -251,6 +365,30 @@ mod tests {
             "status": { "phase": "Running" },
         }));
         assert!(is_evictable(&p));
+    }
+
+    /// A PDB selector matches a pod when every matchLabel is a pod label.
+    #[test]
+    fn selector_matches_pod_labels() {
+        let pod = pod_json(json!({
+            "metadata": { "name": "db-0", "namespace": "prod", "labels": { "app": "db" } },
+        }));
+        let sel: LabelSelector = serde_json::from_value(json!({ "matchLabels": { "app": "db" } })).unwrap();
+        assert!(selector_matches(&sel, &pod));
+        let other: LabelSelector = serde_json::from_value(json!({ "matchLabels": { "app": "web" } })).unwrap();
+        assert!(!selector_matches(&other, &pod));
+    }
+
+    /// An empty selector covers every pod in the namespace; a null selector covers none.
+    #[test]
+    fn selector_empty_matches_all_null_matches_none() {
+        let pod = pod_json(json!({
+            "metadata": { "name": "db-0", "namespace": "prod", "labels": { "app": "db" } },
+        }));
+        let empty: LabelSelector = serde_json::from_value(json!({ "matchLabels": {} })).unwrap();
+        assert!(selector_matches(&empty, &pod));
+        let null: LabelSelector = serde_json::from_value(json!({})).unwrap();
+        assert!(!selector_matches(&null, &pod));
     }
 
     /// 429 means a PDB held the eviction back; anything else is a real error.

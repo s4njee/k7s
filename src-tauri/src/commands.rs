@@ -395,6 +395,14 @@ async fn resource_for(kind: &str, cid: &Cid, mgr: &ClientManager) -> AppResult<(
         "storageclasses" => ("storage.k8s.io", "v1", "StorageClass", false),
         "nodes" => ("", "v1", "Node", false),
         "namespaces" => ("", "v1", "Namespace", false),
+        // B80 kind sweep.
+        "horizontalpodautoscalers" => ("autoscaling", "v2", "HorizontalPodAutoscaler", true),
+        "poddisruptionbudgets" => ("policy", "v1", "PodDisruptionBudget", true),
+        "networkpolicies" => ("networking.k8s.io", "v1", "NetworkPolicy", true),
+        "resourcequotas" => ("", "v1", "ResourceQuota", true),
+        "limitranges" => ("", "v1", "LimitRange", true),
+        "mutatingwebhookconfigurations" => ("admissionregistration.k8s.io", "v1", "MutatingWebhookConfiguration", false),
+        "validatingwebhookconfigurations" => ("admissionregistration.k8s.io", "v1", "ValidatingWebhookConfiguration", false),
         other => return Err(AppError::Other(format!("unknown kind: {other}"))),
     };
     let gvk = GroupVersionKind::gvk(group, version, k);
@@ -1060,6 +1068,19 @@ pub async fn drain_node(name: String, cid: String, mgr: State<'_, Arc<ClientMana
     });
     manager.push_task(cid, task).await;
     Ok(())
+}
+
+/// Preview what draining a node would touch (B61/B80): its evictable pods and
+/// the PDBs whose disruption math constrains them — shown *before* the user
+/// confirms, so a drain that would stall on a PDB is visible in advance.
+#[tauri::command]
+pub async fn drain_preview(
+    name: String,
+    cid: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<drain::DrainPreview> {
+    let client = require_client(&mgr, &cid).await?;
+    drain::preview(client, &name).await
 }
 
 /// Backfill a node's charts from Prometheus (B38), or an empty list when the

@@ -15,17 +15,26 @@ use super::dto::{Cell, NavTarget, Tone};
 use super::helm;
 use super::tls;
 use crate::error::{AppError, AppResult};
+use k8s_openapi::api::admissionregistration::v1::{
+    MutatingWebhook, MutatingWebhookConfiguration, ServiceReference, ValidatingWebhook,
+    ValidatingWebhookConfiguration,
+};
 use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet, StatefulSet};
+use k8s_openapi::api::autoscaling::v2::{
+    HorizontalPodAutoscaler, MetricSpec, MetricStatus,
+};
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Event, Node, PersistentVolume, PersistentVolumeClaim, Pod, PodSpec, Secret, Service,
-    ServiceAccount,
+    ConfigMap, Event, LimitRange, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod,
+    PodSpec, ResourceQuota, Secret, Service, ServiceAccount,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
-use k8s_openapi::api::networking::v1::{Ingress, IngressClass};
+use k8s_openapi::api::networking::v1::{Ingress, IngressClass, NetworkPolicy};
+use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::api::rbac::v1::{
     ClusterRole, ClusterRoleBinding, PolicyRule, Role, RoleBinding, Subject,
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::api::{Api, ListParams};
 use kube::{Client, ResourceExt};
 use serde::{Deserialize, Serialize};
@@ -214,6 +223,14 @@ pub fn builtin_nav_id(kind: &str) -> Option<&'static str> {
         "ClusterRole" => "clusterroles",
         "RoleBinding" => "rolebindings",
         "ClusterRoleBinding" => "clusterrolebindings",
+        // B80 kind sweep — each also lands as a nav destination for events.
+        "HorizontalPodAutoscaler" => "horizontalpodautoscalers",
+        "PodDisruptionBudget" => "poddisruptionbudgets",
+        "NetworkPolicy" => "networkpolicies",
+        "ResourceQuota" => "resourcequotas",
+        "LimitRange" => "limitranges",
+        "MutatingWebhookConfiguration" => "mutatingwebhookconfigurations",
+        "ValidatingWebhookConfiguration" => "validatingwebhookconfigurations",
         _ => return None,
     })
 }
@@ -293,6 +310,15 @@ fn qty(q: Option<&Quantity>) -> String {
     q.map(|q| q.0.clone()).unwrap_or_else(|| DASH.into())
 }
 
+/// A LimitRange constraint map ("cpu=500m,memory=512Mi"), or a dash.
+fn qty_map_text(m: Option<&BTreeMap<String, Quantity>>) -> String {
+    let Some(m) = m else { return DASH.into() };
+    if m.is_empty() {
+        return DASH.into();
+    }
+    m.iter().map(|(k, v)| format!("{k}={v}", v = v.0)).collect::<Vec<_>>().join(",")
+}
+
 /// "n/total" ready-style tone: green when all ready, amber when partial, red at zero.
 fn ready_tone(ready: i32, desired: i32) -> Tone {
     if desired == 0 {
@@ -319,6 +345,8 @@ fn condition_tone(type_: &str, status: &str) -> Tone {
             | "PIDPressure"
             | "NetworkUnavailable"
             | "ReplicaFailure"
+            // An HPA that hit its ceiling isn't a happy state (B80).
+            | "ScalingLimited"
     );
     match (status, good_when_true) {
         ("True", true) | ("False", false) => Tone::Good,
@@ -394,6 +422,17 @@ pub async fn gather(
         "serviceaccounts" => gather_serviceaccount(client, namespace, name).await,
         "rolebindings" => gather_rolebinding(client, namespace, name).await,
         "clusterrolebindings" => gather_clusterrolebinding(client, name).await,
+        // B80 kind sweep: the namespaced quota/limits/webhook kinds and the
+        // cluster-scoped admission configurations.
+        "horizontalpodautoscalers" => gather_hpa(client, namespace, name).await,
+        "poddisruptionbudgets" => gather_pdb(client, namespace, name).await,
+        "networkpolicies" => gather_networkpolicy(client, namespace, name).await,
+        "resourcequotas" => gather_resourcequota(client, namespace, name).await,
+        "limitranges" => gather_limitrange(client, namespace, name).await,
+        "mutatingwebhookconfigurations" => gather_mutatingwebhookconfiguration(client, name).await,
+        "validatingwebhookconfigurations" => gather_validatingwebhookconfiguration(client, name).await,
+        // Namespaces gained a panel with the quota fill (B80).
+        "namespaces" => gather_namespace(client, name).await,
         other => Err(AppError::Other(format!("no properties for kind {other}"))),
     }
 }
@@ -910,6 +949,24 @@ async fn gather_pod(client: Client, namespace: &str, name: &str) -> AppResult<Pr
         Some("no services select this pod"),
         &["NAME", "TYPE", "CLUSTER-IP", "PORTS"],
         services,
+    );
+
+    // ---- PDBs covering this pod (B80/B61) ----
+    let pdbs = gather_pod_pdbs(&client, namespace, pod.metadata.labels.as_ref()).await;
+    props.push_table(
+        "PodDisruptionBudgets",
+        Some("no PodDisruptionBudget selects this pod"),
+        &["NAME", "MIN AVAILABLE", "MAX UNAVAILABLE", "DISRUPTIONS ALLOWED"],
+        pdbs,
+    );
+
+    // ---- NetworkPolicies selecting this pod (B80) ----
+    let nps = gather_pod_networkpolicies(&client, namespace, pod.metadata.labels.as_ref()).await;
+    props.push_table(
+        "NetworkPolicies",
+        Some("no NetworkPolicy selects this pod"),
+        &["NAME", "POD-SELECTOR", "AGE"],
+        nps,
     );
 
     // Config/secret/projected volumes: interesting, but not worth a section of
@@ -2472,6 +2529,747 @@ async fn gather_node(client: Client, name: &str) -> AppResult<Properties> {
     Ok(props)
 }
 
+// ---------------------------------------------------------------------------
+// B80 kind sweep: HPA, PDB, NetworkPolicy, ResourceQuota/LimitRange, webhooks
+// ---------------------------------------------------------------------------
+
+/// HorizontalPodAutoscalers: the thing it scales (a link), the metric targets,
+/// and the conditions that say whether it's being held back (ScalingLimited).
+async fn gather_hpa(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
+    let api: Api<HorizontalPodAutoscaler> = Api::namespaced(client.clone(), namespace);
+    let hpa = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let spec = hpa.spec.clone().unwrap_or_default();
+    let status = hpa.status.clone();
+    let mut props = Properties::default();
+
+    let target = spec.scale_target_ref.clone();
+    let target_nav = match target.kind.as_str() {
+        "Deployment" => Some(NavTarget::namespaced("deployments", namespace, target.name.clone())),
+        "StatefulSet" => Some(NavTarget::namespaced("statefulsets", namespace, target.name.clone())),
+        _ => None,
+    };
+    props.fields(
+        "Overview",
+        vec![
+            Field {
+                label: "scale target".into(),
+                value: Cell::link(format!("{}/{}", target.kind, target.name), Tone::Primary, target_nav.clone()),
+                nav: target_nav,
+            },
+            field("min replicas", spec.min_replicas.unwrap_or(1).to_string()),
+            field("max replicas", spec.max_replicas.to_string()),
+            field(
+                "current replicas",
+                status.as_ref().and_then(|s| s.current_replicas).map(|r| r.to_string()).unwrap_or_else(|| "0".into()),
+            ),
+            field(
+                "desired replicas",
+                status.as_ref().map(|s| s.desired_replicas.to_string()).unwrap_or_else(|| DASH.into()),
+            ),
+            field(
+                "last scale time",
+                status
+                    .as_ref()
+                    .and_then(|s| s.last_scale_time.as_ref())
+                    .map(|t| t.0.to_rfc3339())
+                    .unwrap_or_else(|| DASH.into()),
+            ),
+        ],
+    );
+
+    if let Some(metrics) = spec.metrics.as_ref() {
+        props.push_table(
+            "Metrics",
+            Some("no metrics configured"),
+            &["TYPE", "NAME", "TARGET", "CURRENT"],
+            hpa_metric_rows(
+                metrics,
+                status.as_ref().and_then(|s| s.current_metrics.as_ref()).map(|v| v.as_slice()),
+            ),
+        );
+    }
+
+    if let Some(conds) = status.as_ref().and_then(|s| s.conditions.as_ref()) {
+        conditions_section(
+            &mut props,
+            conds
+                .iter()
+                .map(|c0| Condition {
+                    type_: c0.type_.clone(),
+                    status: c0.status.clone(),
+                    reason: c0.reason.clone().unwrap_or_default(),
+                    message: c0.message.clone().unwrap_or_default(),
+                    since: c0.last_transition_time.as_ref().map(|t| t.0.to_rfc3339()),
+                })
+                .collect(),
+        );
+    }
+
+    meta_sections(&mut props, &hpa);
+    Ok(props)
+}
+
+/// One row per spec metric: TYPE, NAME, TARGET, CURRENT.
+fn hpa_metric_rows(spec_metrics: &[MetricSpec], status_metrics: Option<&[MetricStatus]>) -> Vec<Vec<Cell>> {
+    spec_metrics
+        .iter()
+        .map(|m| {
+            let (name, target) = hpa_metric_spec(m);
+            let current = status_metrics
+                .and_then(|cm| cm.iter().find(|c| c.type_ == m.type_))
+                .map(hpa_metric_current)
+                .unwrap_or_else(|| "<unknown>".into());
+            vec![name_cell(m.type_.clone()), c(name), c(target), Cell::new(current, Tone::Secondary)]
+        })
+        .collect()
+}
+
+/// (metric name, target text) for a spec metric.
+fn hpa_metric_spec(m: &MetricSpec) -> (String, String) {
+    let spec = match m.type_.as_str() {
+        "Resource" => m.resource.as_ref().map(|r| (r.name.clone(), &r.target)),
+        "ContainerResource" => m.container_resource.as_ref().map(|r| (r.name.clone(), &r.target)),
+        "Pods" => m.pods.as_ref().map(|p| (p.metric.name.clone(), &p.target)),
+        "Object" => m.object.as_ref().map(|o| (o.described_object.name.clone(), &o.target)),
+        "External" => m.external.as_ref().map(|e| (e.metric.name.clone(), &e.target)),
+        _ => None,
+    };
+    match spec {
+        Some((name, target)) => (name, metric_target_text(target)),
+        None => (String::new(), DASH.into()),
+    }
+}
+
+/// Target text for an HPA MetricTarget ("80%", "500m").
+fn metric_target_text(t: &k8s_openapi::api::autoscaling::v2::MetricTarget) -> String {
+    match t.type_.as_str() {
+        "Utilization" => t.average_utilization.map(|u| format!("{u}%")).unwrap_or_else(|| DASH.into()),
+        "AverageValue" => t.average_value.as_ref().map(|q| q.0.clone()).unwrap_or_else(|| DASH.into()),
+        "Value" => t.value.as_ref().map(|q| q.0.clone()).unwrap_or_else(|| DASH.into()),
+        _ => DASH.into(),
+    }
+}
+
+/// Current-value text for a status metric; "<unknown>" when the metrics stack
+/// hasn't reported (e.g. no metrics-server on the cluster).
+fn hpa_metric_current(c: &MetricStatus) -> String {
+    let current = match c.type_.as_str() {
+        "Resource" => c.resource.as_ref().map(|r| &r.current),
+        "ContainerResource" => c.container_resource.as_ref().map(|r| &r.current),
+        "Pods" => c.pods.as_ref().map(|p| &p.current),
+        "Object" => c.object.as_ref().map(|o| &o.current),
+        "External" => c.external.as_ref().map(|e| &e.current),
+        _ => None,
+    };
+    let Some(current) = current else { return "<unknown>".into() };
+    if let Some(u) = current.average_utilization {
+        return format!("{u}%");
+    }
+    if let Some(q) = current.average_value.as_ref() {
+        return q.0.clone();
+    }
+    if let Some(q) = current.value.as_ref() {
+        return q.0.clone();
+    }
+    "<unknown>".into()
+}
+
+/// PodDisruptionBudgets: the availability math and the pods it protects.
+async fn gather_pdb(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
+    let api: Api<PodDisruptionBudget> = Api::namespaced(client.clone(), namespace);
+    let pdb = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let spec = pdb.spec.clone().unwrap_or_default();
+    let status = pdb.status.clone();
+    let selector = spec.selector.as_ref();
+    let mut props = Properties::default();
+
+    // A null selector matches no pods; an empty one matches all of them — the
+    // difference is worth saying in the Overview.
+    let selector_display = match selector {
+        None => "none".to_string(),
+        Some(sel) => match sel.match_labels.as_ref() {
+            Some(m) if !m.is_empty() => selector_text(Some(m)),
+            _ => "all pods in namespace".to_string(),
+        },
+    };
+    props.fields(
+        "Overview",
+        vec![
+            field("min available", spec.min_available.as_ref().map(int_or_string).unwrap_or_else(|| DASH.into())),
+            field("max unavailable", spec.max_unavailable.as_ref().map(int_or_string).unwrap_or_else(|| DASH.into())),
+            field(
+                "current healthy",
+                status.as_ref().map(|s| s.current_healthy.to_string()).unwrap_or_else(|| "0".into()),
+            ),
+            field(
+                "desired healthy",
+                status.as_ref().map(|s| s.desired_healthy.to_string()).unwrap_or_else(|| "0".into()),
+            ),
+            field(
+                "disruptions allowed",
+                status.as_ref().map(|s| s.disruptions_allowed.to_string()).unwrap_or_else(|| "0".into()),
+            ),
+            field("selector", selector_display),
+        ],
+    );
+
+    if let Some(sel) = selector {
+        let pods = gather_selector_pods(&client, namespace, sel).await;
+        props.push_table(
+            "Pods covered",
+            Some("no pods match this budget's selector"),
+            &["NAME", "PHASE"],
+            pods,
+        );
+    }
+
+    meta_sections(&mut props, &pdb);
+    Ok(props)
+}
+
+/// NetworkPolicies: who it applies to, the pods it selects, and the rule summary
+/// that answers "why can't this connect".
+async fn gather_networkpolicy(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
+    let api: Api<NetworkPolicy> = Api::namespaced(client.clone(), namespace);
+    let np = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let spec = np.spec.clone().unwrap_or_default();
+    let selector = &spec.pod_selector;
+    let mut props = Properties::default();
+
+    props.fields(
+        "Overview",
+        vec![
+            Field {
+                label: "pod selector".into(),
+                // Empty = every pod in the namespace — the interesting reading.
+                value: {
+                    let text = selector_text(selector.match_labels.as_ref());
+                    c(if text == DASH { "all pods in namespace".to_string() } else { text })
+                },
+                nav: None,
+            },
+            field("policy types", spec.policy_types.as_ref().map(|t| t.join(", ")).unwrap_or_else(|| "Ingress".into())),
+            field("ingress rules", spec.ingress.as_ref().map(|i| i.len().to_string()).unwrap_or_else(|| "0".into())),
+            field("egress rules", spec.egress.as_ref().map(|e| e.len().to_string()).unwrap_or_else(|| "0".into())),
+        ],
+    );
+
+    let pods = gather_selector_pods(&client, namespace, selector).await;
+    props.push_table(
+        "Pods selected",
+        Some("no pods match this policy's selector"),
+        &["NAME", "PHASE"],
+        pods,
+    );
+
+    // ---- rules ----
+    let mut ingress_rows: Vec<Vec<Cell>> = Vec::new();
+    for rule in spec.ingress.iter().flatten() {
+        ingress_rows.push(vec![c(rule_from_text(rule)), c(rule_ports_text(rule.ports.as_ref()))]);
+    }
+    props.push_table(
+        "Ingress rules",
+        Some("no ingress rules (nothing may reach the selected pods)"),
+        &["FROM", "PORTS"],
+        ingress_rows,
+    );
+
+    let mut egress_rows: Vec<Vec<Cell>> = Vec::new();
+    for rule in spec.egress.iter().flatten() {
+        egress_rows.push(vec![c(rule_to_text(rule)), c(rule_ports_text(rule.ports.as_ref()))]);
+    }
+    props.push_table(
+        "Egress rules",
+        Some("no egress rules (selected pods may reach nothing)"),
+        &["TO", "PORTS"],
+        egress_rows,
+    );
+
+    meta_sections(&mut props, &np);
+    Ok(props)
+}
+
+/// "pods app=api, all pods in namespace, 10.0.0.0/8" for an ingress rule's peers.
+fn rule_from_text(rule: &k8s_openapi::api::networking::v1::NetworkPolicyIngressRule) -> String {
+    let Some(peers) = rule.from.as_ref() else { return "all sources".into() };
+    if peers.is_empty() {
+        return "all sources".into();
+    }
+    peers.iter().map(peer_text).collect::<Vec<_>>().join(", ")
+}
+
+/// "pods app=api, all pods in namespace, 10.0.0.0/8" for an egress rule's peers.
+fn rule_to_text(rule: &k8s_openapi::api::networking::v1::NetworkPolicyEgressRule) -> String {
+    let Some(peers) = rule.to.as_ref() else { return "any destination".into() };
+    if peers.is_empty() {
+        return "any destination".into();
+    }
+    peers.iter().map(peer_text).collect::<Vec<_>>().join(", ")
+}
+
+/// Compact text for one NetworkPolicyPeer.
+fn peer_text(p: &k8s_openapi::api::networking::v1::NetworkPolicyPeer) -> String {
+    if let Some(sel) = &p.pod_selector {
+        match sel.match_labels.as_ref() {
+            Some(m) if !m.is_empty() => format!("pods {}", selector_text(Some(m))),
+            _ => "all pods in namespace".into(),
+        }
+    } else if let Some(ip) = &p.ip_block {
+        ip.cidr.clone()
+    } else if let Some(ns) = &p.namespace_selector {
+        match ns.match_labels.as_ref() {
+            Some(m) if !m.is_empty() => format!("namespaces {}", selector_text(Some(m))),
+            _ => "all namespaces".into(),
+        }
+    } else {
+        "any".into()
+    }
+}
+
+/// "8080/TCP, 443/TCP" or "all ports".
+fn rule_ports_text(ports: Option<&Vec<k8s_openapi::api::networking::v1::NetworkPolicyPort>>) -> String {
+    let Some(ports) = ports else { return "all ports".into() };
+    if ports.is_empty() {
+        return "all ports".into();
+    }
+    ports
+        .iter()
+        .filter_map(|p| {
+            p.port.as_ref().map(|v| {
+                format!("{}/{}", int_or_string(v), p.protocol.clone().unwrap_or_else(|| "TCP".into()))
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// ResourceQuotas: the hard limits and the used-vs-hard breakdown.
+async fn gather_resourcequota(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
+    let api: Api<ResourceQuota> = Api::namespaced(client.clone(), namespace);
+    let rq = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let spec = rq.spec.clone().unwrap_or_default();
+    let used = rq.status.as_ref().and_then(|s| s.used.as_ref());
+    let hard = spec.hard.clone().unwrap_or_default();
+    let mut props = Properties::default();
+
+    props.fields(
+        "Overview",
+        vec![
+            field("hard resources", hard.len().to_string()),
+            field("scopes", spec.scopes.as_ref().map(|s| s.join(", ")).unwrap_or_else(|| DASH.into())),
+        ],
+    );
+
+    // Used/hard per resource — the fill, coloured so a quota nearing its limit
+    // reads before you do the arithmetic.
+    let rows: Vec<Vec<Cell>> = hard
+        .iter()
+        .map(|(k, v)| {
+            let u = used.and_then(|u| u.get(k)).map(|q| q.0.clone()).unwrap_or_else(|| "0".into());
+            vec![name_cell(k.clone()), c(v.0.clone()), Cell::new(u.clone(), usage_tone(&u, &v.0))]
+        })
+        .collect();
+    props.push_table("Usage", Some("no hard limits declared"), &["RESOURCE", "HARD", "USED"], rows);
+
+    meta_sections(&mut props, &rq);
+    Ok(props)
+}
+
+/// Tone for a quota's used value: red at/over the hard limit (creation blocks),
+/// amber past 80%, plain otherwise.
+fn usage_tone(used: &str, hard: &str) -> Tone {
+    match (qty_numeric(used), qty_numeric(hard)) {
+        (Some(u), Some(h)) if h > 0.0 => {
+            let ratio = u / h;
+            if ratio >= 1.0 { Tone::Bad } else if ratio >= 0.8 { Tone::Warn } else { Tone::Secondary }
+        }
+        _ => Tone::Secondary,
+    }
+}
+
+/// Numeric value of a Kubernetes quantity for fill-ratio comparison: plain
+/// counts ("13"), millis ("180m"), and the decimal/binary suffixes kubectl
+/// prints for cpu/memory. Unparsable forms → None (tone stays plain).
+fn qty_numeric(qty: &str) -> Option<f64> {
+    let q = qty.trim();
+    let (digits, mult) = if let Some(milli) = q.strip_suffix('m') {
+        (milli, 1e-3)
+    } else {
+        let split = q
+            .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+            .unwrap_or(q.len());
+        let (d, suffix) = q.split_at(split);
+        let mult = match suffix {
+            "" => 1.0,
+            "Ki" => 1024.0,
+            "Mi" => 1024.0 * 1024.0,
+            "Gi" => 1024.0 * 1024.0 * 1024.0,
+            "Ti" => 1024.0f64.powi(4),
+            "k" | "K" => 1e3,
+            "M" => 1e6,
+            "G" => 1e9,
+            "T" => 1e12,
+            _ => return None,
+        };
+        (d, mult)
+    };
+    digits.trim().parse::<f64>().ok().map(|n| n * mult)
+}
+
+/// LimitRanges: the per-type min/max/default constraints.
+async fn gather_limitrange(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
+    let api: Api<LimitRange> = Api::namespaced(client.clone(), namespace);
+    let lr = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let spec = lr.spec.clone().unwrap_or_default();
+    let mut props = Properties::default();
+
+    let rows: Vec<Vec<Cell>> = spec
+        .limits
+        .iter()
+        .map(|item| {
+            vec![
+                name_cell(item.type_.clone()),
+                c(qty_map_text(item.min.as_ref())),
+                c(qty_map_text(item.max.as_ref())),
+                c(qty_map_text(item.default.as_ref())),
+                c(qty_map_text(item.default_request.as_ref())),
+            ]
+        })
+        .collect();
+    props.push_table(
+        "Limits",
+        Some("no limits declared"),
+        &["TYPE", "MIN", "MAX", "DEFAULT", "DEFAULT REQUEST"],
+        rows,
+    );
+
+    meta_sections(&mut props, &lr);
+    Ok(props)
+}
+
+/// The types a LimitRange constrains, comma-joined ("Container, PersistentVolumeClaim").
+fn limitrange_types(lr: &LimitRange) -> String {
+    let Some(spec) = lr.spec.as_ref() else { return DASH.into() };
+    let mut seen: Vec<String> = Vec::new();
+    for item in &spec.limits {
+        let t = item.type_.clone();
+        if !t.is_empty() && !seen.contains(&t) {
+            seen.push(t);
+        }
+    }
+    if seen.is_empty() {
+        DASH.into()
+    } else {
+        seen.join(", ")
+    }
+}
+
+/// One webhook of either admission kind, flattened to the fields the panel shows.
+struct WebhookInfo {
+    name: String,
+    service: Option<ServiceReference>,
+    url: Option<String>,
+    failure_policy: String,
+    match_policy: String,
+    rules: String,
+    operations: String,
+}
+
+fn webhook_info(w: &MutatingWebhook) -> WebhookInfo {
+    WebhookInfo {
+        name: w.name.clone(),
+        service: w.client_config.service.clone(),
+        url: w.client_config.url.clone(),
+        failure_policy: w.failure_policy.clone().unwrap_or_else(|| DASH.into()),
+        match_policy: w.match_policy.clone().unwrap_or_else(|| DASH.into()),
+        rules: rules_text(w.rules.as_ref()),
+        operations: operations_text(w.rules.as_ref()),
+    }
+}
+
+fn webhook_info_v(w: &ValidatingWebhook) -> WebhookInfo {
+    WebhookInfo {
+        name: w.name.clone(),
+        service: w.client_config.service.clone(),
+        url: w.client_config.url.clone(),
+        failure_policy: w.failure_policy.clone().unwrap_or_else(|| DASH.into()),
+        match_policy: w.match_policy.clone().unwrap_or_else(|| DASH.into()),
+        rules: rules_text(w.rules.as_ref()),
+        operations: operations_text(w.rules.as_ref()),
+    }
+}
+
+/// Resources a webhook's rules apply to, de-duplicated and joined ("pods,deployments").
+fn rules_text(rules: Option<&Vec<k8s_openapi::api::admissionregistration::v1::RuleWithOperations>>) -> String {
+    let Some(rules) = rules else { return DASH.into() };
+    let mut out: Vec<String> = Vec::new();
+    for r in rules {
+        for res in r.resources.iter().flatten() {
+            if !out.contains(res) {
+                out.push(res.clone());
+            }
+        }
+    }
+    if out.is_empty() { DASH.into() } else { out.join(", ") }
+}
+
+/// Operations a webhook's rules match, de-duplicated and joined ("CREATE,UPDATE").
+fn operations_text(rules: Option<&Vec<k8s_openapi::api::admissionregistration::v1::RuleWithOperations>>) -> String {
+    let Some(rules) = rules else { return DASH.into() };
+    let mut out: Vec<String> = Vec::new();
+    for r in rules {
+        for op in r.operations.iter().flatten() {
+            if !out.contains(op) {
+                out.push(op.clone());
+            }
+        }
+    }
+    if out.is_empty() { DASH.into() } else { out.join(", ") }
+}
+
+/// Shared panel for the two admission-webhook configuration kinds (cluster-scoped).
+async fn webhook_config_panel(client: Client, infos: Vec<WebhookInfo>, meta: &impl ResourceExt) -> AppResult<Properties> {
+    let count = infos.len();
+    let mut props = Properties::default();
+
+    let mut rows: Vec<Vec<Cell>> = Vec::new();
+    for wh in infos {
+        // The webhook's service, linked when it exists — a dead service is
+        // usually the "why is this webhook failing" answer (B42).
+        let service_cell = if let Some(s) = &wh.service {
+            let exists = Api::<Service>::namespaced(client.clone(), &s.namespace).get(&s.name).await.is_ok();
+            ref_cell(
+                &format!("{}/{}", s.namespace, s.name),
+                exists,
+                NavTarget::namespaced("services", &s.namespace, &s.name),
+            )
+        } else if let Some(url) = &wh.url {
+            c(url.clone())
+        } else {
+            muted(DASH)
+        };
+        rows.push(vec![
+            name_cell(wh.name.clone()),
+            service_cell,
+            c(wh.failure_policy),
+            c(wh.match_policy),
+            c(wh.rules),
+            c(wh.operations),
+        ]);
+    }
+    props.fields("Overview", vec![field("webhooks", count.to_string())]);
+    props.push_table(
+        "Webhooks",
+        Some("no webhooks declared"),
+        &["NAME", "SERVICE/URL", "FAILURE POLICY", "MATCH POLICY", "RULES", "OPERATIONS"],
+        rows,
+    );
+
+    meta_sections(&mut props, meta);
+    Ok(props)
+}
+
+async fn gather_mutatingwebhookconfiguration(client: Client, name: &str) -> AppResult<Properties> {
+    let api: Api<MutatingWebhookConfiguration> = Api::all(client.clone());
+    let cfg = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let infos = cfg.webhooks.as_ref().map(|ws| ws.iter().map(webhook_info).collect()).unwrap_or_default();
+    webhook_config_panel(client, infos, &cfg).await
+}
+
+async fn gather_validatingwebhookconfiguration(client: Client, name: &str) -> AppResult<Properties> {
+    let api: Api<ValidatingWebhookConfiguration> = Api::all(client.clone());
+    let cfg = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let infos = cfg.webhooks.as_ref().map(|ws| ws.iter().map(webhook_info_v).collect()).unwrap_or_default();
+    webhook_config_panel(client, infos, &cfg).await
+}
+
+/// Namespaces: the quota fill — used-vs-hard for every ResourceQuota in the
+/// namespace, plus its LimitRanges (B80). This is the panel that answers "why
+/// won't anything schedule here?".
+async fn gather_namespace(client: Client, name: &str) -> AppResult<Properties> {
+    let api: Api<Namespace> = Api::all(client.clone());
+    let ns = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let mut props = Properties::default();
+
+    props.fields(
+        "Overview",
+        vec![field(
+            "status",
+            ns.status.as_ref().and_then(|s| s.phase.clone()).unwrap_or_else(|| "Active".into()),
+        )],
+    );
+
+    // ---- quota fill ----
+    let quotas: Api<ResourceQuota> = Api::namespaced(client.clone(), name);
+    if let Ok(list) = quotas.list(&ListParams::default()).await {
+        let mut rows: Vec<Vec<Cell>> = Vec::new();
+        for rq in list.items {
+            let rq_name = rq.name_any();
+            let hard = rq.spec.as_ref().and_then(|s| s.hard.as_ref()).cloned().unwrap_or_default();
+            let used = rq.status.as_ref().and_then(|s| s.used.as_ref()).cloned().unwrap_or_default();
+            for (k, v) in &hard {
+                let u = used.get(k).map(|q| q.0.clone()).unwrap_or_else(|| "0".into());
+                rows.push(vec![
+                    Cell::link(
+                        rq_name.clone(),
+                        Tone::Primary,
+                        Some(NavTarget::namespaced("resourcequotas", name, rq_name.clone())),
+                    ),
+                    name_cell(k.clone()),
+                    c(v.0.clone()),
+                    Cell::new(u.clone(), usage_tone(&u, &v.0)),
+                ]);
+            }
+        }
+        props.push_table(
+            "Resource quotas",
+            Some("no resource quotas in this namespace"),
+            &["QUOTA", "RESOURCE", "HARD", "USED"],
+            rows,
+        );
+    }
+
+    // ---- limit ranges ----
+    let lrs: Api<LimitRange> = Api::namespaced(client.clone(), name);
+    if let Ok(list) = lrs.list(&ListParams::default()).await {
+        let rows: Vec<Vec<Cell>> = list
+            .items
+            .iter()
+            .map(|lr| {
+                vec![
+                    Cell::link(
+                        lr.name_any(),
+                        Tone::Primary,
+                        Some(NavTarget::namespaced("limitranges", name, lr.name_any())),
+                    ),
+                    c(limitrange_types(lr)),
+                    lr.creation_timestamp()
+                        .map(|t| Cell::age(Some(t.0.to_rfc3339())))
+                        .unwrap_or_else(|| muted(DASH)),
+                ]
+            })
+            .collect();
+        props.push_table(
+            "Limit ranges",
+            Some("no limit ranges in this namespace"),
+            &["NAME", "TYPES", "AGE"],
+            rows,
+        );
+    }
+
+    meta_sections(&mut props, &ns);
+    Ok(props)
+}
+
+// ---------------------------------------------------------------------------
+// Selector joins shared by the B80 panels
+// ---------------------------------------------------------------------------
+
+/// True when a LabelSelector's matchLabels all match the pod's labels. An empty
+/// selector matches everything; matchExpressions are intentionally ignored (the
+/// Service join is matchLabels-only too — most real selectors are plain).
+fn selector_matches_pod(selector: &LabelSelector, pod_labels: Option<&BTreeMap<String, String>>) -> bool {
+    match selector.match_labels.as_ref() {
+        Some(labels) if labels.is_empty() => true,
+        Some(labels) => pod_labels
+            .map(|pl| labels.iter().all(|(k, v)| pl.get(k).map(|lv| lv == v).unwrap_or(false)))
+            .unwrap_or(false),
+        None => false,
+    }
+}
+
+/// Pods a selector picks in a namespace: NAME, PHASE, each a click-through link.
+async fn gather_selector_pods(client: &Client, namespace: &str, selector: &LabelSelector) -> Vec<Vec<Cell>> {
+    let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
+    let list = match pods.list(&ListParams::default()).await {
+        Ok(l) => l,
+        Err(_) => return Vec::new(),
+    };
+    list.items
+        .iter()
+        .filter(|p| selector_matches_pod(selector, p.metadata.labels.as_ref()))
+        .map(|p| {
+            vec![
+                Cell::link(
+                    p.name_any(),
+                    Tone::Primary,
+                    Some(NavTarget::namespaced("pods", namespace, p.name_any())),
+                ),
+                c(p.status.as_ref().and_then(|s| s.phase.clone()).unwrap_or_else(|| DASH.into())),
+            ]
+        })
+        .collect()
+}
+
+/// PDBs whose selector matches the pod's labels (B80).
+async fn gather_pod_pdbs(
+    client: &Client,
+    namespace: &str,
+    pod_labels: Option<&BTreeMap<String, String>>,
+) -> Vec<Vec<Cell>> {
+    let api: Api<PodDisruptionBudget> = Api::namespaced(client.clone(), namespace);
+    let list = match api.list(&ListParams::default()).await {
+        Ok(l) => l,
+        Err(_) => return Vec::new(),
+    };
+    list.items
+        .into_iter()
+        .filter_map(|pdb| {
+            let spec = pdb.spec.as_ref()?;
+            let selector = spec.selector.as_ref()?;
+            if !selector_matches_pod(selector, pod_labels) {
+                return None;
+            }
+            let name = pdb.name_any();
+            let disruptions = pdb.status.as_ref().map(|s| s.disruptions_allowed).unwrap_or(0);
+            Some(vec![
+                Cell::link(
+                    name.clone(),
+                    Tone::Primary,
+                    Some(NavTarget::namespaced("poddisruptionbudgets", namespace, name)),
+                ),
+                c(spec.min_available.as_ref().map(int_or_string).unwrap_or_else(|| DASH.into())),
+                c(spec.max_unavailable.as_ref().map(int_or_string).unwrap_or_else(|| DASH.into())),
+                Cell::new(disruptions.to_string(), if disruptions == 0 { Tone::Warn } else { Tone::Secondary }),
+            ])
+        })
+        .collect()
+}
+
+/// NetworkPolicies whose podSelector matches the pod's labels (B80).
+async fn gather_pod_networkpolicies(
+    client: &Client,
+    namespace: &str,
+    pod_labels: Option<&BTreeMap<String, String>>,
+) -> Vec<Vec<Cell>> {
+    let api: Api<NetworkPolicy> = Api::namespaced(client.clone(), namespace);
+    let list = match api.list(&ListParams::default()).await {
+        Ok(l) => l,
+        Err(_) => return Vec::new(),
+    };
+    list.items
+        .into_iter()
+        .filter_map(|np| {
+            let spec = np.spec.as_ref()?;
+            if !selector_matches_pod(&spec.pod_selector, pod_labels) {
+                return None;
+            }
+            let name = np.name_any();
+            Some(vec![
+                Cell::link(
+                    name.clone(),
+                    Tone::Primary,
+                    Some(NavTarget::namespaced("networkpolicies", namespace, name)),
+                ),
+                c(selector_text(spec.pod_selector.match_labels.as_ref())),
+                np.creation_timestamp()
+                    .map(|t| Cell::age(Some(t.0.to_rfc3339())))
+                    .unwrap_or_else(|| muted(DASH)),
+            ])
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2843,5 +3641,85 @@ metadata:
         assert_eq!(cert_tone(&healthy.to_rfc3339(), now), Tone::Secondary);
         assert_eq!(cert_tone(&expiring.to_rfc3339(), now), Tone::Warn);
         assert_eq!(cert_tone(&expired.to_rfc3339(), now), Tone::Bad);
+    }
+
+    // ---- B80 kind sweep ----
+
+    /// An HPA at its ceiling (ScalingLimited=True) reads bad, not good — the
+    /// polarity rule is what keeps a held-back HPA from painting green.
+    #[test]
+    fn scaling_limited_condition_is_not_good_when_true() {
+        assert_eq!(condition_tone("ScalingLimited", "True"), Tone::Bad);
+        assert_eq!(condition_tone("ScalingLimited", "False"), Tone::Good);
+        assert_eq!(condition_tone("AbleToScale", "True"), Tone::Good);
+        assert_eq!(condition_tone("ScalingActive", "True"), Tone::Good);
+    }
+
+    /// Quota fill tones: at/over the hard limit is red, past 80% amber, below plain.
+    #[test]
+    fn usage_tone_tracks_the_fill_ratio() {
+        assert_eq!(usage_tone("8", "8"), Tone::Bad);
+        assert_eq!(usage_tone("9", "8"), Tone::Bad);
+        assert_eq!(usage_tone("180m", "4"), Tone::Secondary);
+        assert_eq!(usage_tone("7", "8"), Tone::Warn);
+        assert_eq!(usage_tone("280Mi", "1Gi"), Tone::Secondary);
+        assert_eq!(usage_tone("4Gi", "5Gi"), Tone::Warn);
+        assert_eq!(usage_tone("not-a-qty", "8"), Tone::Secondary, "unparsable stays plain");
+    }
+
+    /// Selector matching: every matchLabel must be a pod label; an empty selector
+    /// matches everything; matchExpressions are ignored (matchLabels-only joins).
+    #[test]
+    fn selector_join_semantics() {
+        let sel = |labels: serde_json::Value| serde_json::from_value::<LabelSelector>(labels).unwrap();
+        let matching: BTreeMap<String, String> =
+            [("app", "web"), ("tier", "api")].into_iter().map(|(k, v)| (k.into(), v.into())).collect();
+        let pod = sel(json!({ "matchLabels": { "app": "web" } }));
+        assert!(selector_matches_pod(&pod, Some(&matching)));
+        let not_matching = sel(json!({ "matchLabels": { "app": "worker" } }));
+        assert!(!selector_matches_pod(&not_matching, Some(&matching)));
+        // The empty selector is the NetworkPolicy "applies to everyone" case.
+        let empty = sel(json!({ "matchLabels": {} }));
+        assert!(selector_matches_pod(&empty, Some(&matching)));
+        // A null selector matches nothing.
+        let null = sel(json!({}));
+        assert!(!selector_matches_pod(&null, Some(&matching)));
+    }
+
+    /// LimitRange constraint maps render as "cpu=500m,memory=512Mi".
+    #[test]
+    fn qty_map_renders_constraints() {
+        let m: BTreeMap<String, Quantity> = serde_json::from_value(json!({ "cpu": "500m", "memory": "512Mi" })).unwrap();
+        assert_eq!(qty_map_text(Some(&m)), "cpu=500m,memory=512Mi");
+        assert_eq!(qty_map_text(None), "—");
+        assert_eq!(qty_map_text(Some(&BTreeMap::new())), "—");
+    }
+
+    /// A webhook's rule resources/operations are de-duplicated and joined.
+    #[test]
+    fn webhook_rules_flatten() {
+        let rules: Vec<k8s_openapi::api::admissionregistration::v1::RuleWithOperations> =
+            serde_json::from_value(json!([
+                { "apiGroups": [""], "apiVersions": ["v1"], "resources": ["pods", "pods"],
+                  "operations": ["CREATE", "UPDATE"] },
+                { "apiGroups": [""], "apiVersions": ["v1"], "resources": ["deployments"],
+                  "operations": ["CREATE"] }
+            ])).unwrap();
+        assert_eq!(rules_text(Some(&rules)), "pods, deployments");
+        assert_eq!(operations_text(Some(&rules)), "CREATE, UPDATE");
+        assert_eq!(rules_text(None), "—");
+    }
+
+    /// NetworkPolicy port rules render "8080/TCP"; a rule with no ports allows all.
+    #[test]
+    fn rule_ports_render_kubectl_style() {
+        let ports: Vec<k8s_openapi::api::networking::v1::NetworkPolicyPort> =
+            serde_json::from_value(json!([
+                { "protocol": "TCP", "port": 8080 },
+                { "protocol": "UDP", "port": 53 }
+            ])).unwrap();
+        assert_eq!(rule_ports_text(Some(&ports)), "8080/TCP, 53/UDP");
+        assert_eq!(rule_ports_text(None), "all ports");
+        assert_eq!(rule_ports_text(Some(&vec![])), "all ports");
     }
 }

@@ -78,6 +78,16 @@ pub enum ResourceKind {
     Helm,
     /// The overview pseudo-kind (B79): a frontend-only dashboard.
     Overview,
+    /// Kind coverage sweep (B80): autoscaling, disruption budgets, network
+    /// policy, quota/limits, and the admission webhooks.
+    Horizontalpodautoscalers,
+    Poddisruptionbudgets,
+    Networkpolicies,
+    Resourcequotas,
+    Limitranges,
+    /// Cluster-scoped admission configuration.
+    Mutatingwebhookconfigurations,
+    Validatingwebhookconfigurations,
 }
 
 impl ResourceKind {
@@ -109,6 +119,13 @@ impl ResourceKind {
             ResourceKind::Events => "events",
             ResourceKind::Helm => "helm",
             ResourceKind::Overview => "overview",
+            ResourceKind::Horizontalpodautoscalers => "horizontalpodautoscalers",
+            ResourceKind::Poddisruptionbudgets => "poddisruptionbudgets",
+            ResourceKind::Networkpolicies => "networkpolicies",
+            ResourceKind::Resourcequotas => "resourcequotas",
+            ResourceKind::Limitranges => "limitranges",
+            ResourceKind::Mutatingwebhookconfigurations => "mutatingwebhookconfigurations",
+            ResourceKind::Validatingwebhookconfigurations => "validatingwebhookconfigurations",
         }
     }
 }

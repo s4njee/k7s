@@ -213,6 +213,38 @@ the other's `resource-update` channel is not subscribed (no IPC) — its rail
 chip still shows the last-known state, and switching back replays the retained
 rows.
 
+## Kind coverage sweep (B80)
+
+Seven new kinds (HPA, PDB, NetworkPolicy, ResourceQuota, LimitRange,
+Mutating/ValidatingWebhookConfiguration) plus the cross-kind joins. Verified
+live against the fixture cluster:
+
+```bash
+./dev/cluster/up.sh    # applies 15-scale/45-quota/50-admission + the NetworkPolicy
+KUBECONFIG=$HOME/.kube/config cargo run --example kinds_check
+KUBECONFIG=$HOME/.kube/config cargo run --example related_links_check
+KUBECONFIG=$HOME/.kube/config cargo run --example drain_check
+```
+
+- Each table matches `kubectl get`: HPA shows `cpu: 6%/80%` TARGETS and the
+  scaleTargetRef; the PDB shows min=2 / disruptions allowed=0 (the fixture uses
+  `minAvailable: 2` so any single eviction blocks, matching demo mode); the
+  quota's REQUEST/LIMIT show used/hard like `kubectl get -o wide`.
+- Pod panel joins: selecting a pod shows the PodDisruptionBudgets that cover it
+  and the NetworkPolicies that select it (matchLabels-only, like the Service
+  join). The Namespace panel (new) shows the quota fill — used vs hard per
+  resource, toned amber past 80% and red at/over the limit.
+- Drain confirm now fetches a PDB preview before committing: "N evictable pods
+  on this node" plus each budget's min available / current healthy / disruptions
+  allowed. On the fixture, draining the control-plane node shows
+  `prod/yggdrasil-db` at 0 disruptions — the stall is visible before you click.
+- The webhook fixture configs are inert (`failurePolicy: Ignore` pointing at a
+  service that doesn't exist), so admission is never blocked; the panel shows
+  the service as "(not found)", which is the honest answer to "why is this
+  webhook failing".
+- `related_links_check` walks all the new panels: 0 broken links. Demo mode
+  mirrors the fixture (HPA/PDB/quota/NetworkPolicy/webhook mock rows + panels).
+
 ## Known follow-ups (out of v1 scope, per plan.md)
 
 - Detail panel (YAML/Events) for non-pod kinds — pods-only in v1 by design.

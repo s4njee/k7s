@@ -51,6 +51,23 @@ async fn main() -> anyhow::Result<()> {
             list.items.len(),
             "every pod on the node must be either evicted or skipped"
         );
+
+        // B61/B80: the PDB preview shown *before* confirming a drain — which
+        // budgets constrain this node's pods and their current disruption math.
+        let preview = k7s_lib::kube::drain::preview(client.clone(), &name).await?;
+        assert_eq!(
+            preview.pod_count, evict.len(),
+            "the preview must count exactly the pods the drain would evict"
+        );
+        println!("PDB preview ({} budgets constrain this node's {} evictable pods):", preview.pdbs.len(), preview.pod_count);
+        for pdb in &preview.pdbs {
+            println!(
+                "    {}/{} min={} max={} healthy={}/{} disruptions={} covers: {}",
+                pdb.namespace, pdb.name, pdb.min_available, pdb.max_unavailable,
+                pdb.current_healthy, pdb.desired_healthy, pdb.disruptions_allowed,
+                pdb.pods.join(", ")
+            );
+        }
     }
 
     println!("\nDrain selection checked (read-only; no pod was evicted).");

@@ -40,6 +40,15 @@ fn gvk_for(kind: &str) -> Option<(&'static str, &'static str, &'static str)> {
         "clusterroles" => ("rbac.authorization.k8s.io", "v1", "ClusterRole"),
         "rolebindings" => ("rbac.authorization.k8s.io", "v1", "RoleBinding"),
         "clusterrolebindings" => ("rbac.authorization.k8s.io", "v1", "ClusterRoleBinding"),
+        // B80 kind sweep — the pod panel now links to these, so a 404 here would
+        // fail the pod-panel walk too.
+        "horizontalpodautoscalers" => ("autoscaling", "v2", "HorizontalPodAutoscaler"),
+        "poddisruptionbudgets" => ("policy", "v1", "PodDisruptionBudget"),
+        "networkpolicies" => ("networking.k8s.io", "v1", "NetworkPolicy"),
+        "resourcequotas" => ("", "v1", "ResourceQuota"),
+        "limitranges" => ("", "v1", "LimitRange"),
+        "mutatingwebhookconfigurations" => ("admissionregistration.k8s.io", "v1", "MutatingWebhookConfiguration"),
+        "validatingwebhookconfigurations" => ("admissionregistration.k8s.io", "v1", "ValidatingWebhookConfiguration"),
         _ => return None,
     })
 }
@@ -220,6 +229,53 @@ async fn main() -> anyhow::Result<()> {
         .or_else(|| sa_list.items.first())
     {
         panels.push(("serviceaccounts", sa.namespace().unwrap_or_default(), sa.name_any()));
+    }
+    // B80 kind sweep: the new panels emit links (HPA→workload, PDB/NetworkPolicy
+    // →pods, namespace→quota/limits, webhook→service), so they join the walk.
+    // Each is best-effort — a cluster without one simply skips.
+    let hpas: Api<k8s_openapi::api::autoscaling::v2::HorizontalPodAutoscaler> = Api::all(client.clone());
+    if let Some(h) = hpas.list(&ListParams::default()).await?.items.into_iter().next() {
+        panels.push(("horizontalpodautoscalers", h.namespace().unwrap_or_default(), h.name_any()));
+    }
+    let pdbs: Api<k8s_openapi::api::policy::v1::PodDisruptionBudget> = Api::all(client.clone());
+    if let Some(p) = pdbs.list(&ListParams::default()).await?.items.into_iter().next() {
+        panels.push(("poddisruptionbudgets", p.namespace().unwrap_or_default(), p.name_any()));
+    }
+    let nps: Api<k8s_openapi::api::networking::v1::NetworkPolicy> = Api::all(client.clone());
+    if let Some(np) = nps.list(&ListParams::default()).await?.items.into_iter().next() {
+        panels.push(("networkpolicies", np.namespace().unwrap_or_default(), np.name_any()));
+    }
+    let rqs: Api<k8s_openapi::api::core::v1::ResourceQuota> = Api::all(client.clone());
+    if let Some(rq) = rqs.list(&ListParams::default()).await?.items.into_iter().next() {
+        panels.push(("resourcequotas", rq.namespace().unwrap_or_default(), rq.name_any()));
+    }
+    let lrs: Api<k8s_openapi::api::core::v1::LimitRange> = Api::all(client.clone());
+    if let Some(lr) = lrs.list(&ListParams::default()).await?.items.into_iter().next() {
+        panels.push(("limitranges", lr.namespace().unwrap_or_default(), lr.name_any()));
+    }
+    let mwcs: Api<k8s_openapi::api::admissionregistration::v1::MutatingWebhookConfiguration> = Api::all(client.clone());
+    if let Some(w) = mwcs.list(&ListParams::default()).await?.items.into_iter().next() {
+        panels.push(("mutatingwebhookconfigurations", String::new(), w.name_any()));
+    }
+    let vwcs: Api<k8s_openapi::api::admissionregistration::v1::ValidatingWebhookConfiguration> = Api::all(client.clone());
+    if let Some(w) = vwcs.list(&ListParams::default()).await?.items.into_iter().next() {
+        panels.push(("validatingwebhookconfigurations", String::new(), w.name_any()));
+    }
+    // Namespaces gained a panel (the quota fill) that links to its quotas.
+    // Prefer a namespace that actually has a quota so those links are walked.
+    let nss: Api<k8s_openapi::api::core::v1::Namespace> = Api::all(client.clone());
+    let all_nss = nss.list(&ListParams::default()).await?.items;
+    let mut chosen_ns = all_nss.first();
+    for ns in &all_nss {
+        let quotas: Api<k8s_openapi::api::core::v1::ResourceQuota> =
+            Api::namespaced(client.clone(), &ns.name_any());
+        if quotas.list(&ListParams::default()).await.map(|l| !l.items.is_empty()).unwrap_or(false) {
+            chosen_ns = Some(ns);
+            break;
+        }
+    }
+    if let Some(ns) = chosen_ns {
+        panels.push(("namespaces", String::new(), ns.name_any()));
     }
 
     for (kind, pns, pname) in &panels {

@@ -14,13 +14,18 @@ use super::discovery::{CustomKind, PrinterColumn};
 use super::{dto::Row, helm, mappers, Cid, ClientManager, ResourceKind};
 use futures::stream::BoxStream;
 use futures::StreamExt;
+use k8s_openapi::api::admissionregistration::v1::{
+    MutatingWebhookConfiguration, ValidatingWebhookConfiguration,
+};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
+use k8s_openapi::api::autoscaling::v2::HorizontalPodAutoscaler;
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Event, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Secret,
-    Service, ServiceAccount,
+    ConfigMap, Event, LimitRange, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod,
+    ResourceQuota, Secret, Service, ServiceAccount,
 };
-use k8s_openapi::api::networking::v1::{Ingress, IngressClass};
+use k8s_openapi::api::networking::v1::{Ingress, IngressClass, NetworkPolicy};
+use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::api::rbac::v1::{ClusterRole, ClusterRoleBinding, Role, RoleBinding};
 use k8s_openapi::api::storage::v1::StorageClass;
 use kube::core::{ApiResource, DynamicObject};
@@ -67,11 +72,17 @@ pub async fn spawn_all<R: Runtime>(mgr: Arc<ClientManager<R>>, cid: Cid, client:
     spawn::<_, DaemonSet>(&mgr, &cid, &client, ResourceKind::Daemonsets, mappers::map_daemonset, identity).await;
     spawn::<_, Job>(&mgr, &cid, &client, ResourceKind::Jobs, mappers::map_job, identity).await;
     spawn::<_, CronJob>(&mgr, &cid, &client, ResourceKind::Cronjobs, mappers::map_cronjob, identity).await;
+    // Autoscaling + disruption budgets (B80/B61).
+    spawn::<_, HorizontalPodAutoscaler>(&mgr, &cid, &client, ResourceKind::Horizontalpodautoscalers, mappers::map_hpa, identity).await;
+    spawn::<_, PodDisruptionBudget>(&mgr, &cid, &client, ResourceKind::Poddisruptionbudgets, mappers::map_pdb, identity).await;
     spawn::<_, Service>(&mgr, &cid, &client, ResourceKind::Services, mappers::map_service, identity).await;
     spawn::<_, Ingress>(&mgr, &cid, &client, ResourceKind::Ingresses, mappers::map_ingress, identity).await;
     spawn::<_, IngressClass>(&mgr, &cid, &client, ResourceKind::Ingressclasses, mappers::map_ingressclass, identity).await;
+    spawn::<_, NetworkPolicy>(&mgr, &cid, &client, ResourceKind::Networkpolicies, mappers::map_networkpolicy, identity).await;
     spawn::<_, ConfigMap>(&mgr, &cid, &client, ResourceKind::Configmaps, mappers::map_configmap, identity).await;
     spawn::<_, Secret>(&mgr, &cid, &client, ResourceKind::Secrets, mappers::map_secret, identity).await;
+    spawn::<_, ResourceQuota>(&mgr, &cid, &client, ResourceKind::Resourcequotas, mappers::map_resourcequota, identity).await;
+    spawn::<_, LimitRange>(&mgr, &cid, &client, ResourceKind::Limitranges, mappers::map_limitrange, identity).await;
     spawn::<_, ServiceAccount>(&mgr, &cid, &client, ResourceKind::Serviceaccounts, mappers::map_serviceaccount, identity).await;
     // RBAC (B49).
     spawn::<_, Role>(&mgr, &cid, &client, ResourceKind::Roles, mappers::map_role, identity).await;
@@ -83,6 +94,9 @@ pub async fn spawn_all<R: Runtime>(mgr: Arc<ClientManager<R>>, cid: Cid, client:
     spawn::<_, StorageClass>(&mgr, &cid, &client, ResourceKind::Storageclasses, mappers::map_storageclass, identity).await;
     spawn::<_, Node>(&mgr, &cid, &client, ResourceKind::Nodes, mappers::map_node, identity).await;
     spawn::<_, Namespace>(&mgr, &cid, &client, ResourceKind::Namespaces, mappers::map_namespace, identity).await;
+    // Admission webhook configurations (B80), cluster-scoped.
+    spawn::<_, MutatingWebhookConfiguration>(&mgr, &cid, &client, ResourceKind::Mutatingwebhookconfigurations, mappers::map_mutatingwebhookconfiguration, identity).await;
+    spawn::<_, ValidatingWebhookConfiguration>(&mgr, &cid, &client, ResourceKind::Validatingwebhookconfigurations, mappers::map_validatingwebhookconfiguration, identity).await;
     // Cluster-wide events feed: ordered Warnings-first/newest and capped (B14).
     spawn::<_, Event>(&mgr, &cid, &client, ResourceKind::Events, mappers::map_event, events_order).await;
     // Helm releases, decoded from their Secrets (B26).
@@ -93,7 +107,8 @@ pub async fn spawn_all<R: Runtime>(mgr: Arc<ClientManager<R>>, cid: Cid, client:
         async move { run_helm_watcher(mgr, cid, client).await }
     });
     mgr.push_task(cid, handle).await;
-    25
+    // Spawned kinds + 1 for the overview pseudo-kind (the sidebar footer counts streams).
+    32
 }
 
 /// Spawn one watcher task and register it with the manager.

@@ -1,0 +1,52 @@
+# Mutating/ValidatingWebhookConfiguration for the Cluster section (B80).
+#
+# Both are deliberately inert: they register a webhook that points at a service
+# that does not exist (k7s-fixture-webhook in monitoring), but with
+# failurePolicy: Ignore the API server simply skips a webhook it can't reach, so
+# admission never blocks. They exist to give the table and properties panel real
+# objects to render — and to prove the "why was this mutated?" lookup works —
+# without any actual mutation happening.
+
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: k7s-fixture-validating
+webhooks:
+  - name: fixture.k7s.dev
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Ignore
+    clientConfig:
+      service:
+        name: k7s-fixture-webhook
+        namespace: monitoring
+        path: /validate
+        port: 443
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+        scope: "Namespaced"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: k7s-fixture-mutating
+webhooks:
+  - name: fixture.k7s.dev
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Ignore
+    clientConfig:
+      service:
+        name: k7s-fixture-webhook
+        namespace: monitoring
+        path: /mutate
+        port: 443
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+        scope: "Namespaced"

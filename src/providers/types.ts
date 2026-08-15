@@ -48,7 +48,16 @@ export type ResourceKind =
    * The overview pseudo-kind (B79): a frontend-only dashboard — no watcher,
    * no YAML, just a landing page after connect.
    */
-  | "overview";
+  | "overview"
+  // B80 kind sweep: autoscaling, disruption budgets, network policy,
+  // quota/limits, and the admission webhooks.
+  | "horizontalpodautoscalers"
+  | "poddisruptionbudgets"
+  | "networkpolicies"
+  | "resourcequotas"
+  | "limitranges"
+  | "mutatingwebhookconfigurations"
+  | "validatingwebhookconfigurations";
 
 /**
  * One `additionalPrinterColumn` a CRD declares for its kind (B30): a column the
@@ -545,6 +554,33 @@ export interface DrainProgress {
   done: boolean;
 }
 
+/** One PodDisruptionBudget's contribution to a drain preview (B61/B80). */
+export interface PdbPreview {
+  name: string;
+  namespace: string;
+  minAvailable: string;
+  maxUnavailable: string;
+  currentHealthy: number;
+  desiredHealthy: number;
+  /** 0 means no pod covered by this budget can be evicted right now. */
+  disruptionsAllowed: number;
+  /** The node's evictable pods this PDB covers ("prod/yggdrasil-db-0"). */
+  pods: string[];
+}
+
+/**
+ * What draining a node would touch, before any eviction (B61/B80) — shown in
+ * the drain confirm dialog so a drain that would stall on a PDB is visible
+ * before committing.
+ */
+export interface DrainPreview {
+  node: string;
+  /** Evictable pods on the node (DaemonSet/mirror/finished pods excluded). */
+  podCount: number;
+  /** The PDBs those pods are subject to, with their current disruption math. */
+  pdbs: PdbPreview[];
+}
+
 /** One mounted filesystem on a node (B27). */
 export interface Filesystem {
   mountpoint: string;
@@ -702,6 +738,12 @@ export interface DataProvider {
    * Resolves once cordoned — watch {@link onDrainProgress} for the rest.
    */
   drainNode(node: string): Promise<void>;
+  /**
+   * Preview a drain (B61/B80): the node's evictable pods and the PDBs whose
+   * disruption math constrains them — shown in the confirm dialog *before* the
+   * user commits. Degrades to an empty preview on a restricted cluster.
+   */
+  drainPreview(node: string): Promise<DrainPreview>;
 
   /**
    * Tell the OS window which palette the app is using (B52), so the native

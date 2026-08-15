@@ -1,0 +1,41 @@
+# HorizontalPodAutoscaler and PodDisruptionBudget (B80).
+
+# An HPA on valkyrie-api. On kind there is no metrics-server by default, so the
+# HPA sits with an empty status — which is itself the supported state the
+# TARGETS column must render (<unknown>/80%), exactly like `kubectl get hpa`.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: valkyrie-api
+  namespace: prod
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: valkyrie-api
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+# A PDB that says "never go below 2" on the 2-replica StatefulSet. The fixture
+# is a single-node cluster, so both yggdrasil-db pods share the node and
+# disruptionsAllowed is always 0: draining the node can never evict one. That is
+# deliberate — it makes the drain-confirm preview deterministically match demo
+# mode's "yggdrasil-db blocked" story (minAvailable: 1 would let the first
+# eviction through and the two would disagree).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: yggdrasil-db
+  namespace: prod
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: yggdrasil-db

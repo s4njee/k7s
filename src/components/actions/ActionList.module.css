@@ -81,6 +81,51 @@
   overflow-wrap: anywhere;
 }
 
+/* The pre-drain PDB preview (B61/B80): what the drain would evict and which
+   budgets would block it, so a stall is visible before committing. */
+.drainPreview {
+  border-top: 1px solid var(--border-default);
+  padding-top: 6px;
+  font-size: 11px;
+}
+
+.drainPreviewTitle {
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.drainPreview table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.drainPreview th,
+.drainPreview td {
+  text-align: left;
+  padding: 2px 6px 2px 0;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.drainPreview td {
+  color: var(--text-primary);
+}
+
+.pdbBlocked {
+  color: var(--status-warn);
+  font-weight: 600;
+}
+
+.drainPreviewLoading {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.drainPreviewError {
+  font-size: 11px;
+  color: var(--status-err);
+}
+
 .confirmRow {
   display: flex;
   gap: 6px;

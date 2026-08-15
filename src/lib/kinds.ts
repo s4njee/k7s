@@ -95,6 +95,20 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     icon: "↻",
     columns: ["NAME", "NAMESPACE", "SCHEDULE", "SUSPENDED", "LAST RUN", "AGE"],
   },
+  // B80: autoscaling + disruption budgets — the two "why is it doing this"
+  // questions about a workload's size and drain-ability.
+  horizontalpodautoscalers: {
+    group: "workloads",
+    label: "HPA",
+    icon: "↕",
+    columns: ["NAME", "NAMESPACE", "REFERENCE", "TARGETS", "MINPODS", "MAXPODS", "REPLICAS", "AGE"],
+  },
+  poddisruptionbudgets: {
+    group: "workloads",
+    label: "PDBs",
+    icon: "⛨",
+    columns: ["NAME", "NAMESPACE", "MIN AVAILABLE", "MAX UNAVAILABLE", "CURRENT HEALTHY", "DISRUPTIONS ALLOWED", "AGE"],
+  },
   // ---- Network ----
   services: {
     group: "network",
@@ -107,6 +121,13 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     label: "Ingresses",
     icon: "⇥",
     columns: ["NAME", "NAMESPACE", "HOSTS", "CLASS", "AGE"],
+  },
+  // B80: the "why can't this connect" kind.
+  networkpolicies: {
+    group: "network",
+    label: "NetworkPolicies",
+    icon: "⇥",
+    columns: ["NAME", "NAMESPACE", "POD-SELECTOR", "AGE"],
   },
   // Cluster-scoped; the default is marked in the NAME, as kubectl does.
   ingressclasses: {
@@ -127,6 +148,19 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     label: "Secrets",
     icon: "⚿",
     columns: ["NAME", "NAMESPACE", "TYPE", "DATA", "AGE"],
+  },
+  // B80: the "why won't anything schedule here" kinds.
+  resourcequotas: {
+    group: "config",
+    label: "ResourceQuotas",
+    icon: "☰",
+    columns: ["NAME", "NAMESPACE", "REQUEST", "LIMIT", "AGE"],
+  },
+  limitranges: {
+    group: "config",
+    label: "LimitRanges",
+    icon: "☰",
+    columns: ["NAME", "NAMESPACE", "TYPES", "AGE"],
   },
   // ---- Access (B49) ----
   // The identity a pod runs as, and the roles/bindings that grant it access.
@@ -213,6 +247,19 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     icon: "◫",
     columns: ["NAME", "STATUS", "PODS", "AGE"],
   },
+  // B80: cluster-scoped admission configuration — "why was this rejected?".
+  mutatingwebhookconfigurations: {
+    group: "cluster",
+    label: "MutatingWebhooks",
+    icon: "✚",
+    columns: ["NAME", "WEBHOOKS", "AGE"],
+  },
+  validatingwebhookconfigurations: {
+    group: "cluster",
+    label: "ValidatingWebhooks",
+    icon: "✓",
+    columns: ["NAME", "WEBHOOKS", "AGE"],
+  },
   // A read-only feed rather than a managed resource, but it lives in the Cluster
   // group because it is cluster-wide. It *is* namespaced, so it keeps a NAMESPACE
   // column and honours the namespace filter.
@@ -250,6 +297,9 @@ const CLUSTER_SCOPED: ReadonlySet<string> = new Set<string>([
   "ingressclasses",
   "clusterroles",
   "clusterrolebindings",
+  // B80: admission webhook configurations are cluster-scoped.
+  "mutatingwebhookconfigurations",
+  "validatingwebhookconfigurations",
 ]);
 
 /** Groups in sidebar order. */
@@ -288,6 +338,16 @@ export const KINDS_WITH_PROPERTIES: ReadonlySet<string> = new Set<string>([
   "serviceaccounts",
   "rolebindings",
   "clusterrolebindings",
+  // B80: the kind sweep's panels (HPA metrics/conditions, PDB math, policy
+  // rules, quota fill), plus the Namespaces panel that answers quota fill.
+  "horizontalpodautoscalers",
+  "poddisruptionbudgets",
+  "networkpolicies",
+  "resourcequotas",
+  "limitranges",
+  "mutatingwebhookconfigurations",
+  "validatingwebhookconfigurations",
+  "namespaces",
 ]);
 
 /** Detail-panel tabs, in strip order. Mirrors DetailTab in the store. */
@@ -433,6 +493,14 @@ const BUILTIN_KIND_TO_NAV: Record<string, ResourceKind> = {
   StorageClass: "storageclasses",
   Node: "nodes",
   Namespace: "namespaces",
+  // B80 kind sweep — events referencing these resolve to their tables.
+  HorizontalPodAutoscaler: "horizontalpodautoscalers",
+  PodDisruptionBudget: "poddisruptionbudgets",
+  NetworkPolicy: "networkpolicies",
+  ResourceQuota: "resourcequotas",
+  LimitRange: "limitranges",
+  MutatingWebhookConfiguration: "mutatingwebhookconfigurations",
+  ValidatingWebhookConfiguration: "validatingwebhookconfigurations",
 };
 
 /**

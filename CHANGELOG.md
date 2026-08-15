@@ -16,6 +16,18 @@ and CI refuses a tag whose three versions disagree.
 
 ### Added
 
+- Kind coverage sweep (B80): HorizontalPodAutoscalers (REFERENCE/TARGETS
+  columns, tone on `ScalingLimited`), PodDisruptionBudgets (B61's MIN/MAX
+  AVAILABLE, CURRENT HEALTHY, DISRUPTIONS ALLOWED), NetworkPolicies, ResourceQuotas
+  (used/hard REQUEST/LIMIT like `kubectl get -o wide`), LimitRanges, and the
+  Mutating/ValidatingWebhookConfigurations — each with a properties panel. The
+  pod panel now answers which PDBs cover it and which NetworkPolicies select it;
+  the Namespace panel shows its quota fill (used vs hard, toned at 80%/100%);
+  and the drain confirm shows the PDB math *before* committing (a node's
+  evictable pods, each budget's allowed disruptions), so a drain that would
+  stall on a PDB is visible in advance. The fixture cluster and live harnesses
+  (`kinds_check`, `related_links_check`, `drain_check`) cover the new tables and
+  every new reference link.
 - Automatic updates (B72): `tauri-plugin-updater` with its own Ed25519 signing
   keypair, a passive check in Settings ("Software updates" — current version +
   check/install/restart) and a quiet statusbar badge when a newer version
