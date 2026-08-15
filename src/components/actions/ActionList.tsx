@@ -7,13 +7,14 @@
  * lib/actions.ts and rendered here.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import styles from "./ActionList.module.css";
 import { useStore } from "../../store";
 import { getProvider } from "../../providers";
 import { selectorFilter } from "../../lib/filter";
 import {
   actionsFor,
+  actionVerbs,
   bulkErrorText,
   isRolloutKind,
   plural,
@@ -68,9 +69,50 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
   const [busy, setBusy] = useState(false);
 
   const actions = actionsFor(kind, rows);
+
+  // B88: fetch SelfSubjectAccessReview for the actions' verbs on open and cache
+  // the verdicts, so a forbidden action is disabled before the user clicks. A
+  // race (permission revoked after this) still surfaces as a typed forbidden
+  // envelope when the action runs.
+  const [allowed, setAllowed] = useState<Record<string, boolean> | null>(null);
+  const single = rows[0];
+  useEffect(() => {
+    let live = true;
+    const checks = new Map<string, { verb: string; resource: string; namespace?: string }>();
+    for (const a of actions) {
+      for (const v of actionVerbs(a.id, kind, single)) {
+        checks.set(`${v.verb}:${v.resource}:${v.namespace ?? ""}`, v);
+      }
+    }
+    if (checks.size === 0) {
+      setAllowed({});
+      return;
+    }
+    Promise.all([...checks.values()].map((v) => getProvider().canI(v.verb, v.resource, v.namespace ?? null)))
+      .then((results) => {
+        if (!live) return;
+        const map: Record<string, boolean> = {};
+        [...checks.keys()].forEach((key, i) => {
+          map[key] = results[i];
+        });
+        setAllowed(map);
+      })
+      .catch(() => {
+        // An unreachable cluster shouldn't disable every action — allow.
+        if (live) setAllowed({});
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, rows]);
+
   if (actions.length === 0) return null;
 
-  const single = rows[0];
+  /** True when the current identity is (known to be) denied this action. */
+  const denied = (a: ActionDef): boolean =>
+    allowed != null &&
+    actionVerbs(a.id, kind, single).some((v) => allowed[`${v.verb}:${v.resource}:${v.namespace ?? ""}`] === false);
   const refOf = (row: Row): ResourceRef => ({ kind, namespace: row.namespace, name: row.name });
 
   /** Execute an action, then close (or report). `gone` means the objects are no more. */
@@ -179,6 +221,7 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
   if (mode.kind === "form" && mode.id === "scale") {
     return (
       <ScaleForm
+        kind={kind}
         row={single}
         busy={busy}
         onCancel={() => setMode({ kind: "menu" })}
@@ -225,6 +268,8 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
           type="button"
           role="menuitem"
           className={styles.row}
+          disabled={denied(a)}
+          title={denied(a) ? "permission denied — the current identity can't do this" : undefined}
           onClick={() => pick(a)}
         >
           {/* The bookmark action's label follows the row's state. */}
@@ -238,6 +283,8 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
           type="button"
           role="menuitem"
           className={`${styles.row} ${styles.danger}`}
+          disabled={denied(a)}
+          title={denied(a) ? "permission denied — the current identity can't do this" : undefined}
           onClick={() => pick(a)}
         >
           {a.label}

@@ -9,8 +9,10 @@
 import { useEffect, useRef, useState } from "react";
 import styles from "./ActionList.module.css";
 import { confirmText, type ActionDef, type ActionId } from "../../lib/actions";
+import { kubectlCommand } from "../../lib/kubectl";
 import { getProvider } from "../../providers";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { KubectlPreview } from "./KubectlPreview";
 import type { DrainPreview, KindId, Row } from "../../providers/types";
 
 interface ActionConfirmDialogProps {
@@ -185,6 +187,8 @@ export function ActionConfirmDialog({
             {busy ? "…" : label(id)}
           </button>
         </div>
+        {/* B88/v5 B64: the kubectl equivalent, built from the action's parameters. */}
+        <KubectlPreview commands={kubectlCommand(id, kind, rows)} />
       </div>
     </div>
   );

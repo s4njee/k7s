@@ -21,6 +21,62 @@
 import type { KindId, Row } from "../providers/types";
 import { errMsg } from "./errors";
 
+/** One SelfSubjectAccessReview check an action needs (B88): the verb + resource
+ *  the current identity must be allowed, to disable forbidden actions up front. */
+export interface ActionVerb {
+  verb: string;
+  resource: string;
+  namespace?: string;
+}
+
+/**
+ * The RBAC checks an action implies, matched to the backend's actual verbs
+ * (mostly PATCH, not update). A denied verb disables the action in the menu; a
+ * race (permission revoked after the check) still surfaces as a typed B74-L
+ * forbidden envelope when the action runs.
+ */
+export function actionVerbs(id: ActionId, kind: KindId, row?: Row): ActionVerb[] {
+  const ns = row?.namespace;
+  // The SSAR resource is the API plural; custom ids are "group/plural".
+  const plural = kind.includes("/") ? kind.slice(kind.indexOf("/") + 1) : kind;
+  switch (id) {
+    case "view-pods":
+      return [{ verb: "get", resource: "pods", namespace: ns }];
+    case "forward":
+      return [{ verb: "create", resource: "pods/portforward", namespace: ns }];
+    case "scale":
+      return [{ verb: "patch", resource: plural, namespace: ns }];
+    case "restart":
+      return kind === "pods"
+        ? [{ verb: "delete", resource: "pods", namespace: ns }]
+        : [{ verb: "patch", resource: plural, namespace: ns }];
+    case "cordon":
+    case "uncordon":
+      return [{ verb: "patch", resource: "nodes", namespace: ns }];
+    case "drain":
+      return [
+        { verb: "patch", resource: "nodes", namespace: ns },
+        { verb: "create", resource: "pods/eviction", namespace: ns },
+      ];
+    case "delete":
+      return [{ verb: "delete", resource: plural, namespace: ns }];
+    case "uninstall":
+      return [{ verb: "delete", resource: "secrets", namespace: ns }];
+    case "run-now":
+      return [{ verb: "create", resource: "jobs", namespace: ns }];
+    case "suspend":
+    case "resume":
+      return [{ verb: "patch", resource: "cronjobs", namespace: ns }];
+    case "retry":
+      return [
+        { verb: "delete", resource: "jobs", namespace: ns },
+        { verb: "create", resource: "jobs", namespace: ns },
+      ];
+    default:
+      return [];
+  }
+}
+
 export type ActionId =
   | "view-pods"
   | "forward"

@@ -438,6 +438,34 @@ require YAML/Helm workflow.
 - [ ] A restricted ServiceAccount sees forbidden actions disabled before click;
       a race still returns a typed B74-L error.
 
+**Implementation report (2026-08-15):**
+
+Implemented (absorbs v5 B62 + B64). **Metadata editor** — a Labels & Annotations
+section at the top of the Properties panel (`MetadataEditor`) with inline
+add/edit/remove via focused RFC 6902 JSON Patch (`patch_metadata` command:
+`Patch::Json` over `dynamic_api` for any kind incl. CRDs; `~1`/`~0` pointer
+escaping tested). Removing a pod label fetches `label_dependencies` and, if a
+Service/PDB/NetworkPolicy selects on it, warns naming the dependent before
+removing. Long annotation values truncate with expand-on-click. The patch
+refuses Helm-managed metadata (the managed-by label or a managed field with
+manager "helm") with a real message, and the editor shows the same warning.
+**Kubectl previews** — every action confirmation (and the scale/port-forward
+forms, live on their parameters) plus the create/apply YAML paths show a
+collapsible "kubectl equivalent" built from the action's parameters
+(`lib/kubectl.ts`; the drain flags `--ignore-daemonsets --delete-emptydir-data`
+match the app's behavior; bulk = one command per resource) with a copy button.
+**RBAC** — `subject_access_review` (SelfSubjectAccessReview) + a `canI` provider
+method gate the actions menu: a forbidden verb disables the action up front with
+an explanation; a race still surfaces as the existing typed B74-L envelope. The
+per-action verb/resource map (`actionVerbs`) is tested. **Live proof** — a
+`metadata_check` harness in the B83 manifest patches a fixture pod's label and
+proves the watcher carries it (22/25 harnesses pass against kind, incl. the new
+one). **Verification:** 481 frontend tests (+16), clippy + 237 cargo tests
+(+3: the RFC 6902 op builder + Helm guard), and the live round-trip. The v7
+acceptance boxes stay unchecked pending the real-app pass (a restricted SA on
+kind, a native confirm preview, a Helm-owned object).
+
+### B89 — Port-forward management workspace
 ### B89 — Port-forward management workspace
 
 Promote the current forward strip into a searchable management view. Support

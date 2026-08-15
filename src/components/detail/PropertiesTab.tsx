@@ -12,6 +12,7 @@ import { useStore } from "../../store";
 import { getProvider } from "../../providers";
 import { useNow } from "../../hooks/useNow";
 import { SectionView } from "./properties/SectionView";
+import { MetadataEditor } from "./properties/MetadataEditor";
 import type { Properties } from "../../providers/types";
 import { errDisplay } from "../../lib/errors";
 
@@ -75,6 +76,11 @@ export function PropertiesTab() {
 
   return (
     <div className={styles.wrap}>
+      {/* B88/v5 B62: the inline labels/annotations editor; a patch bumps the
+          refresh key so the properties document re-gathers. */}
+      {row && (
+        <MetadataEditor key={row.uid} onChanged={() => setRefreshKey((k) => k + 1)} />
+      )}
       {props.sections.map((s) => (
         <SectionView
           key={s.title}

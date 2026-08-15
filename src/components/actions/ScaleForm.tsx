@@ -4,9 +4,12 @@
 
 import { useState } from "react";
 import styles from "./ActionList.module.css";
-import type { Row } from "../../providers/types";
+import { kubectlCommand } from "../../lib/kubectl";
+import { KubectlPreview } from "./KubectlPreview";
+import type { KindId, Row } from "../../providers/types";
 
 interface ScaleFormProps {
+  kind: KindId;
   row: Row;
   busy: boolean;
   onCancel: () => void;
@@ -22,7 +25,7 @@ function currentReplicas(row: Row): number {
   return 1;
 }
 
-export function ScaleForm({ row, busy, onCancel, onApply }: ScaleFormProps) {
+export function ScaleForm({ kind, row, busy, onCancel, onApply }: ScaleFormProps) {
   const [replicas, setReplicas] = useState(() => currentReplicas(row));
 
   return (
@@ -61,6 +64,7 @@ export function ScaleForm({ row, busy, onCancel, onApply }: ScaleFormProps) {
             Apply
           </button>
         </div>
+        <KubectlPreview commands={kubectlCommand("scale", kind, [row], { replicas })} />
       </div>
     </div>
   );

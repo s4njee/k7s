@@ -35,6 +35,7 @@ import type {
   Properties,
   CustomKind,
   KindId,
+  LabelDependencies,
   ResourceRef,
   ShellHandle,
   Row,
@@ -262,6 +263,34 @@ export class TauriProvider implements DataProvider {
       name: ref.name,
       replicas,
     });
+  }
+
+  canI(verb: string, resource: string, namespace: string | null): Promise<boolean> {
+    return this.invokeCmd<boolean>("subject_access_review", { verb, resource, namespace });
+  }
+
+  patchMetadata(
+    ref: ResourceRef,
+    change: {
+      labels?: { add?: Record<string, string>; remove?: string[] };
+      annotations?: { add?: Record<string, string>; remove?: string[] };
+    },
+  ): Promise<void> {
+    return this.invokeCmd<void>("patch_metadata", {
+      kind: ref.kind,
+      namespace: ref.namespace ?? null,
+      name: ref.name,
+      labels: change.labels ?? null,
+      annotations: change.annotations ?? null,
+    });
+  }
+
+  async labelDependencies(ref: ResourceRef, key: string): Promise<LabelDependencies> {
+    const d = await this.invokeCmd<{ services: string[]; pdbs: string[]; network_policies: string[] }>(
+      "label_dependencies",
+      { namespace: ref.namespace ?? "", pod: ref.name, labelKey: key },
+    );
+    return { services: d.services, pdbs: d.pdbs, networkPolicies: d.network_policies };
   }
 
   restartPod(ref: ResourceRef): Promise<void> {

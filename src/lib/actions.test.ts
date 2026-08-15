@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   actionsFor,
+  actionVerbs,
   runBulk,
   bulkErrorText,
   confirmText,
@@ -278,5 +279,35 @@ describe("runBulk", () => {
 
   it("does nothing for an empty selection", async () => {
     expect(await runBulk([], async () => {})).toEqual({ ok: 0, failures: [] });
+  });
+});
+
+describe("actionVerbs (B88 SSAR map)", () => {
+  const pod = { uid: "p", name: "web-abc", namespace: "prod", cells: [] } as unknown as Row;
+  const dep = { uid: "d", name: "web", namespace: "prod", cells: [] } as unknown as Row;
+
+  it("maps each action to the backend's actual verb + resource", () => {
+    expect(actionVerbs("scale", "deployments", dep)).toEqual([{ verb: "patch", resource: "deployments", namespace: "prod" }]);
+    expect(actionVerbs("delete", "pods", pod)).toEqual([{ verb: "delete", resource: "pods", namespace: "prod" }]);
+    expect(actionVerbs("cordon", "nodes", { ...dep, namespace: undefined })).toEqual([
+      { verb: "patch", resource: "nodes", namespace: undefined },
+    ]);
+  });
+
+  it("restart is a pod delete or a rollout patch, matching how each executes", () => {
+    expect(actionVerbs("restart", "pods", pod)).toEqual([{ verb: "delete", resource: "pods", namespace: "prod" }]);
+    expect(actionVerbs("restart", "deployments", dep)).toEqual([{ verb: "patch", resource: "deployments", namespace: "prod" }]);
+  });
+
+  it("drain needs both the node cordon and the eviction verb", () => {
+    const verbs = actionVerbs("drain", "nodes", { ...dep, namespace: undefined });
+    expect(verbs).toContainEqual({ verb: "patch", resource: "nodes", namespace: undefined });
+    expect(verbs).toContainEqual({ verb: "create", resource: "pods/eviction", namespace: undefined });
+  });
+
+  it("uses the CRD plural for custom kinds", () => {
+    expect(actionVerbs("delete", "argoproj.io/applications", { ...dep, namespace: undefined })).toEqual([
+      { verb: "delete", resource: "applications", namespace: undefined },
+    ]);
   });
 });

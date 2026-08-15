@@ -16,8 +16,13 @@ use crate::kube::{
 };
 use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::api::authorization::v1::{
+    ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
+};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
-use k8s_openapi::api::core::v1::Event;
+use k8s_openapi::api::core::v1::{Event, Pod, Service};
+use k8s_openapi::api::networking::v1::NetworkPolicy;
+use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use crate::kube::dto::EventInvolved;
 use kube::api::{
     Api, ApiResource, DeleteParams, DynamicObject, ListParams, Patch, PatchParams, PostParams,
@@ -25,6 +30,7 @@ use kube::api::{
 use kube::core::GroupVersionKind;
 use kube::ResourceExt;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::State;
@@ -1455,6 +1461,201 @@ pub fn export_csv(path: String, content: String) -> AppResult<usize> {
     Ok(lines)
 }
 
+/// Ask the API server whether the current identity may perform `verb` on
+/// `resource` in `namespace` (SelfSubjectAccessReview, B88). Used to disable
+/// forbidden actions before the user clicks. The review's own error denies.
+#[tauri::command]
+pub async fn subject_access_review(
+    cid: String,
+    verb: String,
+    resource: String,
+    namespace: Option<String>,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<bool> {
+    let client = require_client(&mgr, &cid).await?;
+    let ssar = SelfSubjectAccessReview {
+        spec: SelfSubjectAccessReviewSpec {
+            resource_attributes: Some(ResourceAttributes {
+                verb: Some(verb),
+                namespace,
+                resource: Some(resource),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let api: Api<SelfSubjectAccessReview> = Api::all(client);
+    match api.create(&PostParams::default(), &ssar).await {
+        Ok(created) => Ok(created.status.map(|s| s.allowed).unwrap_or(false)),
+        // The review itself was refused (403) or the resource is unknown — deny.
+        Err(_) => Ok(false),
+    }
+}
+
+/// Apply a focused metadata change (B88, v5 B62): add/remove label and annotation
+/// entries via RFC 6902 JSON Patch — not a full object PUT — so the object's
+/// resourceVersion and unrelated fields are untouched. Refuses Helm-managed
+/// metadata (the object carries `app.kubernetes.io/managed-by: Helm`, or managed
+/// fields owned by manager "helm").
+#[tauri::command]
+pub async fn patch_metadata(
+    cid: String,
+    kind: String,
+    namespace: Option<String>,
+    name: String,
+    labels: Option<serde_json::Value>,
+    annotations: Option<serde_json::Value>,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<()> {
+    let client = require_client(&mgr, &cid).await?;
+    let api = dynamic_api(client, &kind, namespace.as_deref().unwrap_or(""), &cid, &mgr).await?;
+
+    // Helm guard: metadata owned by Helm is changed through Helm, not here.
+    let obj = api.get(&name).await.map_err(AppError::from)?;
+    if helm_owns_metadata(&obj.data) {
+        return Err(AppError::Other(
+            "this object's metadata is managed by Helm — use `helm upgrade` or the YAML/Helm workflow".into(),
+        ));
+    }
+
+    let mut ops: Vec<json_patch::PatchOperation> = Vec::new();
+    collect_metadata_ops(&mut ops, "/metadata/labels", labels.as_ref());
+    collect_metadata_ops(&mut ops, "/metadata/annotations", annotations.as_ref());
+    if ops.is_empty() {
+        return Ok(());
+    }
+
+    api.patch(&name, &PatchParams::default(), &Patch::Json::<()>(json_patch::Patch(ops)))
+        .await
+        .map_err(AppError::from)?;
+    Ok(())
+}
+
+/// True when the object's metadata is owned by Helm — the managed-by label, or a
+/// server-side-applied managed field with manager "helm".
+fn helm_owns_metadata(data: &serde_json::Value) -> bool {
+    let meta = data.get("metadata").and_then(|m| m.as_object());
+    let managed_by_helm = meta
+        .and_then(|m| m.get("labels"))
+        .and_then(|l| l.get("app.kubernetes.io/managed-by"))
+        .and_then(|v| v.as_str())
+        == Some("Helm");
+    let helm_managed_field = meta
+        .and_then(|m| m.get("managedFields"))
+        .and_then(|mf| mf.as_array())
+        .map(|arr| {
+            arr.iter().any(|f| {
+                f.get("manager").and_then(|m| m.as_str()) == Some("helm")
+                    && f.get("operation").and_then(|o| o.as_str()) == Some("Apply")
+            })
+        })
+        .unwrap_or(false);
+    managed_by_helm || helm_managed_field
+}
+
+fn collect_metadata_ops(
+    ops: &mut Vec<json_patch::PatchOperation>,
+    root: &str,
+    patch: Option<&serde_json::Value>,
+) {
+    let Some(patch) = patch else { return };
+    if let Some(add) = patch.get("add").and_then(|a| a.as_object()) {
+        for (key, value) in add {
+            ops.push(json_patch::PatchOperation::Add(json_patch::AddOperation {
+                path: pointer(format!("{root}/{}", escape_json_pointer_key(key))),
+                value: value.clone(),
+            }));
+        }
+    }
+    if let Some(remove) = patch.get("remove").and_then(|r| r.as_array()) {
+        for key in remove {
+            if let Some(key) = key.as_str() {
+                ops.push(json_patch::PatchOperation::Remove(json_patch::RemoveOperation {
+                    path: pointer(format!("{root}/{}", escape_json_pointer_key(key))),
+                }));
+            }
+        }
+    }
+}
+
+/// Build an RFC 6901 PointerBuf from a pointer string (json-patch v4's path type).
+/// The string is always a valid pointer (keys are escaped), so parse cannot fail.
+fn pointer(p: String) -> json_patch::jsonptr::PointerBuf {
+    json_patch::jsonptr::PointerBuf::parse(&p).expect("metadata patch path is a valid pointer")
+}
+
+/// RFC 6902 reference-token escaping for keys that contain `/` or `~`
+/// (e.g. `k8s.io/owner`).
+fn escape_json_pointer_key(key: &str) -> String {
+    key.replace('~', "~0").replace('/', "~1")
+}
+
+/// The dependents that would stop selecting the pod if `label_key` were removed
+/// (B88): Services/PDBs/NetworkPolicies whose selectors contain the key and
+/// currently match.
+#[derive(serde::Serialize)]
+pub struct LabelDependencies {
+    pub services: Vec<String>,
+    pub pdbs: Vec<String>,
+    pub network_policies: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn label_dependencies(
+    cid: String,
+    namespace: String,
+    pod: String,
+    label_key: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<LabelDependencies> {
+    let client = require_client(&mgr, &cid).await?;
+    let pods: Api<Pod> = Api::namespaced(client.clone(), &namespace);
+    let p = pods.get(&pod).await.map_err(AppError::from)?;
+    let labels = p.metadata.labels.clone().unwrap_or_default();
+    if !labels.contains_key(&label_key) {
+        return Ok(LabelDependencies { services: vec![], pdbs: vec![], network_policies: vec![] });
+    }
+
+    // A selector depends on the key when it names it and matches the pod today.
+    let depends = |selector: &BTreeMap<String, String>| {
+        selector.contains_key(&label_key)
+            && selector.iter().all(|(k, v)| labels.get(k).map(|lv| lv == v).unwrap_or(false))
+    };
+
+    let mut services = Vec::new();
+    let svcs: Api<Service> = Api::namespaced(client.clone(), &namespace);
+    for s in svcs.list(&ListParams::default()).await?.items {
+        if let Some(sel) = s.spec.as_ref().and_then(|sp| sp.selector.clone()) {
+            if depends(&sel) {
+                services.push(s.name_any());
+            }
+        }
+    }
+
+    let mut pdbs = Vec::new();
+    let pdb_api: Api<PodDisruptionBudget> = Api::namespaced(client.clone(), &namespace);
+    for pdb in pdb_api.list(&ListParams::default()).await?.items {
+        if let Some(sel) = pdb.spec.as_ref().and_then(|sp| sp.selector.clone()) {
+            if depends(&sel.match_labels.clone().unwrap_or_default()) {
+                pdbs.push(pdb.name_any());
+            }
+        }
+    }
+
+    let mut network_policies = Vec::new();
+    let np_api: Api<NetworkPolicy> = Api::namespaced(client.clone(), &namespace);
+    for np in np_api.list(&ListParams::default()).await?.items {
+        if let Some(spec) = np.spec.as_ref() {
+            if depends(&spec.pod_selector.match_labels.clone().unwrap_or_default()) {
+                network_policies.push(np.name_any());
+            }
+        }
+    }
+
+    Ok(LabelDependencies { services, pdbs, network_policies })
+}
+
 /// Stop a log stream (idempotent). Called on pause and panel close.
 #[tauri::command]
 pub async fn stop_log_stream(
@@ -2102,5 +2303,49 @@ mod diff_tests {
         }))
         .unwrap();
         assert!(last_applied_baseline(&obj).is_none());
+    }
+}
+
+#[cfg(test)]
+mod metadata_patch_tests {
+    use super::*;
+
+    #[test]
+    fn escapes_rfc6901_reference_tokens() {
+        // Only `~` and `/` are escaped; dots are literal pointer tokens.
+        assert_eq!(escape_json_pointer_key("k8s.io/owner"), "k8s.io~1owner");
+        assert_eq!(escape_json_pointer_key("a~b"), "a~0b");
+        assert_eq!(escape_json_pointer_key("plain"), "plain");
+    }
+
+    #[test]
+    fn builds_add_and_remove_ops() {
+        let patch = serde_json::json!({
+            "add": { "app": "web", "k8s.io/team": "platform" },
+            "remove": ["old"]
+        });
+        let mut ops = Vec::new();
+        collect_metadata_ops(&mut ops, "/metadata/labels", Some(&patch));
+        assert_eq!(ops.len(), 3);
+        // The key's slash is escaped in the pointer path; its dot is not.
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            json_patch::PatchOperation::Add(a)
+                if a.path == "/metadata/labels/k8s.io~1team"
+        )));
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            json_patch::PatchOperation::Remove(r) if r.path == "/metadata/labels/old"
+        )));
+    }
+
+    #[test]
+    fn detects_helm_managed_metadata() {
+        assert!(helm_owns_metadata(&serde_json::json!({
+            "metadata": { "labels": { "app.kubernetes.io/managed-by": "Helm" } }
+        })));
+        assert!(!helm_owns_metadata(&serde_json::json!({
+            "metadata": { "labels": { "app": "web" } }
+        })));
     }
 }

@@ -19,6 +19,7 @@ import type {
   EventItem,
   ForwardInfo,
   ImportResult,
+  LabelDependencies,
   LogHandle,
   LogLine,
   LogOptions,
@@ -286,6 +287,21 @@ export class MockProvider implements DataProvider {
   // UI flow can be exercised without a cluster.
   async deleteResource(_ref: ResourceRef): Promise<void> {}
   async scaleResource(_ref: ResourceRef, _replicas: number): Promise<void> {}
+  // Demo mode has no RBAC to consult — everything is allowed.
+  async canI(): Promise<boolean> {
+    return true;
+  }
+
+  async patchMetadata(): Promise<void> {
+    // Demo rows are static; the editor reflects the change locally.
+  }
+
+  async labelDependencies(ref: ResourceRef, key: string): Promise<LabelDependencies> {
+    // The demo's web pod is selected by a Service; removing `app` would deselect it.
+    return ref.kind === "pods" && key === "app"
+      ? { services: ["web-svc"], pdbs: [], networkPolicies: [] }
+      : { services: [], pdbs: [], networkPolicies: [] };
+  }
   async restartPod(_ref: ResourceRef): Promise<void> {}
   async restartRollout(_ref: ResourceRef): Promise<void> {}
 

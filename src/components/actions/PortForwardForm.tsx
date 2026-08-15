@@ -4,6 +4,8 @@
 
 import { useState } from "react";
 import styles from "./ActionList.module.css";
+import { kubectlCommand } from "../../lib/kubectl";
+import { KubectlPreview } from "./KubectlPreview";
 import type { KindId, Row } from "../../providers/types";
 
 interface PortForwardFormProps {
@@ -63,6 +65,7 @@ export function PortForwardForm({ kind, row, busy, onCancel, onForward }: PortFo
             Forward
           </button>
         </div>
+        <KubectlPreview commands={kubectlCommand("forward", kind, [row], { port })} note="the local port is picked automatically (the app's port-forward does the same)" />
       </div>
     </div>
   );

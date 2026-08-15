@@ -12,6 +12,7 @@ import { useStore } from "../../store";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { getProvider } from "../../providers";
 import { CodeEditor } from "../detail/CodeEditor";
+import { KubectlPreview } from "../actions/KubectlPreview";
 import { errDisplay } from "../../lib/errors";
 
 /** A starter manifest, so an empty editor never greets anyone. */
@@ -137,6 +138,9 @@ export function CreateYaml() {
         </div>
 
         {error && <div className={styles.error}>{error}</div>}
+
+        {/* B88/v5 B64: the kubectl equivalent of a YAML create. */}
+        <KubectlPreview commands={["kubectl apply -f -"]} note="pipes the manifest to kubectl — the same object this dialog creates" />
 
         {proposed ? (
           <div className={styles.editor}>

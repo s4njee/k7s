@@ -1,0 +1,50 @@
+/* The collapsible kubectl-preview section (B88/v5 B64), mirroring the drain
+   preview block in ActionList.module.css. */
+.preview {
+  margin-top: 8px;
+}
+.toggle {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+}
+.toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.body {
+  margin-top: 6px;
+  padding: 8px;
+  background: var(--bg-terminal);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+}
+.note {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.command {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  background: var(--bg-log-hover);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-body);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.copy {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 3px 8px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+}
+.copy:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}

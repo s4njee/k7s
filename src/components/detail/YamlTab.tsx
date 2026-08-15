@@ -10,6 +10,7 @@ import { useStore } from "../../store";
 import { getProvider } from "../../providers";
 import { CodeEditor } from "./CodeEditor";
 import { DiffView } from "./DiffView";
+import { KubectlPreview } from "../actions/KubectlPreview";
 import type { ResourceRef, YamlDiff } from "../../providers/types";
 import { errDisplay } from "../../lib/errors";
 
@@ -163,11 +164,15 @@ export function YamlTab() {
       {error && <div className={styles.error}>{error}</div>}
 
       {yamlEditing && review ? (
-        <DiffView
-          diff={review}
-          note="as the server would store it, after defaulting and any mutating webhooks"
-          empty="No changes — the server would store this object exactly as it is now."
-        />
+        <>
+          <DiffView
+            diff={review}
+            note="as the server would store it, after defaulting and any mutating webhooks"
+            empty="No changes — the server would store this object exactly as it is now."
+          />
+          {/* B88/v5 B64: the kubectl equivalent of an apply. */}
+          <KubectlPreview commands={["kubectl apply -f -"]} note="pipes the edited manifest to kubectl — the same PUT this dialog applies" />
+        </>
       ) : yamlEditing ? (
         <div className={`${styles.editorWrap} ${styles.editing}`}>
           <CodeEditor

@@ -2397,6 +2397,7 @@ dependencies = [
  "flate2",
  "futures",
  "http",
+ "json-patch 4.2.0",
  "k8s-openapi",
  "kube",
  "portable-pty",

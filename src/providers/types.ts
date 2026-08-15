@@ -502,6 +502,14 @@ export interface ResourceRef {
   name: string;
 }
 
+/** The dependents that select a pod by label (B88) — for the "removing this label
+ *  deselects the pod from …" warning. */
+export interface LabelDependencies {
+  services: string[];
+  pdbs: string[];
+  networkPolicies: string[];
+}
+
 /** A bookmarked resource (B56) — a resource ref the sidebar keeps quick access to. */
 export interface Bookmark {
   kind: KindId;
@@ -799,6 +807,24 @@ export interface DataProvider {
   deleteResource(ref: ResourceRef): Promise<void>;
   /** Scale a Deployment/StatefulSet to `replicas`. */
   scaleResource(ref: ResourceRef, replicas: number): Promise<void>;
+  /** Ask the API server whether the current identity may `verb` `resource` in
+   *  `namespace` (SelfSubjectAccessReview, B88) — for disabling forbidden
+   *  actions before the user clicks. */
+  canI(verb: string, resource: string, namespace: string | null): Promise<boolean>;
+
+  /** Apply a focused metadata change (B88): add/remove label and annotation
+   *  entries via JSON Patch. Rejects for Helm-managed metadata. */
+  patchMetadata(
+    ref: ResourceRef,
+    change: {
+      labels?: { add?: Record<string, string>; remove?: string[] };
+      annotations?: { add?: Record<string, string>; remove?: string[] };
+    },
+  ): Promise<void>;
+
+  /** The Services/PDBs/NetworkPolicies that would stop selecting the pod if
+   *  `key` were removed (B88) — the selector-dependency warning. */
+  labelDependencies(ref: ResourceRef, key: string): Promise<LabelDependencies>;
   /**
    * Restart a pod (B34) by deleting it; its controller recreates a fresh one.
    * Rejects for a pod with no controller — that would just delete it.

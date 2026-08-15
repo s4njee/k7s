@@ -59,6 +59,9 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+# RFC 6902 JSON Patch for the metadata editor (B88); kube's `jsonpatch` feature
+# enables the same crate, so this adds no new tree.
+json-patch = "4"
 # Parses the *public* x509 certificate of a kubernetes.io/tls Secret (B48). The
 # private key is never touched.
 x509-parser = "0.18"
@@ -71,7 +74,7 @@ futures = "0.3"
 
 # --- Kubernetes ---
 # `kube` gives us the typed client, config parsing, and the watcher/reflector runtime.
-kube = { version = "0.99", features = ["client", "config", "runtime", "ws"] }
+kube = { version = "0.99", features = ["client", "config", "runtime", "ws", "jsonpatch"] }
 # `k8s-openapi` provides the typed resource structs. The feature gate pins the API
 # surface; `latest` tracks the newest Kubernetes release supported by the crate.
 k8s-openapi = { version = "0.24", features = ["latest"] }

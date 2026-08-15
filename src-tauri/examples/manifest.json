@@ -13,6 +13,7 @@
     { "name": "live_check", "description": "pod exec + port-forward against a live pod", "requires": ["kind"], "timeout_s": 180 },
     { "name": "logs_check", "description": "log streams (tail, previous, ring-buffer cap)", "requires": ["kind"], "timeout_s": 180 },
     { "name": "multi_cluster_check", "description": "two concurrent ClientManagers + disconnect isolation", "requires": ["kind", "multi"], "timeout_s": 120 },
+    { "name": "metadata_check", "description": "metadata JSON Patch round-trips through the watcher (B88)", "requires": ["kind"], "timeout_s": 90 },
     { "name": "nodeshell_check", "description": "node debug-shell admission (dry run by default)", "requires": ["kind"], "timeout_s": 180 },
     { "name": "nodestats_check", "description": "node-exporter find/forward/scrape/rate", "requires": ["kind"], "timeout_s": 180 },
     { "name": "promql_check", "description": "Prometheus backfill (self-skips without a Prometheus service)", "requires": ["kind"], "timeout_s": 120 },

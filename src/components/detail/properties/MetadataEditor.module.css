@@ -1,0 +1,127 @@
+.wrap {
+  padding: 0 16px 8px;
+  border-bottom: 1px solid var(--border-default);
+  margin-bottom: 8px;
+}
+.heading {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.helmNote {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--status-warn);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.section {
+  margin-bottom: 8px;
+}
+.sectionTitle {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+}
+.key {
+  flex: none;
+  min-width: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-body);
+  cursor: pointer;
+}
+.editRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+.input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-terminal);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 6px;
+}
+.btn {
+  flex: none;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+}
+.btn:hover:not(:disabled) {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.btn:disabled {
+  opacity: 0.5;
+}
+.addBtn {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+}
+.addBtn:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+.warning {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--status-warn);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--text-body);
+}
+.warning code {
+  font-family: var(--font-mono);
+  color: var(--status-warn);
+}
+.warningActions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 8px;
+}
+.error {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--status-err);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--status-err);
+}
