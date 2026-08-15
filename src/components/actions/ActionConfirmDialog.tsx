@@ -34,6 +34,8 @@ export function ActionConfirmDialog({
   const danger = actions.find((a) => a.id === id)?.danger;
   const [preview, setPreview] = useState<DrainPreview | null>(null);
   const [previewError, setPreviewError] = useState(false);
+  const [uninstallObjects, setUninstallObjects] = useState<{ kind: string; name: string }[] | null>(null);
+  const [uninstallError, setUninstallError] = useState(false);
 
   // Fetch the PDB math when a single-node drain is being confirmed. Keyed on the
   // node's name, not the rows array, so a background watch tick doesn't re-fetch
@@ -51,6 +53,37 @@ export function ActionConfirmDialog({
       .catch(() => {
         // A restricted cluster can't always list PDBs; the confirm still works.
         if (live) setPreviewError(true);
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, rows[0]?.name]);
+
+  // An uninstall removes the objects its chart installed — enumerate them in the
+  // confirm (B81 accept: "confirm enumerating them first"), from the release's
+  // own Objects properties section.
+  useEffect(() => {
+    if (id !== "uninstall" || rows.length !== 1) return;
+    let live = true;
+    setUninstallObjects(null);
+    setUninstallError(false);
+    getProvider()
+      .getProperties({ kind, namespace: rows[0].namespace, name: rows[0].name })
+      .then((p) => {
+        if (!live) return;
+        const obj = p.sections.find((s) => s.title === "Objects");
+        if (obj && obj.body.type === "table") {
+          setUninstallObjects(
+            obj.body.rows.map((r) => ({ kind: r[0]?.text ?? "", name: r[1]?.text ?? "" })),
+          );
+        } else {
+          setUninstallObjects([]);
+        }
+      })
+      .catch(() => {
+        // Properties are best-effort; the confirm still works without the list.
+        if (live) setUninstallError(true);
       });
     return () => {
       live = false;
@@ -106,6 +139,35 @@ export function ActionConfirmDialog({
         {id === "drain" && previewError && (
           <div className={styles.drainPreviewError}>couldn't check PodDisruptionBudgets</div>
         )}
+        {id === "uninstall" && !uninstallObjects && !uninstallError && (
+          <div className={styles.drainPreviewLoading}>listing the objects it installed…</div>
+        )}
+        {id === "uninstall" && uninstallObjects && uninstallObjects.length > 0 && (
+          <div className={styles.drainPreview}>
+            <div className={styles.drainPreviewTitle}>
+              Deletes {uninstallObjects.length} object{uninstallObjects.length === 1 ? "" : "s"}:
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>KIND</th>
+                  <th>NAME</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uninstallObjects.map((o) => (
+                  <tr key={`${o.kind}/${o.name}`}>
+                    <td>{o.kind}</td>
+                    <td>{o.name}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {id === "uninstall" && uninstallError && (
+          <div className={styles.drainPreviewError}>couldn't list the objects it installed</div>
+        )}
         <div className={styles.confirmRow}>
           <div className={styles.cancelBtn} onClick={onCancel}>
             Cancel
@@ -128,6 +190,8 @@ function label(id: ActionId): string {
   switch (id) {
     case "delete":
       return "Delete";
+    case "uninstall":
+      return "Uninstall";
     case "restart":
       return "Restart";
     case "drain":

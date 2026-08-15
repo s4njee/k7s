@@ -581,6 +581,12 @@ export interface DrainPreview {
   pdbs: PdbPreview[];
 }
 
+/** What an uninstall removed (B81). */
+export interface UninstallOutcome {
+  objectsDeleted: number;
+  secretsDeleted: number;
+}
+
 /** One mounted filesystem on a node (B27). */
 export interface Filesystem {
   mountpoint: string;
@@ -698,6 +704,17 @@ export interface DataProvider {
    * that generation again. Resolves to the revision rolled back to.
    */
   undoRollout(ref: ResourceRef, revision: number): Promise<number>;
+  /**
+   * Roll a Helm release back to an earlier revision (B81): apply that revision's
+   * manifest, mark the current one superseded, and write a new revision Secret
+   * the way `helm rollback` does. Resolves to the new revision.
+   */
+  rollbackRelease(ref: ResourceRef, revision: number): Promise<number>;
+  /**
+   * Uninstall a Helm release (B81): delete the objects its manifest installs and
+   * the release's revision Secrets. Resolves with what was deleted.
+   */
+  uninstallRelease(ref: ResourceRef): Promise<UninstallOutcome>;
   /** Cordon or uncordon a node. */
   setCordon(node: string, unschedulable: boolean): Promise<void>;
   /** Suspend or resume a CronJob by patching spec.suspend (B47). */

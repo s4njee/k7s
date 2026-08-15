@@ -29,6 +29,9 @@ export type ActionId =
   | "uncordon"
   | "drain"
   | "delete"
+  // B81: a Helm release's write verbs — the release row is a synthetic view over
+  // its storage Secrets, so these aren't the shared delete path.
+  | "uninstall"
   // Batch verbs (B47).
   | "run-now"
   | "suspend"
@@ -74,6 +77,9 @@ const ALL: ActionDef[] = [
   // label flips to Unbookmark when the row is already bookmarked.
   { id: "bookmark", label: "Bookmark", mode: "immediate", bulk: false },
   { id: "delete", label: "Delete…", danger: true, mode: "confirm", bulk: true },
+  // B81: uninstall is the Helm-release form of delete — it removes the release's
+  // objects *and* its history, so it's not the generic delete path.
+  { id: "uninstall", label: "Uninstall…", danger: true, mode: "confirm", bulk: false },
 ];
 
 /** Does this action apply to a single row of this kind? */
@@ -84,6 +90,9 @@ function applies(id: ActionId, kind: KindId, row: Row): boolean {
       // release "row" is a synthetic view over a storage Secret — deleting that
       // corrupts the release rather than uninstalling it.
       return kind !== "nodes" && kind !== "namespaces" && kind !== "helm";
+    case "uninstall":
+      // B81: the release's own write verb, in place of delete.
+      return kind === "helm";
     case "scale":
       return kind === "deployments" || kind === "statefulsets";
     case "cordon":
@@ -186,6 +195,8 @@ export function confirmText(id: ActionId, kind: KindId, rows: Row[]): string {
       return `Run ${what} now?${names} Creates a Job from its template, owned by nothing so it can be deleted on its own.`;
     case "retry":
       return `Retry ${what}?${names} Deletes the failed Job and recreates it from its own spec, fresh and unowned.`;
+    case "uninstall":
+      return `Uninstall ${what}?${names} Removes the release and the objects its chart installed — its whole history with it.`;
     default:
       return `${id} ${what}?${names}`;
   }
@@ -214,6 +225,8 @@ export function plural(kind: KindId, n: number): string {
     limitranges: "limitrange",
     mutatingwebhookconfigurations: "mutatingwebhookconfiguration",
     validatingwebhookconfigurations: "validatingwebhookconfiguration",
+    // B81: a Helm release uninstalls (singular reads "release").
+    helm: "release",
   };
   // Custom kinds are "group/plural" ids; the plural half is the readable part.
   const base = singular[kind] ?? kind.split("/").pop() ?? String(kind);

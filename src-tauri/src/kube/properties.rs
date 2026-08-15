@@ -37,7 +37,7 @@ use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::api::{Api, ListParams};
 use kube::{Client, ResourceExt};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::BTreeMap;
 
 /// A label/annotation entry (a list keeps frontend rendering simple).
@@ -639,33 +639,6 @@ async fn gather_helm(client: Client, namespace: &str, name: &str) -> AppResult<P
     Ok(build_helm_properties(releases))
 }
 
-/// Kind/name pairs of the objects a release's rendered manifest installs (B46).
-///
-/// The manifest is a sequence of YAML documents; each document's top-level
-/// `kind` and `metadata.name` are what we list. Parsed from the document, not by
-/// a schema: a Helm chart can install any object, including CRDs we don't model.
-fn manifest_objects(manifest: &str) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    for doc in serde_yaml::Deserializer::from_str(manifest) {
-        let Ok(value) = serde_yaml::Value::deserialize(doc) else {
-            continue; // a stray `---` or an unparsable doc is not a failure
-        };
-        let Some(kind) = value.get("kind").and_then(|v| v.as_str()).map(String::from) else {
-            continue;
-        };
-        let name = value
-            .get("metadata")
-            .and_then(|m| m.get("name"))
-            .and_then(|v| v.as_str())
-            .map(String::from)
-            .unwrap_or_default();
-        if !kind.is_empty() && !name.is_empty() {
-            out.push((kind, name));
-        }
-    }
-    out
-}
-
 /// Build the release document from its decoded revisions (pure, so the ordering
 /// and toning are testable without a cluster). Newest revision leads the Overview
 /// and the History.
@@ -735,7 +708,7 @@ fn build_helm_properties(mut releases: Vec<helm::Release>) -> Properties {
     // ---- objects the release installed (B46) ----
     // Each is a link when the kind is one we list; a CRD kind we don't model
     // renders as plain text rather than a dead link.
-    let obj_rows: Vec<Vec<Cell>> = manifest_objects(&current.manifest)
+    let obj_rows: Vec<Vec<Cell>> = helm::manifest_objects(&current.manifest)
         .into_iter()
         .map(|(kind, name)| {
             let nav = builtin_nav_id(&kind)
@@ -3380,7 +3353,7 @@ metadata:
   name: gw
 ";
         assert_eq!(
-            manifest_objects(manifest),
+            helm::manifest_objects(manifest),
             vec![
                 ("Service".to_string(), "traefik".to_string()),
                 ("Deployment".to_string(), "traefik".to_string()),

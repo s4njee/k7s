@@ -124,6 +124,10 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
       case "delete":
         void execute((row) => getProvider().deleteResource(refOf(row)), true);
         break;
+      case "uninstall":
+        // B81: the release and its objects are gone, so the row leaves the table.
+        void execute((row) => getProvider().uninstallRelease(refOf(row)), true);
+        break;
       case "restart":
         // A restarted pod is deleted and recreated under a new name, so it's gone
         // from this table; a rolled workload keeps its identity.

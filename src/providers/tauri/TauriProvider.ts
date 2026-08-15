@@ -17,6 +17,7 @@ import type {
   DataProvider,
   DrainPreview,
   DrainProgress,
+  UninstallOutcome,
   NodeSample,
   PodPoint,
   NodeStatsError,
@@ -282,6 +283,21 @@ export class TauriProvider implements DataProvider {
       namespace: ref.namespace ?? "",
       name: ref.name,
       revision,
+    });
+  }
+
+  rollbackRelease(ref: ResourceRef, revision: number): Promise<number> {
+    return this.invokeCmd<number>("rollback_release", {
+      namespace: ref.namespace ?? "",
+      name: ref.name,
+      revision,
+    });
+  }
+
+  uninstallRelease(ref: ResourceRef): Promise<UninstallOutcome> {
+    return this.invokeCmd<UninstallOutcome>("uninstall_release", {
+      namespace: ref.namespace ?? "",
+      name: ref.name,
     });
   }
 

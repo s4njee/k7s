@@ -13,6 +13,7 @@ import type {
   DrainFailure,
   DrainPreview,
   DrainProgress,
+  UninstallOutcome,
   NodeSample,
   NodeStatsError,
   EventItem,
@@ -279,6 +280,15 @@ export class MockProvider implements DataProvider {
     // Demo mode has no real Deployment to patch; claim the rollback succeeded so
     // the confirm flow and properties refresh are exercised end to end.
     return revision;
+  }
+  async rollbackRelease(_ref: ResourceRef, revision: number): Promise<number> {
+    // Demo has no real release history to rewrite; the History table's rollback
+    // buttons and refresh flow are still exercised.
+    return revision + 1;
+  }
+  async uninstallRelease(_ref: ResourceRef): Promise<UninstallOutcome> {
+    // Demo's release is static; claim success so the confirm flow completes.
+    return { objectsDeleted: 2, secretsDeleted: 2 };
   }
   async setCordon(_node: string, _unschedulable: boolean): Promise<void> {}
   async setCronjobSuspend(_ref: ResourceRef, _suspended: boolean): Promise<void> {

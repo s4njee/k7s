@@ -16,6 +16,18 @@ and CI refuses a tag whose three versions disagree.
 
 ### Added
 
+- Helm write path, phase 1 (B81): **rollback** and **uninstall**. A release's
+  History panel now has a per-revision "roll back" button (like a Deployment's
+  ReplicaSets), which applies that revision's stored manifest via server-side
+  apply and writes a new revision Secret exactly as `helm rollback` does — the
+  previously-deployed revision flips to superseded, so `helm history` reads the
+  rollback in both directions and a later `helm rollback`/`upgrade` works
+  without an SSA conflict. Uninstall is a context-menu action whose confirm
+  enumerates the objects the chart installed before deleting them and the
+  release's revision Secrets. The fixture gains a minimal chart
+  (`dev/cluster/charts/fixture-app` + `dev/cluster/helm-fixture.sh`) and a
+  write harness (`helm_write_check`) proving the interop against a real Helm
+  4.2.3.
 - Kind coverage sweep (B80): HorizontalPodAutoscalers (REFERENCE/TARGETS
   columns, tone on `ScalingLimited`), PodDisruptionBudgets (B61's MIN/MAX
   AVAILABLE, CURRENT HEALTHY, DISRUPTIONS ALLOWED), NetworkPolicies, ResourceQuotas

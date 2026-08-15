@@ -955,6 +955,35 @@ pub async fn undo_rollout(cid: String,
     Ok(revision)
 }
 
+/// Roll a Helm release back to an earlier revision (B81 Phase 1): apply that
+/// revision's stored manifest, mark the current one superseded, and write a new
+/// revision Secret the way `helm rollback` does — so `helm history` shows it.
+/// Resolves to the new revision.
+#[tauri::command]
+pub async fn rollback_release(
+    namespace: String,
+    name: String,
+    revision: i64,
+    cid: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<i64> {
+    let client = require_client(&mgr, &cid).await?;
+    helm::rollback(client, &namespace, &name, revision).await
+}
+
+/// Uninstall a Helm release (B81 Phase 1): delete the objects its manifest
+/// installs and the release's revision Secrets.
+#[tauri::command]
+pub async fn uninstall_release(
+    namespace: String,
+    name: String,
+    cid: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<helm::UninstallOutcome> {
+    let client = require_client(&mgr, &cid).await?;
+    helm::uninstall(client, &namespace, &name).await
+}
+
 /// Suspend or resume a CronJob by patching `spec.suspend` (B47).
 #[tauri::command]
 pub async fn set_cronjob_suspend(cid: String, 

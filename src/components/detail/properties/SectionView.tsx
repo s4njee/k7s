@@ -5,6 +5,8 @@
 import styles from "../PropertiesTab.module.css";
 import { FieldRow } from "./FieldRow";
 import { NavLink } from "./NavLink";
+import { HelmHistoryTable } from "./HelmHistoryTable";
+import { type HelmRollbackRef } from "./HelmRollbackButton";
 import { ReplicaSetsTable } from "./ReplicaSetsTable";
 import { SecretDataTable, type SecretRef } from "./SecretDataTable";
 import { type RolloutRef } from "./RollbackButton";
@@ -17,11 +19,13 @@ export function SectionView({
   now,
   rollout,
   secretRef,
+  helmRollback,
 }: {
   section: Section;
   now: number;
   rollout?: RolloutRef;
   secretRef?: SecretRef;
+  helmRollback?: HelmRollbackRef;
 }) {
   const { body } = section;
   return (
@@ -51,6 +55,10 @@ export function SectionView({
           // B37: a Secret's Data table lists keys; each gets a copy button whose
           // command decodes the value in Rust so it never enters the webview.
           <SecretDataTable columns={body.columns} rows={body.rows} now={now} secret={secretRef} />
+        ) : section.title === "History" && helmRollback ? (
+          // B81: a Helm release's History gets a per-row rollback action for
+          // every revision except the one deployed now — the incident surface.
+          <HelmHistoryTable columns={body.columns} rows={body.rows} now={now} helm={helmRollback} />
         ) : (
           <div className={styles.tableScroll}>
             <table className={styles.table}>

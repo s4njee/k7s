@@ -1,0 +1,6 @@
+apiVersion: v2
+name: fixture-app
+description: A minimal chart for k7s's Helm write-path verification (B81).
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

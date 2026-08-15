@@ -46,6 +46,20 @@ describe("actionsFor — single row", () => {
     expect(ids("helm", [row("rel")])).not.toContain("delete");
   });
 
+  /** B81: the release's own verbs — uninstall is the delete replacement, rollback
+   *  lives on the History panel rather than the menu. */
+  it("offers uninstall (and only uninstall) on a Helm release", () => {
+    const got = ids("helm", [row("rel")]);
+    expect(got).toContain("uninstall");
+    expect(got).not.toContain("delete");
+    expect(got).not.toContain("scale");
+  });
+
+  it("never offers uninstall on non-Helm kinds", () => {
+    expect(ids("pods", [row("p")])).not.toContain("uninstall");
+    expect(ids("deployments", [row("d")])).not.toContain("uninstall");
+  });
+
   it("offers View pods only when there is a selector to filter by", () => {
     expect(ids("deployments", [row("d", { selector: { app: "x" } })])).toContain("view-pods");
     expect(ids("deployments", [row("d")])).not.toContain("view-pods");
@@ -183,6 +197,9 @@ describe("plural", () => {
   /** "ingresss" would be visibly wrong in a confirmation. */
   it("handles sibilant endings", () => {
     expect(plural("ingresses", 2)).toBe("ingresses");
+    // B81: a Helm release uninstalls; singular reads "release".
+    expect(plural("helm", 1)).toBe("release");
+    expect(plural("helm", 2)).toBe("releases");
   });
 
   /** Custom kinds are "group/plural" ids; the readable half is after the slash. */

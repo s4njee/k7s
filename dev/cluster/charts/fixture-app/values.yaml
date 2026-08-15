@@ -1,0 +1,4 @@
+# The knob a rollback visibly flips: rev 1 is color=red, rev 2 is color=blue, and
+# rolling back to rev 1 must put "color: red" back in the ConfigMap.
+replicaCount: 1
+color: red

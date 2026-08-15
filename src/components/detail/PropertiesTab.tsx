@@ -61,10 +61,28 @@ export function PropertiesTab() {
   const secretRef =
     kind === "secrets" && row ? { namespace: row.namespace ?? "", name: row.name } : undefined;
 
+  // A Helm release's History table carries the rollback actions (B81), keyed on
+  // the selected row being a Helm release.
+  const helmRollback =
+    kind === "helm" && row
+      ? {
+          namespace: row.namespace ?? "",
+          name: row.name,
+          onChanged: () => setRefreshKey((k) => k + 1),
+        }
+      : undefined;
+
   return (
     <div className={styles.wrap}>
       {props.sections.map((s) => (
-        <SectionView key={s.title} section={s} now={now} rollout={rollout} secretRef={secretRef} />
+        <SectionView
+          key={s.title}
+          section={s}
+          now={now}
+          rollout={rollout}
+          secretRef={secretRef}
+          helmRollback={helmRollback}
+        />
       ))}
     </div>
   );

@@ -245,6 +245,37 @@ KUBECONFIG=$HOME/.kube/config cargo run --example drain_check
 - `related_links_check` walks all the new panels: 0 broken links. Demo mode
   mirrors the fixture (HPA/PDB/quota/NetworkPolicy/webhook mock rows + panels).
 
+## Helm write path (B81)
+
+Rollback + uninstall, written the way Helm itself stores releases (`base64(gzip(
+JSON))` Secrets — no helm SDK, no shelling out). Verified live against the
+fixture with a real Helm 4.2.3 CLI:
+
+```bash
+./dev/cluster/up.sh
+./dev/cluster/helm-fixture.sh          # installs fixture-app rev1 (color=red) + rev2 (color=blue)
+KUBECONFIG=$HOME/.kube/config cargo run --example helm_write_check   # rollback→verify, uninstall→verify
+```
+
+- **Rollback** (the History panel's per-revision button, or `helm::rollback`):
+  applies the target revision's stored manifest (server-side apply, field
+  manager `helm`), flips the previously-deployed revision to superseded, and
+  writes a new revision Secret — `helm history` reads it as `deployed
+  "Rollback to N"` and `helm get manifest` matches the target revision
+  verbatim. Interop is proven **both ways** on the fixture: k7s rollback →
+  `helm history` shows rev 3 "Rollback to 1"; a subsequent `helm rollback` to
+  rev 2 succeeds (rev 4 "Rollback to 2") with no SSA conflict, because k7s
+  applies under Helm's own field manager.
+- **Uninstall** (context-menu danger action): the confirm enumerates the
+  objects the chart installed (from the release's Objects panel), then deletes
+  them (a missing object is "already gone", not an error) and the release's
+  revision Secrets. `helm list` drops the release; the ConfigMap/Deployment are
+  gone.
+- Both refuse cleanly when the release isn't Helm 3 storage v1 (wrong type,
+  wrong labels, or an undecodable payload) — never a guess at a v2 layout.
+- Phase-1 scope: hooks aren't run, and objects the target manifest no longer
+  lists aren't pruned (a rollback applies the target, it doesn't diff-and-prune).
+
 ## Known follow-ups (out of v1 scope, per plan.md)
 
 - Detail panel (YAML/Events) for non-pod kinds — pods-only in v1 by design.

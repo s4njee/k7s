@@ -393,6 +393,17 @@ function helmProperties(ref: ResourceRef): Properties {
         "no revisions",
       ),
       table("Values", ["KEY", "VALUE"], values, "chart defaults (no overrides)"),
+      // B81: the objects the release's manifest installs — what an uninstall
+      // confirm enumerates before deleting.
+      table(
+        "Objects",
+        ["KIND", "NAME"],
+        [
+          [n("Deployment"), link(name, "deployments", name, ref.namespace)],
+          [n("ConfigMap"), link(`${name}-config`, "configmaps", `${name}-config`, ref.namespace)],
+        ],
+        "nothing in the manifest",
+      ),
     ],
   };
 }

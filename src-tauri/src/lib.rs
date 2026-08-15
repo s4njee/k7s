@@ -120,6 +120,8 @@ pub fn run() {
             commands::restart_pod,
             commands::restart_rollout,
             commands::undo_rollout,
+            commands::rollback_release,
+            commands::uninstall_release,
             commands::set_cronjob_suspend,
             commands::run_cronjob,
             commands::retry_job,
