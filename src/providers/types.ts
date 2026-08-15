@@ -461,6 +461,8 @@ export interface Prefs {
   importedFiles?: string[] | null;
   /** Bookmarks (B56) keyed by cluster context, so each context has its own list. */
   bookmarks?: Record<string, Bookmark[]> | null;
+  /** Saved views (B60) keyed by cluster context, persisted like bookmarks. */
+  savedViews?: Record<string, SavedView[]> | null;
   /** Per-cluster rail colour + default namespace (B77). */
   clusterColors?: Record<string, string> | null;
   clusterNamespaces?: Record<string, string> | null;
@@ -500,6 +502,34 @@ export interface Bookmark {
   kind: KindId;
   namespace?: string;
   name: string;
+}
+
+/**
+ * A saved view (B60): a named table preset — kind, namespace, filter expression,
+ * sort column/direction, and optional Problems scope — saved from the toolbar and
+ * loaded from the toolbar or ⌘K. Per-cluster (cid === context) and persisted like
+ * bookmarks. Sort is stored as the column *name* (indices drift when the
+ * all-clusters problems scope prepends CLUSTER, and B87 will make columns
+ * user-configurable); it resolves to an index at apply time.
+ */
+export interface SavedView {
+  /** Stable slug (derived from the name at save time). */
+  id: string;
+  name: string;
+  /** Built-ins are filter expressions shown everywhere; never persisted or deletable. */
+  builtin?: boolean;
+  kind: KindId;
+  /** "all" or a namespace. */
+  namespace: string;
+  /** The table-filter expression (B60 extended the grammar: `colname=value`, `|` OR). */
+  filter: string;
+  /** Sort column by NAME (e.g. "RESTARTS"); null = no sort. */
+  sortColName: string | null;
+  sortDir: "asc" | "desc";
+  /** Only meaningful for kind === "problems". */
+  problemsScope?: "active" | "all";
+  /** B87 forward-compat: the kind's visible columns at save time (static today). */
+  columns?: string[];
 }
 
 /** Options for starting a log stream. */

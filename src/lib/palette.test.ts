@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { buildPalette, parseQuery, type PaletteContext } from "./palette";
+import type { SavedView } from "./views";
 import type { CustomKind, Row } from "../providers/types";
 
 /** A minimal row; the palette only reads name/namespace. */
@@ -98,6 +99,35 @@ describe("buildPalette", () => {
   it("reaches the Helm view by name", () => {
     const out = buildPalette("releases", ctx());
     expect(out[0]).toMatchObject({ type: "kind", id: "helm" });
+  });
+
+  // B60: saved views appear with a "view:" prefix and are reachable by name.
+  it("lists saved views with a view: prefix, reachable by their bare name", () => {
+    const v: SavedView = {
+      id: "crashloop",
+      name: "CrashLoopBackOff pods",
+      kind: "pods",
+      namespace: "all",
+      filter: "status=CrashLoopBackOff",
+      sortColName: null,
+      sortDir: "asc",
+    };
+    const out = buildPalette("crash", ctx({ savedViews: [v] }));
+    expect(out.some((i) => i.type === "view" && i.label === "view: CrashLoopBackOff pods")).toBe(true);
+  });
+
+  it("reaches a view by its prefixed name too", () => {
+    const v: SavedView = {
+      id: "x",
+      name: "crashloop",
+      kind: "pods",
+      namespace: "all",
+      filter: "status=CrashLoopBackOff",
+      sortColName: null,
+      sortDir: "asc",
+    };
+    const out = buildPalette("view:crash", ctx({ savedViews: [v] }));
+    expect(out[0]).toMatchObject({ type: "view", label: "view: crashloop" });
   });
 
   it("reaches a CRD kind by its plural, which its Kind name doesn't contain", () => {

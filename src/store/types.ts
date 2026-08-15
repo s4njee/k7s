@@ -20,6 +20,7 @@ import type {
 } from "../providers/types";
 import type { Bookmark } from "../lib/bookmarks";
 import type { Settings } from "../lib/settings";
+import type { SavedView } from "../lib/views";
 import type { SelectionState } from "../lib/selection";
 import type { SinceOption } from "../lib/logview";
 
@@ -84,6 +85,8 @@ export interface NavigationActions {
   jumpTo: (kind: KindId, row?: Row) => void;
   navigateTo: (target: NavTarget) => void;
   viewPods: (namespace: string | undefined, selector: string) => void;
+  /** Apply a saved view: nav + namespace + filter + sort + problems scope (B60). */
+  applyView: (view: SavedView) => void;
 }
 
 export interface ConnectionSliceState {
@@ -111,6 +114,8 @@ export interface ConnectionSliceState {
   clusterColors: Record<string, string>;
   /** Per-cluster default namespace (B77), layered over the global setting. */
   clusterNamespaces: Record<string, string>;
+  /** Saved views per cluster (B60), persisted like bookmarks. */
+  savedViewsByCid: Record<Cid, SavedView[]>;
 }
 
 export interface ConnectionActions {
@@ -124,6 +129,10 @@ export interface ConnectionActions {
   toggleBookmark: (bookmark: Bookmark) => void;
   setClusterColor: (cid: string, color: string) => void;
   setClusterNamespace: (cid: string, ns: string) => void;
+  /** Save (or replace, by name) a view for a cluster (B60). */
+  addSavedView: (cid: Cid, view: SavedView) => void;
+  /** Delete a saved view by id (built-ins are never stored, so never deleted). */
+  removeSavedView: (cid: Cid, id: string) => void;
   setClusterStatus: (cid: Cid, s: ClusterStatus) => void;
   setWatchCount: (cid: Cid, n: number) => void;
   setWatcherHealth: (cid: Cid, health: Record<string, WatcherHealth>) => void;

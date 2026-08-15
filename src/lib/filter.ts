@@ -52,17 +52,32 @@ export function isEmptyFilter(f: ParsedFilter): boolean {
 }
 
 /**
- * Test a row against a parsed filter. Label selectors must all match the pod's
- * labels (a non-pod row has none, so any selector rejects it); the text term is
- * a name substring, except for Events whose name is an opaque id — there it
- * matches across the visible cells, as the pre-B33 filter did.
+ * Test a row against a parsed filter.
+ *
+ * A `key=value` term is a **column match** when the key names a column of the
+ * kind (case-insensitive): the value must equal that cell's text (case-
+ * insensitive, trimmed), and `|` splits the value into OR alternatives — so
+ * `status=CrashLoopBackOff|Error|Failed` matches any of those statuses (B60,
+ * saved-view built-ins). Any other `key=value` stays a **label selector**: it
+ * must match the pod's labels exactly (a non-pod row has none, so it rejects),
+ * which is the unchanged pre-B60 k8s-selector behaviour.
+ *
+ * The text term is a name substring, except for Events/Problems whose names are
+ * opaque ids — there it matches across the visible cells, as always.
  */
-export function matchesFilter(row: Row, f: ParsedFilter, nav: KindId): boolean {
-  if (f.labels.length) {
-    const labels = row.labels;
-    if (!labels) return false;
-    for (const [k, v] of f.labels) {
-      if (labels[k] !== v) return false;
+export function matchesFilter(
+  row: Row,
+  f: ParsedFilter,
+  nav: KindId,
+  columns: string[] = [],
+): boolean {
+  for (const [k, v] of f.labels) {
+    const colIdx = columnIndex(k, columns);
+    if (colIdx !== -1) {
+      if (!cellMatches(row.cells[colIdx]?.text, v)) return false;
+    } else {
+      const labels = row.labels;
+      if (!labels || labels[k] !== v) return false;
     }
   }
   if (f.text === "") return true;
@@ -72,6 +87,19 @@ export function matchesFilter(row: Row, f: ParsedFilter, nav: KindId): boolean {
   return nav === "events" || nav === "problems"
     ? row.cells.some((c) => c.text.toLowerCase().includes(f.text))
     : row.name.toLowerCase().includes(f.text);
+}
+
+/** Case-insensitive index of a column name in the kind's column list, else -1. */
+function columnIndex(key: string, columns: string[]): number {
+  const k = key.toLowerCase();
+  return columns.findIndex((c) => c.toLowerCase() === k);
+}
+
+/** Exact (trimmed, case-insensitive) cell match; `|` is an OR of alternatives. */
+function cellMatches(text: string | undefined, value: string): boolean {
+  if (text == null) return false;
+  const t = text.trim().toLowerCase();
+  return value.split("|").some((alt) => alt.trim().toLowerCase() === t);
 }
 
 /**

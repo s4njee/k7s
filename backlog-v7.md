@@ -335,6 +335,40 @@ Problems/all-clusters scope. It is available from the toolbar and command
 palette, with built-ins for unhealthy pods, warnings, Pending workloads, and
 recent failures.
 
+**Accept (v5, carried forward):**
+
+- [ ] Saving `status=CrashLoopBackOff` + namespace + sort RESTARTS desc, then
+      loading it, restores all three parameters.
+- [ ] Built-in views work on any cluster (filter expressions, not hardcoded names).
+- [ ] Views survive restart.
+- [ ] ⌘K lists saved views with a "view:" prefix for discoverability.
+
+**Implementation report (2026-08-15):**
+
+Implemented. A `SavedView` (providers/types.ts, beside Bookmark) captures
+kind/namespace/filter/sort(by column *name*, so it survives the CLUSTER-prepend
+of the all-clusters problems scope and B87's future column work)/problems scope
++ a B87-forward columns snapshot. The filter grammar gained `colname=value` cell
+matching with `|` OR (src/lib/filter.ts) — required by the acceptance case and
+the built-ins; label selectors are unchanged. Store: `savedViewsByCid` +
+add/remove (upsert by name = edit-in-place) in the connection slice, and an
+`applyView` action (navigation slice) that sets nav+namespace+filter+sort+scope
+in one update (deliberately not `jumpTo`, which clears filter/sort). UI: a "▾
+views" dropdown in the table toolbar (built-ins + saved, each applies; ✕ deletes
+saved ones; "Save current view…" captures the live table state). The command
+palette lists them as `view: <name>` items (palette ViewItem). Built-ins (v7):
+Unhealthy pods, Warnings, Pending workloads, Recent failures — plain filter
+expressions that work on any cluster. Persistence mirrors bookmarks: a
+`savedViews` field on `Prefs` (TS + the Rust `Prefs` struct in commands.rs —
+without the Rust field serde would drop it on first save) restored/saved in
+useBootstrap. **Verification:** 434 frontend tests green (+24), clippy and cargo
+test green (Rust change is the struct field only). The four acceptance items are
+covered by tests: save/load restores filter+namespace+sort (store + toolbar
+tests), built-ins match mock rows per cluster (views.test), the prefs round-trip
+survives JSON (store test), and ⌘K's "view:" items (palette test). Remaining to
+confirm in the running app: a real restart cycle and a manual ⌘K run — the boxes
+above are left unchecked until then.
+
 ### B87 — Table controls, local custom columns, and export *(absorbs B67)*
 
 Add show/hide, drag reorder, resize, reset, and persisted width/order/visibility

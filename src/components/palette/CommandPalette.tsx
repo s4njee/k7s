@@ -17,6 +17,7 @@ import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { getProvider } from "../../providers";
 import { buildPalette, type ActionId, type PaletteItem } from "../../lib/palette";
 import { bookmarkKey, EMPTY_BOOKMARKS } from "../../lib/bookmarks";
+import { BUILTIN_VIEWS } from "../../lib/views";
 
 const EMPTY_ITEMS: PaletteItem[] = [];
 
@@ -30,6 +31,9 @@ export function CommandPalette() {
   const selectedRow = useStore((s) => s.selectedRow);
   const context = useStore((s) => s.connection.context ?? "");
   const bookmarks = useStore((s) => s.bookmarksByContext[context] ?? EMPTY_BOOKMARKS);
+  const activeCid = useStore((s) => s.activeCid);
+  const savedViewsByCid = useStore((s) => s.savedViewsByCid);
+  const applyView = useStore((s) => s.applyView);
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -45,9 +49,14 @@ export function CommandPalette() {
             nav,
             selectedRow,
             bookmarks: new Set(bookmarks.map(bookmarkKey)),
+            // Saved views, with the built-ins always available (B60).
+            savedViews: [
+              ...BUILTIN_VIEWS,
+              ...(activeCid ? savedViewsByCid[activeCid] ?? [] : []),
+            ],
           })
         : EMPTY_ITEMS,
-    [open, query, rows, customKinds, nav, selectedRow, bookmarks],
+    [open, query, rows, customKinds, nav, selectedRow, bookmarks, activeCid, savedViewsByCid],
   );
 
   // A fresh palette every time: the last query is rarely the next one, and
@@ -90,6 +99,11 @@ export function CommandPalette() {
         break;
       case "action":
         runAction(item.id);
+        setOpen(false);
+        break;
+      case "view":
+        // B60: applying a view navigates (nav/namespace/filter/sort/scope).
+        applyView(item.view);
         setOpen(false);
         break;
     }
@@ -258,6 +272,8 @@ function itemKey(item: PaletteItem): string {
       return `obj:${item.row.uid}`;
     case "action":
       return `act:${item.id}`;
+    case "view":
+      return `view:${item.view.id}`;
   }
 }
 
@@ -270,5 +286,7 @@ function iconFor(item: PaletteItem): string {
       return "›";
     case "action":
       return "⚡";
+    case "view":
+      return "▾";
   }
 }

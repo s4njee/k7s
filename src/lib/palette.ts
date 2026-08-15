@@ -14,6 +14,7 @@
 import { fuzzyMatch } from "./fuzzy";
 import { isCustomKind, KIND_META, KIND_ORDER, type KindId } from "./kinds";
 import { bookmarkKey } from "./bookmarks";
+import type { SavedView } from "./views";
 import type { CustomKind, Row } from "../providers/types";
 
 /** A bookmarked object's score boost — it outranks a same-quality match (B56). */
@@ -56,7 +57,15 @@ export interface ActionItem extends Scored {
   hint: string;
 }
 
-export type PaletteItem = KindItem | ObjectItem | ActionItem;
+/** Apply a saved (or built-in) view (B60). */
+export interface ViewItem extends Scored {
+  type: "view";
+  view: SavedView;
+  label: string;
+  hint: string;
+}
+
+export type PaletteItem = KindItem | ObjectItem | ActionItem | ViewItem;
 
 /** The slice of the store the palette reads. */
 export interface PaletteContext {
@@ -67,6 +76,8 @@ export interface PaletteContext {
   selectedRow: Row | null;
   /** Bookmark keys (B56) — bookmarked objects rank higher. Absent = none. */
   bookmarks?: Set<string>;
+  /** Saved + built-in views to offer (B60); labelled with a "view:" prefix. */
+  savedViews?: SavedView[];
 }
 
 /** A query split into its `ns:` scope and the text to match. */
@@ -92,6 +103,7 @@ const UNSEARCHABLE_KINDS: ReadonlySet<string> = new Set(["events"]);
 const MAX_KINDS = 8;
 const MAX_OBJECTS = 25;
 const MAX_ACTIONS = 6;
+const MAX_VIEWS = 8;
 
 /**
  * Split a leading `ns:<name>` scope off a query.
@@ -115,6 +127,7 @@ export function buildPalette(raw: string, ctx: PaletteContext): PaletteItem[] {
 
   const kinds = rankClass(kindCandidates(ctx), text, MAX_KINDS);
   const actions = rankClass(actionCandidates(ctx), text, MAX_ACTIONS);
+  const views = rankClass(viewCandidates(ctx), text, MAX_VIEWS);
   // Objects are only listed once there's something to match: every row in the
   // cluster is not a useful default screen, and the empty palette should show
   // where you can *go*, not everything that exists.
@@ -133,7 +146,7 @@ export function buildPalette(raw: string, ctx: PaletteContext): PaletteItem[] {
   // One list, ranked together: the scores come from the same query, so they're
   // comparable, and a strong object match should be able to outrank a weak kind
   // match rather than being stuck below it.
-  return [...kinds, ...actions, ...objects].sort(byScore);
+  return [...kinds, ...actions, ...views, ...objects].sort(byScore);
 }
 
 /** Best-first, with a stable tiebreak so equal scores don't shuffle per render. */
@@ -264,6 +277,21 @@ function actionCandidates(ctx: PaletteContext) {
     );
   }
 
+  return items;
+}
+
+/** Saved + built-in views (B60), labelled with a "view:" prefix so they're
+ *  discoverable as their own thing ("view:crashloop" — and plain "crashloop"
+ *  matches too, via the bare-name fallback target). */
+function viewCandidates(ctx: PaletteContext) {
+  const items: { item: Omit<ViewItem, "score" | "indices">; targets: string[] }[] = [];
+  for (const v of ctx.savedViews ?? []) {
+    const label = `view: ${v.name}`;
+    items.push({
+      item: { type: "view", view: v, label, hint: `view · ${v.kind}` },
+      targets: [label, v.name],
+    });
+  }
   return items;
 }
 

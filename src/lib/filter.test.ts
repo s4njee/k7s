@@ -108,6 +108,61 @@ describe("matchesFilter", () => {
   });
 });
 
+describe("matchesFilter — column-name matching (B60)", () => {
+  // The pods column set, as kindMeta reports it; the last cell is STATUS.
+  const POD_COLUMNS = ["NAME", "NAMESPACE", "READY", "RESTARTS", "CPU", "MEM", "AGE", "STATUS"];
+  const crashLoopPod = row({
+    name: "heimdall-auth-6b8c9d5f7-qq3rt",
+    labels: { app: "heimdall-auth" },
+    cells: [
+      { text: "heimdall-auth-6b8c9d5f7-qq3rt", tone: "primary" },
+      { text: "prod", tone: "muted" },
+      { text: "1/2", tone: "warn" },
+      { text: "14", tone: "err" },
+      { text: "45m", tone: "secondary" },
+      { text: "203Mi", tone: "secondary" },
+      { text: "2h14m", tone: "muted" },
+      { text: "CrashLoopBackOff", tone: "err" },
+    ],
+  });
+
+  it("status=… matches the STATUS cell exactly", () => {
+    expect(matchesFilter(crashLoopPod, parseFilter("status=CrashLoopBackOff"), "pods", POD_COLUMNS)).toBe(true);
+    expect(matchesFilter(crashLoopPod, parseFilter("status=Running"), "pods", POD_COLUMNS)).toBe(false);
+  });
+
+  it("a | value is an OR of alternatives", () => {
+    expect(matchesFilter(crashLoopPod, parseFilter("status=Running|CrashLoopBackOff"), "pods", POD_COLUMNS)).toBe(true);
+    expect(matchesFilter(crashLoopPod, parseFilter("status=Running|Failed"), "pods", POD_COLUMNS)).toBe(false);
+  });
+
+  it("is case-insensitive in both key and value", () => {
+    expect(matchesFilter(crashLoopPod, parseFilter("STATUS=crashloopbackoff"), "pods", POD_COLUMNS)).toBe(true);
+  });
+
+  it("a key that isn't a column still matches labels", () => {
+    expect(matchesFilter(crashLoopPod, parseFilter("app=heimdall-auth"), "pods", POD_COLUMNS)).toBe(true);
+    expect(matchesFilter(crashLoopPod, parseFilter("app=other"), "pods", POD_COLUMNS)).toBe(false);
+  });
+
+  it("a column match works on kinds without labels (events type=Warning)", () => {
+    const ev = row({
+      name: "x.17c3f",
+      cells: [
+        { text: "Warning", tone: "err" },
+        { text: "FailedMount", tone: "primary" },
+      ],
+    });
+    expect(matchesFilter(ev, parseFilter("type=Warning"), "events", ["TYPE", "REASON"])).toBe(true);
+    expect(matchesFilter(ev, parseFilter("type=Normal"), "events", ["TYPE", "REASON"])).toBe(false);
+  });
+
+  it("without columns, key=value stays a label selector (back-compat)", () => {
+    // "status" isn't a label, so a row with labels rejects it — the old behaviour.
+    expect(matchesFilter(crashLoopPod, parseFilter("status=CrashLoopBackOff"), "pods")).toBe(false);
+  });
+});
+
 describe("selectorFilter", () => {
   it("renders matchLabels as a stable, sorted k=v,k2=v2 string", () => {
     expect(selectorFilter({ tier: "web", app: "wiki" })).toBe("app=wiki,tier=web");

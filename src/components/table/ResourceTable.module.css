@@ -245,3 +245,105 @@
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* ---- Saved views dropdown (B60) ---- */
+.viewWrap {
+  position: relative;
+  flex: none;
+}
+.viewsBtn {
+  flex: none;
+  background: var(--bg-control);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.viewsBtn:hover {
+  border-color: var(--border-hover);
+}
+.viewMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 230px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-menu);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  padding: 4px;
+}
+.viewRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.viewItem {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.viewItem:hover {
+  background: var(--bg-hover);
+}
+.builtinTag {
+  margin-left: 6px;
+  font-size: 9px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+.viewDelete {
+  flex: none;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.viewDelete:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.viewDivider {
+  height: 1px;
+  background: var(--border-default);
+  margin: 4px 2px;
+}
+.saveRow {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  align-items: center;
+}
+.saveInput {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-terminal);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 4px 8px;
+}
+.saveBtn {
+  flex: none;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-body);
+}
+.saveBtn:hover {
+  border-color: var(--border-hover);
+}

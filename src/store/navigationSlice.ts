@@ -5,7 +5,8 @@
 import type { StateCreator } from "zustand";
 import type { AppState, NavigationActions, NavigationState } from "./types";
 import type { KindId, Row } from "../providers/types";
-import { hasLogs } from "../lib/kinds";
+import { hasLogs, kindMeta } from "../lib/kinds";
+import { viewSortIndex, type SavedView } from "../lib/views";
 import { EMPTY_SELECTION, type SelectionState } from "../lib/selection";
 import type { DetailTab } from "./types";
 import type { SinceOption } from "../lib/logview";
@@ -120,5 +121,25 @@ export const createNavigationSlice: StateCreator<
       selection: EMPTY_SELECTION,
       namespace: namespace || s.namespace,
       tableFilter: selector,
+    })),
+
+  // B60: apply a saved view in one update — the kind, namespace, filter, sort
+  // (column NAME resolved against the kind's columns, so it survives the
+  // CLUSTER-prepend of the all-clusters problems scope), and the problems scope.
+  // Deliberately not jumpTo: that clears the filter and sort.
+  applyView: (view: SavedView) =>
+    set((s) => ({
+      nav: view.kind,
+      namespace: view.namespace || s.namespace,
+      tableFilter: view.filter ?? "",
+      sortCol: viewSortIndex(view, kindMeta(view.kind, s.customKinds)?.columns ?? []),
+      sortDir: view.sortDir ?? "asc",
+      openMenu: null,
+      paletteOpen: false,
+      selectedRow: null,
+      selection: EMPTY_SELECTION,
+      ...(view.kind === "problems" && view.problemsScope
+        ? { problemsScope: view.problemsScope }
+        : {}),
     })),
 });

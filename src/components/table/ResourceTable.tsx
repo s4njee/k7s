@@ -195,7 +195,8 @@ export function ResourceTable() {
       if (!isClusterScoped(nav, customKinds) && namespace !== "all" && r.namespace !== namespace) {
         return false;
       }
-      return matchesFilter(r, parsed, nav);
+      // `columns` lets the filter match by column name (B60), e.g. status=…
+      return matchesFilter(r, parsed, nav, columns);
     });
     const overlaid = overlayMetrics(nav, filtered, podMetrics, nodeMetrics, podRows);
     return sortCol === null ? overlaid : sortRows(overlaid, sortCol, sortDir, now);

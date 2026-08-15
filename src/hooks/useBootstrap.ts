@@ -132,6 +132,8 @@ export function useBootstrap(): void {
           if (typeof prefs.showTimestamps === "boolean") restore.showTimestamps = prefs.showTimestamps;
           // Bookmarks are keyed by context, so each context keeps its own list (B56).
           if (prefs.bookmarks) restore.bookmarksByContext = prefs.bookmarks;
+          // Saved views are per-cluster too (B60).
+          if (prefs.savedViews) restore.savedViewsByCid = prefs.savedViews;
           // Per-cluster rail colour + default namespace (B77).
           if (prefs.clusterColors) restore.clusterColors = prefs.clusterColors;
           if (prefs.clusterNamespaces) restore.clusterNamespaces = prefs.clusterNamespaces;
@@ -168,6 +170,8 @@ export function useBootstrap(): void {
             importedFiles: s.importedFiles,
             // Bookmarks keyed by context (B56).
             bookmarks: s.bookmarksByContext,
+            // Saved views keyed by context (B60).
+            savedViews: s.savedViewsByCid,
             // Per-cluster rail colour + default namespace (B77).
             clusterColors: s.clusterColors,
             clusterNamespaces: s.clusterNamespaces,

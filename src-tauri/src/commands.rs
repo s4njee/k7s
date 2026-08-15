@@ -77,6 +77,9 @@ pub struct Prefs {
     /// Resource bookmarks (B56), keyed by context. Frontend-owned, so it's
     /// carried as an opaque JSON value to round-trip through saves.
     pub bookmarks: Option<serde_json::Value>,
+    /// Saved views (B60), keyed by context. Frontend-owned, carried as an opaque
+    /// JSON value so it round-trips through saves exactly like bookmarks.
+    pub saved_views: Option<serde_json::Value>,
     /// Container image for the node debug shell; None/empty uses the default (B53).
     pub node_shell_image: Option<String>,
     // ---- diagnostics (B73) ----

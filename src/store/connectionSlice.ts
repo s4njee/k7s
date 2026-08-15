@@ -12,6 +12,7 @@ import type { StateCreator } from "zustand";
 import type { AppState, ConnectionActions, ConnectionSliceState } from "./types";
 import { getProvider } from "../providers";
 import { sameBookmark } from "../lib/bookmarks";
+import { viewId } from "../lib/views";
 import { EMPTY_SELECTION } from "../lib/selection";
 import { emptyRows } from "./dataSlice";
 import { defaultDetailState } from "./detailSlice";
@@ -31,6 +32,7 @@ export const initialConnectionState: ConnectionSliceState = {
   bookmarksByContext: {},
   clusterColors: {},
   clusterNamespaces: {},
+  savedViewsByCid: {},
 };
 
 export const createConnectionSlice: StateCreator<
@@ -149,6 +151,24 @@ export const createConnectionSlice: StateCreator<
         bookmarksByContext: { ...s.bookmarksByContext, [ctx]: [...list, bookmark] },
       };
     }),
+
+  // Saved views (B60): per-cluster, upserted by name (re-saving "crashloop"
+  // with different parameters edits that view in place), id derived from the name.
+  addSavedView: (cid, view) =>
+    set((s) => {
+      const id = viewId(view.name);
+      const list = (s.savedViewsByCid[cid] ?? []).filter((v) => v.id !== id);
+      list.push({ ...view, id, name: view.name, builtin: false });
+      return { savedViewsByCid: { ...s.savedViewsByCid, [cid]: list } };
+    }),
+
+  removeSavedView: (cid, id) =>
+    set((s) => ({
+      savedViewsByCid: {
+        ...s.savedViewsByCid,
+        [cid]: (s.savedViewsByCid[cid] ?? []).filter((v) => v.id !== id),
+      },
+    })),
 
   setClusterColor: (cid, color) =>
     set((s) => ({ clusterColors: { ...s.clusterColors, [cid]: color } })),
