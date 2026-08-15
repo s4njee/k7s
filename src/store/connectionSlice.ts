@@ -34,6 +34,7 @@ export const initialConnectionState: ConnectionSliceState = {
   clusterNamespaces: {},
   savedViewsByCid: {},
   columnPrefsByCid: {},
+  forwardPresetsByCid: {},
 };
 
 export const createConnectionSlice: StateCreator<
@@ -188,6 +189,24 @@ export const createConnectionSlice: StateCreator<
       delete next[kind];
       return { columnPrefsByCid: { ...s.columnPrefsByCid, [cid]: next } };
     }),
+
+  // Forward presets (B89): per-cluster, upserted by id (re-saving a preset with
+  // the same name edits it in place).
+  addForwardPreset: (cid, preset) =>
+    set((s) => {
+      const id = viewId(preset.name);
+      const list = (s.forwardPresetsByCid[cid] ?? []).filter((p) => p.id !== id);
+      list.push({ ...preset, id });
+      return { forwardPresetsByCid: { ...s.forwardPresetsByCid, [cid]: list } };
+    }),
+
+  removeForwardPreset: (cid, id) =>
+    set((s) => ({
+      forwardPresetsByCid: {
+        ...s.forwardPresetsByCid,
+        [cid]: (s.forwardPresetsByCid[cid] ?? []).filter((p) => p.id !== id),
+      },
+    })),
 
   setClusterColor: (cid, color) =>
     set((s) => ({ clusterColors: { ...s.clusterColors, [cid]: color } })),

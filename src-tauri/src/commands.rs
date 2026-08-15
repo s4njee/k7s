@@ -89,6 +89,9 @@ pub struct Prefs {
     /// Per-{cluster, kind} column config (B87). Frontend-owned, carried as an
     /// opaque JSON value so it round-trips through saves.
     pub column_prefs: Option<serde_json::Value>,
+    /// Port-forward presets (B89), keyed by context. Frontend-owned, carried as
+    /// an opaque JSON value so it round-trips through saves.
+    pub forward_presets: Option<serde_json::Value>,
     /// Container image for the node debug shell; None/empty uses the default (B53).
     pub node_shell_image: Option<String>,
     // ---- diagnostics (B73) ----
@@ -2023,6 +2026,7 @@ pub async fn start_port_forward(
     namespace: String,
     pod: String,
     remote_port: u16,
+    local_port: Option<u16>,
     mgr: State<'_, Arc<ClientManager>>,
     cid: String,
 ) -> AppResult<ForwardDto> {
@@ -2032,7 +2036,7 @@ pub async fn start_port_forward(
     // Fail fast with a clear message if the pod is gone.
     portforward::ensure_pod(client.clone(), &namespace, &pod).await?;
 
-    spawn_forward(manager, client, cid, namespace, pod, None, remote_port).await
+    spawn_forward(manager, client, cid, namespace, pod, None, remote_port, local_port).await
 }
 
 /// Start forwarding a *Service* port (B16): pick a Ready backing pod and resolve
@@ -2045,6 +2049,7 @@ pub async fn start_service_port_forward(
     namespace: String,
     service: String,
     remote_port: u16,
+    local_port: Option<u16>,
     mgr: State<'_, Arc<ClientManager>>,
     cid: String,
 ) -> AppResult<ForwardDto> {
@@ -2054,7 +2059,7 @@ pub async fn start_service_port_forward(
     let (pod, target_port) =
         portforward::resolve_service(client.clone(), &namespace, &service, remote_port).await?;
 
-    spawn_forward(manager, client, cid, namespace, pod, Some((service, remote_port)), target_port).await
+    spawn_forward(manager, client, cid, namespace, pod, Some((service, remote_port)), target_port, local_port).await
 }
 
 /// Bind a local listener, spawn the forward's accept loop, and register it.
@@ -2070,6 +2075,7 @@ async fn spawn_forward(
     // For a Service forward: its name and the port the user asked for.
     service: Option<(String, u16)>,
     remote_port: u16,
+    local_port: Option<u16>,
 ) -> AppResult<ForwardDto> {
     let (ready_tx, ready_rx) = oneshot::channel::<Result<u16, String>>();
     // Bounded: per-connection errors are for display, so a full channel just means
@@ -2079,7 +2085,7 @@ async fn spawn_forward(
     let ns = namespace.clone();
     let p = pod.clone();
     let task = tokio::spawn(async move {
-        portforward::run_port_forward(client, ns, p, remote_port, ready_tx, err_tx).await;
+        portforward::run_port_forward_on(client, ns, p, remote_port, local_port, ready_tx, err_tx).await;
     });
 
     // Wait for the listener to bind (or report the bind error).

@@ -834,7 +834,7 @@ export class MockProvider implements DataProvider {
   // ---- port-forwarding (demo: fake local ports) ----
   private forwards: ForwardInfo[] = [];
 
-  async startPortForward(ref: ResourceRef, remotePort: number): Promise<ForwardInfo> {
+  async startPortForward(ref: ResourceRef, remotePort: number, localPort?: number): Promise<ForwardInfo> {
     const isService = ref.kind === "services";
     const fwd: ForwardInfo = {
       id: `pf-${ref.name}-${remotePort}-${this.forwards.length}`,
@@ -848,7 +848,7 @@ export class MockProvider implements DataProvider {
       // mirrors that so the strip's "show what was asked for" rule is visible.
       remotePort: isService ? 8080 : remotePort,
       servicePort: isService && remotePort !== 8080 ? remotePort : undefined,
-      localPort: 20000 + Math.floor(Math.random() * 10000),
+      localPort: localPort ?? 20000 + Math.floor(Math.random() * 10000),
     };
     this.forwards.push(fwd);
     this.emitForwards();

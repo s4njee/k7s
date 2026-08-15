@@ -8,6 +8,7 @@ import type {
   CustomKind,
   DrainProgress,
   ForwardInfo,
+  ForwardPreset,
   KindId,
   LogLine,
   NavTarget,
@@ -119,6 +120,8 @@ export interface ConnectionSliceState {
   savedViewsByCid: Record<Cid, SavedView[]>;
   /** Per-{cid, kind} column config (B87): visibility, order, widths, custom columns. */
   columnPrefsByCid: Record<Cid, Record<KindId, ColumnPrefs>>;
+  /** Saved port-forward presets per cluster (B89), persisted like bookmarks. */
+  forwardPresetsByCid: Record<Cid, ForwardPreset[]>;
 }
 
 export interface ConnectionActions {
@@ -140,6 +143,10 @@ export interface ConnectionActions {
   setColumnPrefs: (cid: Cid, kind: KindId, prefs: ColumnPrefs) => void;
   /** Drop a kind's column config, restoring the default columns. */
   resetColumnPrefs: (cid: Cid, kind: KindId) => void;
+  /** Save (or replace, by name) a port-forward preset for a cluster (B89). */
+  addForwardPreset: (cid: Cid, preset: ForwardPreset) => void;
+  /** Delete a forward preset by id. */
+  removeForwardPreset: (cid: Cid, id: string) => void;
   setClusterStatus: (cid: Cid, s: ClusterStatus) => void;
   setWatchCount: (cid: Cid, n: number) => void;
   setWatcherHealth: (cid: Cid, health: Record<string, WatcherHealth>) => void;
@@ -162,6 +169,8 @@ export interface DataSliceState {
   settingsOpen: boolean;
   createOpen: boolean;
   paletteOpen: boolean;
+  /** The port-forward management workspace (B89). */
+  forwardManagerOpen: boolean;
   /** Problems view scope (B77): the active cluster, or aggregated across all. */
   problemsScope: "active" | "all";
   podMetrics: PodMetricsMap;
@@ -199,6 +208,7 @@ export interface DataActions {
   setSettingsOpen: (open: boolean) => void;
   setCreateOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
+  setForwardManagerOpen: (open: boolean) => void;
   setProblemsScope: (scope: "active" | "all") => void;
   /** Wipe one cluster's retained data (failed connect / rail removal). */
   resetData: (cid: Cid) => void;

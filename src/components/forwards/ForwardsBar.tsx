@@ -17,8 +17,7 @@ import type { ForwardInfo } from "../../providers/types";
 export function ForwardsBar() {
   const forwards = useStore((s) => s.portForwards);
   const setPortForwards = useStore((s) => s.setPortForwards);
-
-  if (forwards.length === 0) return null;
+  const setForwardManagerOpen = useStore((s) => s.setForwardManagerOpen);
 
   const stop = async (id: string) => {
     await getProvider().stopPortForward(id);
@@ -62,6 +61,15 @@ export function ForwardsBar() {
           </button>
         </span>
       ))}
+      {forwards.length === 0 && <span className={styles.empty}>none</span>}
+      <button
+        type="button"
+        className={styles.manage}
+        onClick={() => setForwardManagerOpen(true)}
+        aria-label="manage port forwards"
+      >
+        ▸ manage
+      </button>
     </div>
   );
 }

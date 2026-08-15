@@ -12,6 +12,7 @@ import { useBootstrap } from "./hooks/useBootstrap";
 import { useCustomKindWatch } from "./hooks/useCustomKindWatch";
 import { useGlobalKeys } from "./hooks/useGlobalKeys";
 import { useProblemNotifications } from "./hooks/useProblemNotifications";
+import { useForwardPresetRestart } from "./hooks/useForwardPresetRestart";
 import { useTheme } from "./hooks/useTheme";
 import { useUpdates } from "./hooks/useUpdates";
 import { Sidebar } from "./components/sidebar/Sidebar";
@@ -21,6 +22,7 @@ import { ResourceTable } from "./components/table/ResourceTable";
 import { DetailPanel } from "./components/detail/DetailPanel";
 import { ClusterOverview } from "./components/overview/ClusterOverview";
 import { ForwardsBar } from "./components/forwards/ForwardsBar";
+import { ForwardManager } from "./components/forwards/ForwardManager";
 import { TerminalPanel } from "./components/terminal/TerminalPanel";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { CreateYaml } from "./components/create/CreateYaml";
@@ -38,6 +40,7 @@ export default function App() {
   useTheme();
   // Native problem notifications when opted in (B50).
   useProblemNotifications();
+  useForwardPresetRestart();
   // Passive update checks (B72): on launch and once a day, silent on failure.
   useUpdates();
 
@@ -59,6 +62,7 @@ export default function App() {
       <SettingsPanel />
       <CreateYaml />
       <CommandPalette />
+      <ForwardManager />
     </div>
   );
 }

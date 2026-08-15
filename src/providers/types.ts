@@ -466,6 +466,8 @@ export interface Prefs {
   bookmarks?: Record<string, Bookmark[]> | null;
   /** Saved views (B60) keyed by cluster context, persisted like bookmarks. */
   savedViews?: Record<string, SavedView[]> | null;
+  /** Port-forward presets (B89) keyed by cluster context. */
+  forwardPresets?: Record<string, ForwardPreset[]> | null;
   /** Per-{cluster, kind} column config (B87), persisted like bookmarks. */
   columnPrefs?: Record<string, Record<string, ColumnPrefs>> | null;
   /** Per-cluster rail colour + default namespace (B77). */
@@ -543,6 +545,25 @@ export interface SavedView {
   problemsScope?: "active" | "all";
   /** B87 forward-compat: the kind's visible columns at save time (static today). */
   columns?: string[];
+}
+
+/**
+ * A saved port-forward preset (B89): a named target that can be started with one
+ * click, bound to a cluster (the store keys presets by cid). Does not
+ * auto-connect on launch; `autoRestart` opts into restarting after the cluster
+ * recovers from a stale/offline state. `localPort` pins the local port when set.
+ */
+export interface ForwardPreset {
+  id: string;
+  /** Display name. */
+  name: string;
+  kind: "pods" | "services";
+  namespace: string;
+  /** The pod or service name. */
+  target: string;
+  remotePort: number;
+  localPort?: number;
+  autoRestart?: boolean;
 }
 
 /**
@@ -1082,7 +1103,9 @@ export interface DataProvider {
    * Service resolves to a Ready backing pod first, and `remotePort` is then the
    * *service* port rather than the pod's (B16).
    */
-  startPortForward(ref: ResourceRef, remotePort: number): Promise<ForwardInfo>;
+  /** Start a port-forward to `ref.remotePort`, optionally pinned to a specific
+   *  local port (B89 — None lets the OS pick one). */
+  startPortForward(ref: ResourceRef, remotePort: number, localPort?: number): Promise<ForwardInfo>;
   stopPortForward(id: string): Promise<void>;
   listPortForwards(): Promise<ForwardInfo[]>;
   /** Active forwards, pushed on add/remove/failure (B16). */

@@ -466,7 +466,6 @@ acceptance boxes stay unchecked pending the real-app pass (a restricted SA on
 kind, a native confirm preview, a Helm-owned object).
 
 ### B89 — Port-forward management workspace
-### B89 — Port-forward management workspace
 
 Promote the current forward strip into a searchable management view. Support
 open in browser, stop/start, edit local port, delete, and named saved presets.
@@ -482,6 +481,32 @@ as the always-visible active-session summary.
 - [ ] Recreated pod endpoints are resolved again rather than reusing a dead pod
       name/IP.
 - [ ] Same-named Services on two clusters remain unambiguous and isolated.
+
+**Implementation report (2026-08-15):**
+
+Implemented. **Management workspace** — a `ForwardManager` modal (searchable,
+`role="dialog"` + focus trap) lists the cluster's active forwards and saved
+presets: each forward row has open-in-browser (`shell:allow-open` already covers
+`http://localhost:<port>`, via `lib/openExternal`), stop, edit-local-port (an
+inline port input → stop + restart with the chosen port), save-as-preset, and a
+failing forward's `error` shown inline. The compact ForwardsBar stays the
+always-visible summary and now has a "manage" button. **Presets** —
+`ForwardPreset` (kind/target/remotePort/optional pinned localPort/autoRestart),
+cid-bound via `forwardPresetsByCid`, upserted by name, persisted through the
+savedViews chain (TS Prefs + the Rust `Prefs` struct `forward_presets` +
+useBootstrap); they never auto-connect on launch. **Backend** — the forward
+start path gained an optional `local_port` (a chosen-but-busy port yields the
+clear bind error); a Service-forward restart re-runs `resolve_service`, so a
+recreated pod endpoint is resolved again rather than pinning a dead pod (the
+`svc_forward_check` harness proves the resolution). **Offline + reconnect** —
+presets disable when the cluster is stale *or* disconnected (both signals
+checked), and a stale→fresh-edge hook (`useForwardPresetRestart`, mounted at the
+App root) restarts each opted-in preset when the cluster comes back —
+frontend-only, since the backend never auto-restarts forwards. **Verification:**
+489 frontend tests (+8: preset store + the manager's start/edit/error/offline),
+clippy + 237 cargo tests green. The v7 acceptance boxes stay unchecked pending
+the real-app pass (an actual Service forward opened in a browser, an edited
+port, and a reconnect restart on kind).
 
 ---
 

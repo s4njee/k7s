@@ -34,7 +34,23 @@ pub async fn run_port_forward(
     ready: oneshot::Sender<Result<u16, String>>,
     errors: mpsc::Sender<String>,
 ) {
-    let listener = match TcpListener::bind(("127.0.0.1", 0)).await {
+    // B89: a pinned local port (edit-local-port / presets); None = OS-assigned.
+    run_port_forward_on(client, namespace, pod, remote_port, None, ready, errors).await;
+}
+
+/// The same accept loop with an explicit local port choice. Keeping this the
+/// shared body means the old five-arg call sites (nodestats, examples) and the
+/// new pinned-port path can't drift.
+pub async fn run_port_forward_on(
+    client: Client,
+    namespace: String,
+    pod: String,
+    remote_port: u16,
+    local_port: Option<u16>,
+    ready: oneshot::Sender<Result<u16, String>>,
+    errors: mpsc::Sender<String>,
+) {
+    let listener = match TcpListener::bind(("127.0.0.1", local_port.unwrap_or(0))).await {
         Ok(l) => l,
         Err(e) => {
             let _ = ready.send(Err(e.to_string()));

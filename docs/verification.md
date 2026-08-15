@@ -8,7 +8,7 @@ the few places where the two design sources disagreed and a call was made.
 | Suite | Command | Result |
 |---|---|---|
 | Type check | `pnpm run typecheck` | clean |
-| Frontend unit + component | `pnpm test` (vitest) | 481 passed — formatters, store, terminal slice, RTL component tests (cluster switch, table filter/sort, detail tabs, YAML dry run, confirm dialog, terminal open/close, background-cluster isolation), B75 injection contract, B60 saved views, B87 column config + CSV, B88 metadata editor + kubectl previews |
+| Frontend unit + component | `pnpm test` (vitest) | 489 passed — formatters, store, terminal slice, RTL component tests (cluster switch, table filter/sort, detail tabs, YAML dry run, confirm dialog, terminal open/close, background-cluster isolation), B75 injection contract, B60 saved views, B87 column config + CSV, B88 metadata editor + kubectl previews, B89 forward-manager + presets |
 | Rust unit | `cargo test` | 234 passed — DTO tone mapping, log-line parser, quantity parsing, terminal PTY, B76 lifecycle |
 | Lint | `cargo clippy --all-targets -- -D warnings` | clean |
 | Frontend build | `pnpm run build` | succeeds |

@@ -136,6 +136,8 @@ export function useBootstrap(): void {
           if (prefs.savedViews) restore.savedViewsByCid = prefs.savedViews;
           // Column config is per-{cluster, kind} (B87).
           if (prefs.columnPrefs) restore.columnPrefsByCid = prefs.columnPrefs;
+          // Port-forward presets are per-cluster too (B89).
+          if (prefs.forwardPresets) restore.forwardPresetsByCid = prefs.forwardPresets;
           // Per-cluster rail colour + default namespace (B77).
           if (prefs.clusterColors) restore.clusterColors = prefs.clusterColors;
           if (prefs.clusterNamespaces) restore.clusterNamespaces = prefs.clusterNamespaces;
@@ -176,6 +178,8 @@ export function useBootstrap(): void {
             savedViews: s.savedViewsByCid,
             // Column config keyed by {cluster, kind} (B87).
             columnPrefs: s.columnPrefsByCid,
+            // Port-forward presets keyed by cluster (B89).
+            forwardPresets: s.forwardPresetsByCid,
             // Per-cluster rail colour + default namespace (B77).
             clusterColors: s.clusterColors,
             clusterNamespaces: s.clusterNamespaces,

@@ -55,6 +55,7 @@ export const initialDataState: DataSliceState = {
   settingsOpen: false,
   createOpen: false,
   paletteOpen: false,
+  forwardManagerOpen: false,
   problemsScope: "active",
   podMetrics: {},
   podMetricsByCid: {},
@@ -219,6 +220,7 @@ export const createDataSlice: StateCreator<
 
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setCreateOpen: (open) => set({ createOpen: open }),
+  setForwardManagerOpen: (open) => set({ forwardManagerOpen: open }),
   setSystemDark: (dark) => set({ systemDark: dark }),
   setSelection: (selection) => set({ selection }),
   clearSelection: () => set({ selection: EMPTY_SELECTION }),
