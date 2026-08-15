@@ -28,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
     // Discovery-based (B45): a cluster with no Helm releases has nothing to check.
     if table.is_empty() {
         println!("\nno Helm releases on this cluster, skipping");
+        k7s_lib::harness::skip("no Helm releases on this cluster");
         return Ok(());
     }
 

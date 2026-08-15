@@ -32,6 +32,7 @@ async fn main() -> anyhow::Result<()> {
         .or_else(|| list.items.first())
     else {
         println!("no Deployment on this cluster, skipping");
+        k7s_lib::harness::skip("no Deployment on this cluster");
         return Ok(());
     };
     let ns = target.namespace().unwrap_or_default();

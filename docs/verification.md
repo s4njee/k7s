@@ -7,12 +7,14 @@ the few places where the two design sources disagreed and a call was made.
 
 | Suite | Command | Result |
 |---|---|---|
-| Type check | `npm run typecheck` | clean |
-| Frontend unit | `npm test` (vitest) | 19 passed — formatters, log ring buffer, store selection/nav reset |
-| Rust unit | `cargo test` | 14 passed — DTO tone mapping, log-line parser, quantity parsing |
+| Type check | `pnpm run typecheck` | clean |
+| Frontend unit + component | `pnpm test` (vitest) | 401 passed — formatters, store, terminal slice, RTL component tests (cluster switch, table filter/sort, detail tabs, YAML dry run, confirm dialog, terminal open/close, background-cluster isolation), B75 injection contract |
+| Rust unit | `cargo test` | 234 passed — DTO tone mapping, log-line parser, quantity parsing, terminal PTY, B76 lifecycle |
 | Lint | `cargo clippy --all-targets -- -D warnings` | clean |
-| Frontend build | `npm run build` | succeeds |
-| Release bundle | `npm run tauri:build` | `k7s.app` built (arm64, `io.k7s.app`); `.dmg` styling step needs a GUI session — see note below |
+| Frontend build | `pnpm run build` | succeeds |
+| Live harnesses (B83) | `./dev/cluster/up.sh --metrics && ./dev/cluster/helm-fixture.sh && node dev/run-harnesses.mjs --fixtures kind,helm,metrics,multi` | 21 pass / 3 skip against the kind fixture (crd_check/promql_check/storage_check skip — the fixture has no CRDs, Prometheus, or storage; recorded honestly) |
+| Packaged e2e (B83) | `xvfb-run -a node dev/e2e.mjs` (Linux, needs `tauri-driver`) | golden path via WebDriver; run nightly in CI until the 7-day flake rate is <5% |
+| Release bundle | `pnpm run tauri:build` | `k7s.app` built (arm64, `io.k7s.app`); `.dmg` styling step needs a GUI session — see note below |
 
 ## Manual verification (demo mode, 1440×900)
 

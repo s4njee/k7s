@@ -32,7 +32,11 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     println!("found {} Helm release(s)\n", releases.len());
-    assert!(!releases.is_empty(), "freya has Helm releases (traefik, arc, …)");
+    if releases.is_empty() {
+        // Discovery-based (B45): a cluster with no Helm releases has nothing to check.
+        k7s_lib::harness::skip("no Helm releases on this cluster");
+        return Ok(());
+    }
 
     for (ns, name) in &releases {
         let props = gather(client.clone(), "helm", ns, name).await?;

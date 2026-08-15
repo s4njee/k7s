@@ -107,6 +107,7 @@ async fn main() -> anyhow::Result<()> {
     });
     let Some(pod) = target else {
         println!("no pod with declared container ports, skipping the port-forward check");
+        k7s_lib::harness::skip("no pod with a declared container port");
         return Ok(());
     };
     let ns = pod.metadata.namespace.clone().unwrap_or_default();

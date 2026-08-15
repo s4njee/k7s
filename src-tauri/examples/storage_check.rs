@@ -63,7 +63,11 @@ async fn main() -> anyhow::Result<()> {
         checked += 1;
     }
     println!("\n{checked} bound claim/volume pair(s) reference each other consistently.");
-    assert!(checked > 0, "freya has bound claims to check");
+    if checked == 0 {
+        // Discovery-based (B45): a cluster with no storage has nothing to verify.
+        k7s_lib::harness::skip("no bound PersistentVolumeClaims on this cluster");
+        return Ok(());
+    }
 
     println!("\nStorage tables OK.");
     Ok(())

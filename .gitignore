@@ -23,3 +23,8 @@ latest.json
 .env
 .env.*
 !.env.example
+
+# Live-harness runner / packaged-e2e run artifacts (B83)
+harness-results.json
+harness-run.log
+e2e-results.json

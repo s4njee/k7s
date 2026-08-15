@@ -8,6 +8,7 @@ pub mod commands;
 mod crash_reporting;
 mod diagnostics;
 mod error;
+pub mod harness;
 mod logging;
 // Public so the live verification harnesses in examples/ can exercise the real
 // mappers rather than a copy of them; nothing outside this crate consumes it.

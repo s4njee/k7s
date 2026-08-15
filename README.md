@@ -146,10 +146,29 @@ npm run tauri:dev                # launch against context kind-k7s-dev
 
 ```bash
 npm run typecheck                          # tsc --noEmit
-npm test                                   # vitest (formatters, store/ring buffer)
+npm test                                   # vitest — unit + RTL component tests (B83)
 cargo test  --manifest-path src-tauri/Cargo.toml   # DTO mapping, log parser, quantities
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+./dev/verify.sh                            # all of the above in one command (CI's gates)
 ```
+
+### Live harnesses against the fixture (B83)
+
+The Rust examples under `src-tauri/examples/*_check.rs` are discovery-based live
+verification harnesses, run through a manifested runner that records pass/skip/fail:
+
+```bash
+./dev/cluster/up.sh --metrics
+./dev/cluster/helm-fixture.sh
+cargo build --examples --manifest-path src-tauri/Cargo.toml
+node dev/run-harnesses.mjs --fixtures kind,helm,metrics,multi
+```
+
+CI runs the same job on every PR. A harness with no fixture data records a skip
+(no CRDs, no Prometheus, no storage → `crd_check`/`promql_check`/`storage_check`
+skip); a broken code path fails the run. Note `helm_write_check` writes — it
+rolls the fixture release back and uninstalls it, so re-run `helm-fixture.sh`
+before a second run.
 
 ## Build
 

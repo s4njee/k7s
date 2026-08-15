@@ -17,6 +17,7 @@ async fn main() -> anyhow::Result<()> {
 
     let Some(svc) = promql::discover(&client).await else {
         println!("no Prometheus found — the app falls back to B27's live scraper.");
+        k7s_lib::harness::skip("no Prometheus service found");
         return Ok(());
     };
     println!("discovered: {}/{}:{}", svc.namespace, svc.name, svc.port);

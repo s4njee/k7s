@@ -22,6 +22,7 @@ async fn main() -> anyhow::Result<()> {
     let contexts = client::list_contexts().unwrap_or_default();
     if contexts.len() < 2 {
         println!("need at least two kubeconfig contexts to exercise B76 (found {}); skipping", contexts.len());
+        k7s_lib::harness::skip(format!("need at least two contexts (found {})", contexts.len()));
         return Ok(());
     }
 

@@ -45,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
         });
     let Some(target) = target else {
         println!("no pods on this cluster, skipping");
+        k7s_lib::harness::skip("no pods on this cluster");
         return Ok(());
     };
 

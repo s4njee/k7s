@@ -83,6 +83,84 @@ jobs:
       - name: Frontend dependency audit
         run: pnpm audit --prod --audit-level high
 
+  # B83: the live-harness net. Stands up the kind fixture (seeded, with
+  # metrics-server and the Helm fixture), runs every applicable Rust example
+  # harness through the manifested runner (dev/run-harnesses.mjs — records
+  # pass/skip/fail), uploads the log + JSON on every run, and always tears the
+  # cluster down. Runs per PR (and on every push to main / dispatch) once stable.
+  kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # The examples link k7s_lib → tauri, so the native GTK stack has to be in
+      # place before any cargo invocation, exactly like the Linux build job.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            build-essential \
+            curl wget file \
+            xvfb
+
+      # kind (cluster nodes run in docker, preinstalled on the runner), kubectl
+      # for the fixture scripts, helm for the B81 fixture release.
+      - name: Install kind, kubectl, and helm
+        run: |
+          curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.26.0/kind-linux-amd64
+          chmod +x /usr/local/bin/kind
+          curl -Lo /usr/local/bin/kubectl "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x /usr/local/bin/kubectl
+
+      - uses: azure/setup-helm@v4
+
+      # Compile all 24 example binaries once; the runner invokes them directly
+      # rather than `cargo run`-ing each.
+      - name: Build the example harnesses
+        run: cargo build --examples
+        working-directory: src-tauri
+
+      - name: Provision the fixture cluster
+        run: |
+          ./dev/cluster/up.sh --metrics
+          ./dev/cluster/helm-fixture.sh
+          # A second context into the same cluster: multi_cluster_check's point is
+          # two separate connections, not two clusters (B76).
+          kubectl config set-context k7s-dev-alt --cluster kind-k7s-dev --user kind-k7s-dev
+
+      - name: Run every applicable live harness
+        run: |
+          node dev/run-harnesses.mjs \
+            --fixtures kind,helm,metrics,multi \
+            --json harness-results.json 2>&1 | tee harness-run.log
+
+      - name: Upload harness results and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kind-harness
+          path: |
+            harness-results.json
+            harness-run.log
+          if-no-files-found: ignore
+
+      # The net only means something if the cluster never outlives the job.
+      - name: Tear down the kind cluster
+        if: always()
+        run: ./dev/cluster/down.sh
+
   build:
     # macos-14 is arm64. The intel runner would need its own job and a separate
     # artifact; k7s only ships a build for the arch it was built on.

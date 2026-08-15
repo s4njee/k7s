@@ -109,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
     println!("\n--- forwarding a resolved Service ---");
     let Some((ns, name, port)) = named.or_else(|| remapped.map(|(ns, name, port, _)| (ns, name, port))) else {
         println!("no resolvable Service to forward to, skipping the tunnel");
+        k7s_lib::harness::skip("no resolvable Service to forward to");
         return Ok(());
     };
     let (pod, port) = portforward::resolve_service(client.clone(), &ns, &name, port).await?;

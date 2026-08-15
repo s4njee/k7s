@@ -1,0 +1,29 @@
+{
+  "comment": "Live harness inventory for the k7s Rust examples (B83). dev/run-harnesses.mjs reads this, runs each entry's prebuilt example binary against a live cluster, and records pass / skip / fail. `requires` lists the fixtures a harness needs before it's worth running; the runner pre-skips any harness whose fixtures aren't provisioned. Fixtures: kind (dev/cluster/up.sh), helm (dev/cluster/helm-fixture.sh), metrics (up.sh --metrics), multi (a second kubeconfig context).",
+  "harnesses": [
+    { "name": "crd_check", "description": "CRD discovery + lazy reflector watcher", "requires": ["kind"], "timeout_s": 120 },
+    { "name": "drain_check", "description": "drain eviction/PDB selection rules", "requires": ["kind"], "timeout_s": 120 },
+    { "name": "dryrun_check", "description": "server-side dry-run diff", "requires": ["kind"], "timeout_s": 120 },
+    { "name": "events_check", "description": "events map + sort path", "requires": ["kind"], "timeout_s": 120 },
+    { "name": "exec_check", "description": "exec-credential plugin success/expiry/failure (self-provisions a ServiceAccount)", "requires": ["kind"], "timeout_s": 180 },
+    { "name": "helm_check", "description": "Helm release decode/reduce from storage Secrets", "requires": ["kind", "helm"], "timeout_s": 120 },
+    { "name": "helm_props_check", "description": "Helm release properties (history/values, redaction)", "requires": ["kind", "helm"], "timeout_s": 120 },
+    { "name": "helm_write_check", "description": "rollback + uninstall fixture-app (writes; restore with helm-fixture.sh)", "requires": ["kind", "helm"], "timeout_s": 300 },
+    { "name": "kinds_check", "description": "B80 kind-sweep tables (HPA/PDB/NP/RQ/LR/webhooks)", "requires": ["kind"], "timeout_s": 180 },
+    { "name": "live_check", "description": "pod exec + port-forward against a live pod", "requires": ["kind"], "timeout_s": 180 },
+    { "name": "logs_check", "description": "log streams (tail, previous, ring-buffer cap)", "requires": ["kind"], "timeout_s": 180 },
+    { "name": "multi_cluster_check", "description": "two concurrent ClientManagers + disconnect isolation", "requires": ["kind", "multi"], "timeout_s": 120 },
+    { "name": "nodeshell_check", "description": "node debug-shell admission (dry run by default)", "requires": ["kind"], "timeout_s": 180 },
+    { "name": "nodestats_check", "description": "node-exporter find/forward/scrape/rate", "requires": ["kind"], "timeout_s": 180 },
+    { "name": "promql_check", "description": "Prometheus backfill (self-skips without a Prometheus service)", "requires": ["kind"], "timeout_s": 120 },
+    { "name": "properties_check", "description": "properties gather per kind", "requires": ["kind"], "timeout_s": 120 },
+    { "name": "related_check", "description": "owner/relationship mappers + resolve_owner", "requires": ["kind"], "timeout_s": 120 },
+    { "name": "related_links_check", "description": "detail relationship links (best-effort per link)", "requires": ["kind"], "timeout_s": 180 },
+    { "name": "resilience_check", "description": "typed failure classification + stale/recovery (creates a restricted SA)", "requires": ["kind"], "timeout_s": 240 },
+    { "name": "restart_check", "description": "rollout restart patch", "requires": ["kind"], "timeout_s": 120 },
+    { "name": "storage_check", "description": "PVC/PV/StorageClass mappers", "requires": ["kind"], "timeout_s": 120 },
+    { "name": "svc_forward_check", "description": "Service targetPort resolution + a real tunnel", "requires": ["kind"], "timeout_s": 180 },
+    { "name": "terminal_check", "description": "kubectl pty terminal bound to the viewed cluster", "requires": ["kind"], "timeout_s": 180 },
+    { "name": "topology_check", "description": "Deployment ownership/reference graph", "requires": ["kind"], "timeout_s": 120 }
+  ]
+}

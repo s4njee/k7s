@@ -36,6 +36,7 @@ async fn main() -> anyhow::Result<()> {
     }
     if kinds.is_empty() {
         println!("\nno custom kinds on this cluster, skipping");
+        k7s_lib::harness::skip("no custom kinds on this cluster");
         return Ok(());
     }
 
@@ -80,6 +81,7 @@ async fn main() -> anyhow::Result<()> {
     // map_dynamic — this is what the table renders.
     let Some((target_id, _)) = with_objects.first() else {
         println!("\nno custom kind holds objects on this cluster, skipping the watcher");
+        k7s_lib::harness::skip("no custom kind holds objects");
         return Ok(());
     };
     let target = kinds.iter().find(|k| &k.id == target_id).unwrap();
