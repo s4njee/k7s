@@ -32,6 +32,7 @@ export function useTableKeys(
   const lastG = useRef(0);
 
   const setHighlight = (v: number) => {
+    if (hlRef.current === v) return;
     hlRef.current = v;
     setHighlightState(v);
   };

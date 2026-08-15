@@ -53,6 +53,9 @@ one. Filesystems are sorted fullest-first.*
 - **Actions**: scale, restart (pod delete-and-recreate, or a workload rollout restart), cordon/uncordon, drain (eviction-based, so PodDisruptionBudgets are honoured), delete — each with the confirmation its blast radius deserves. Reachable from the detail panel or a **row context menu**, with shift/⌘-click **multi-select** for bulk deletes and cordons; bulk confirmations enumerate exactly what they'll act on.
 - **Helm releases** decoded straight from their storage Secrets — overview, full revision history, and values with credential keys redacted in Rust.
 - **Node metrics** plotted from node-exporter, backfilled from **Prometheus** when the cluster runs one.
+- **Automatic updates** — checks quietly on launch and once a day; Settings shows the running version and offers check/download/restart, and a statusbar badge appears when a newer release exists. Signature-verified against a keypair independent of Apple's Developer ID.
+- **Diagnostics & supportability** — a rotating log file under the platform app log dir, a Settings log-level control that applies live, frontend errors (window/rejection/render) forwarded to the same log, and **File → Export Diagnostics…** producing a scrubbed zip (log tail, versions, redacted settings, last error) that's safe to attach to a bug report — no kubeconfig contents, tokens, secret values or server URLs.
+- **Opt-in crash reporting** — panics and render errors only, scrubbed, sent to an endpoint you configure; **off by default, no analytics, no usage telemetry, ever**. If it's ever on, you turned it on.
 - **Command palette** (⌘K) with fzy-style fuzzy ranking over kinds, objects and actions.
 - **Light and dark themes**, following the OS by default. Light mode keeps a bright work area with dark side panels; the terminal and charts resolve their colours from the live design tokens rather than a hardcoded copy.
 - **Status bar** with API latency, nodes ready, and cluster CPU/MEM % (via `metrics.k8s.io`, degrading to `—` when metrics-server is absent).
@@ -169,6 +172,25 @@ clean disconnected state.
 > though the `.app` bundle itself builds fine. Build on a desktop session (or ship
 > the `.app`) to get the `.dmg`.
 
+### Automatic updates (releases)
+
+The app's update endpoint is `…/releases/latest/download/latest.json` on GitHub
+Releases. The release workflow only produces signed updater artifacts and
+publishes that manifest when the **updater** signing key is a repo secret —
+independent of Apple's Developer ID, and a prerequisite for the B70 pass later:
+
+```bash
+# generate the keypair (keep the .key safe; CI needs its contents + password)
+pnpm tauri signer generate -w ~/.tauri/k7s.key -p '<a strong password>'
+```
+
+Then add two GitHub Actions secrets: `TAURI_SIGNING_PRIVATE_KEY` (the contents
+of `~/.tauri/k7s.key`) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Until they
+exist, releases build and attach the same bundles, just without the updater
+artifacts — the app degrades to "no update available". See
+[`dev/updater-manifest.mjs`](dev/updater-manifest.mjs) for how `latest.json` is
+assembled.
+
 ## Project layout
 
 ```
@@ -182,6 +204,7 @@ src-tauri/              # Rust backend
   src/kube/             #   client · manager · watchers · mappers · logs · metrics
   src/commands.rs       #   Tauri commands (connect, get_yaml, start_log_stream, …)
 dev/cluster/            # kind config + fixture manifests + up/down scripts
+docs/                   # logging.md (where logs live, debugging) · verification.md (QA checklists)
 ```
 
 ## Architecture at a glance
@@ -217,3 +240,15 @@ backoff, and an Ingress backend port that's a *name* rather than a number.
 > from `dev/cluster/up.sh`, or anything else. A cluster with no suitable fixture
 > prints an explicit "no fixture for X, skipping" and exits cleanly rather than
 > failing, so a fresh cluster is never a red herring.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Releases are versioned and documented in
+[CHANGELOG.md](CHANGELOG.md); the version across `package.json`,
+`src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` is kept in sync by
+`dev/bump.sh` and verified in CI.
+
+## Security
+
+Security posture, supported versions and how to report a vulnerability: see
+[SECURITY.md](SECURITY.md).

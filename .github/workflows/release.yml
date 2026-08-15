@@ -1,16 +1,34 @@
-# Release CI (B25): run every suite, then build the macOS app.
+# Release CI (B25): run every suite, then build the app for all three OSes.
 #
 # Runs on:
 #   - a `v*` tag  → builds and attaches the artifacts to a GitHub Release
 #   - a push/PR   → runs the checks only, so a break is caught before tagging
 #   - manually    → workflow_dispatch, to get a build without cutting a tag
 #
-# macOS is not a preference: a .app/.dmg can only be produced on a macOS runner.
+# The check-version job runs on every trigger: the version lives in three files
+# (package.json, src-tauri/Cargo.toml, src-tauri/tauri.conf.json) and a tag
+# whose three versions disagree (or that doesn't match the tag name) is refused
+# up front (B69) — dev/bump.sh is the single way to move all three.
 #
-# The build is **unsigned and unnotarised** — there are no signing secrets in this
-# repo. Gatekeeper will refuse to open the download until it's cleared (right-click
-# → Open, or `xattr -d com.apple.quarantine`). Signing needs an Apple Developer
-# ID; wire APPLE_CERTIFICATE et al into the tauri-action step when there is one.
+# Three build jobs, one per OS (B71). macOS builds a .app/.dmg (a .app can only
+# be produced on a macOS runner); Windows builds NSIS + MSI; Linux builds
+# AppImage + deb + rpm. The Windows/Linux jobs are the verification for the
+# platform-conditional code (menu, kubeconfig separator, window-state save) —
+# nothing there is exercisable from a macOS-only dev machine.
+#
+# Automatic updates (B72): when the TAURI_SIGNING_PRIVATE_KEY secret exists
+# (the updater's own Ed25519 keypair, independent of Apple's Developer ID), the
+# builds produce signed updater artifacts and the publish-updates job assembles
+# latest.json from their .sig files and attaches it to the release. The app's
+# configured endpoint — …/releases/latest/download/latest.json — serves it once
+# the release is published. Until the secret exists, every job builds the same
+# bundles minus the updater artifacts.
+#
+# The Apple build is **unsigned and unnotarised** — there are no Apple Developer
+# ID secrets in this repo (distinct from the updater key above). Gatekeeper will
+# refuse to open the download until it's cleared (right-click → Open, or
+# `xattr -dr com.apple.quarantine`). Signing needs a Developer ID; wire
+# APPLE_CERTIFICATE et al into the tauri-action step when there is one (B70).
 
 name: release
 
@@ -27,6 +45,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-version:
+    # Cheap enough to run on every push/PR; the tag check only fires on a `v*`
+    # tag push, where GITHUB_REF_TYPE=tag.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The three version files agree (and the tag, on tag pushes)
+        run: ./dev/check-version.sh
+
+  # Supply-chain gates (B75): fail on known-vulnerable dependencies, in either
+  # lockfile. `cargo audit` exits non-zero only on actual vulnerabilities — the
+  # gtk-rs "unmaintained" warnings on the Linux GTK stack are expected and never
+  # gate; `pnpm audit` fails on high+. Dependabot (../dependabot.yml) opens the
+  # bumps that keep these green.
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Rust dependency audit
+        run: cargo audit
+        working-directory: src-tauri
+
+      # pnpm before Node: setup-node's pnpm cache needs pnpm to already exist.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Frontend dependency audit
+        run: pnpm audit --prod --audit-level high
+
   build:
     # macos-14 is arm64. The intel runner would need its own job and a separate
     # artifact; k7s only ships a build for the arch it was built on.
@@ -78,10 +134,31 @@ jobs:
 
       # ---- build ----
 
+      # Automatic updates (B72): the bundler only produces signed updater
+      # artifacts (a `.sig` per update archive) when createUpdaterArtifacts is
+      # on — which requires the updater signing key. The key is a CI secret
+      # independent of Apple's Developer ID, so until it exists we build the
+      # same bundles minus the artifacts via an empty overlay.
+      - name: Prepare updater config overlay
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo '{"bundle":{"createUpdaterArtifacts":true}}' > updater-overlay.json
+            echo "updater artifacts enabled"
+          else
+            echo '{}' > updater-overlay.json
+            echo "no TAURI_SIGNING_PRIVATE_KEY secret yet — building without updater artifacts"
+          fi
+
       - name: Build the app bundle
         # `--bundles app` on its own, because the DMG step below is the fragile
         # part and the .app is the thing that must always come out.
-        run: pnpm tauri build --bundles app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --bundles app --config updater-overlay.json
 
       - name: Zip the .app
         # ditto, not `zip`: it preserves the bundle's symlinks and resource forks,
@@ -99,11 +176,24 @@ jobs:
         # and can fail on a headless runner. That must not fail the release: the
         # zipped .app above is a complete artifact on its own.
         continue-on-error: true
-        run: pnpm tauri build --bundles dmg
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --bundles dmg --config updater-overlay.json
 
       - name: Note a skipped DMG
         if: steps.dmg.outcome == 'failure'
         run: echo "::warning::DMG bundling failed on this runner (usually the headless AppleScript step); shipping the zipped .app only."
+
+      # The updater signature (B72) for the publish-updates job. Only exists
+      # when the signing key made createUpdaterArtifacts effective.
+      - name: Upload updater signatures
+        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-macos
+          path: src-tauri/target/release/bundle/macos/*.sig
+          if-no-files-found: error
 
       # ---- publish ----
 
@@ -129,4 +219,228 @@ jobs:
             To run it: right-click the app → Open, or `xattr -dr com.apple.quarantine /Applications/k7s.app`.
           files: |
             k7s-macos-arm64.zip
+            src-tauri/target/release/bundle/macos/*.tar.gz
             src-tauri/target/release/bundle/dmg/*.dmg
+
+  # Windows and Linux, first-class (B71): the same suite, then the platform's
+  # own bundle targets. The matrix is the only place this code gets verified —
+  # none of it runs from a macOS-only dev machine.
+  build-windows-linux:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: nsis,msi
+            artifact-name: k7s-windows
+            updater-name: updater-windows
+            artifact-paths: |
+              src-tauri/target/release/bundle/nsis/*.exe
+              src-tauri/target/release/bundle/msi/*.msi
+          - os: ubuntu-latest
+            bundles: appimage,deb,rpm
+            artifact-name: k7s-linux
+            updater-name: updater-linux
+            artifact-paths: |
+              src-tauri/target/release/bundle/appimage/*.AppImage
+              src-tauri/target/release/bundle/deb/*.deb
+              src-tauri/target/release/bundle/rpm/*.rpm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm before Node: setup-node's pnpm cache needs pnpm to already exist.
+      # Version comes from package.json's packageManager field.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Linux builds the GTK/WebKit surface, so its native toolchain has to be
+      # in place before any cargo invocation (build scripts pkg-config it).
+      # `patchelf`/`rpm` are what the tauri bundler shells out to for deb/rpm.
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            build-essential \
+            curl wget file \
+            patchelf rpm \
+            xvfb
+
+      - name: Install dependencies
+        # --frozen-lockfile: fail rather than silently resolve something new.
+        run: pnpm install --frozen-lockfile
+
+      # ---- the full suite, before anything is built or published ----
+      # cargo test/clippy on these OSes are the B71 verification that the
+      # platform-conditional paths hold; they must not be skipped.
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Frontend tests
+        run: pnpm test
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: src-tauri
+
+      - name: Rust tests
+        run: cargo test
+        working-directory: src-tauri
+
+      # ---- build ----
+
+      # B72: same overlay trick as the macOS job — signed updater artifacts (and
+      # their `.sig` files) only exist when the signing key is a CI secret. The
+      # step runs bash on both runners, so the conditional is one script.
+      - name: Prepare updater config overlay
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo '{"bundle":{"createUpdaterArtifacts":true}}' > updater-overlay.json
+            echo "updater artifacts enabled"
+          else
+            echo '{}' > updater-overlay.json
+            echo "no TAURI_SIGNING_PRIVATE_KEY secret yet — building without updater artifacts"
+          fi
+
+      - name: Build the bundles
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --bundles ${{ matrix.bundles }} --config updater-overlay.json
+
+      # First-window-paint probe (best-effort, B71): launch the built binary and
+      # confirm it survives long enough to have opened a window. A smoke test,
+      # not the QA pass — the real per-platform manual checklist lives in
+      # docs/verification.md and runs on actual hardware. Best-effort because a
+      # headless runner is not the target environment (headless GTK, WebView2
+      # quirks); a crash here is a warning, not a release blocker, until the
+      # first real-host pass has validated the probe itself.
+      - name: Smoke-launch the binary (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        continue-on-error: true
+        env:
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+        run: |
+          xvfb-run -a ./src-tauri/target/release/k7s &
+          pid=$!
+          sleep 8
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "k7s stayed up under Xvfb (window opened)"
+            kill "$pid"
+          else
+            wait "$pid" || true
+            echo "::warning::k7s exited before first window paint; verify on a real Linux host"
+          fi
+
+      - name: Smoke-launch the binary (Windows)
+        if: matrix.os == 'windows-latest'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "src-tauri\target\release\k7s.exe" -PassThru
+          Start-Sleep -Seconds 8
+          if ($p.HasExited) {
+            Write-Output "::warning::k7s exited before first window paint (code $($p.ExitCode)); verify on a real Windows host"
+          } else {
+            Write-Output "k7s stayed up (window opened)"
+            Stop-Process -Id $p.Id -Force
+          }
+
+      # The updater signature (B72) for the publish-updates job. Only exists
+      # when the signing key made createUpdaterArtifacts effective.
+      - name: Upload updater signatures
+        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.updater-name }}
+          path: src-tauri/target/release/bundle/**/*.sig
+          if-no-files-found: error
+
+      # ---- publish ----
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.artifact-paths }}
+          # Every bundle listed for the OS must exist, or the release is broken.
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: ${{ matrix.artifact-paths }}
+
+  # Automatic updates (B72): assemble the signed manifest (latest.json) from the
+  # three platform builds' `.sig` files and attach it to the release, where the
+  # app's configured endpoint (…/releases/latest/download/latest.json) serves it
+  # once the release is published. Runs only when the updater signing key is a
+  # CI secret — without it there are no signed artifacts to advertise. On a
+  # non-tag run (PR/push) the manifest is still assembled and validated; only a
+  # tag push attaches it.
+  publish-updates:
+    needs: [build, build-windows-linux]
+    if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-macos
+          path: updater/macos
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-windows
+          path: updater/windows
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-linux
+          path: updater/linux
+
+      - name: Assemble latest.json
+        run: |
+          VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -1)"
+          node dev/updater-manifest.mjs \
+            --version "$VERSION" \
+            --tag "$GITHUB_REF_NAME" \
+            --repo s4njee/k7s \
+            --sig-dir updater \
+            --map "darwin-aarch64=k7s.app.tar.gz" \
+            --map "windows-x86_64=k7s-setup.exe" \
+            --map "linux-x86_64=k7s_*_amd64.AppImage" \
+            -o latest.json
+          echo "manifest:"; cat latest.json
+
+      - name: Attach latest.json to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: latest.json

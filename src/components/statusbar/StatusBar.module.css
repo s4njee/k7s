@@ -24,3 +24,22 @@
 .spacer {
   flex: 1;
 }
+
+/* Passive "an update is available" notice (B72): a quiet pill, never a modal.
+   Clicking opens Settings, where the install lives. */
+.updateBadge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-control);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.updateBadge:hover {
+  background: var(--bg-selected-row);
+}

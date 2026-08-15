@@ -29,6 +29,7 @@ import { DiffTab } from "./DiffTab";
 import { TopologyTab } from "./TopologyTab";
 import { EventsTab } from "./EventsTab";
 import { ActionsMenu } from "./ActionsMenu";
+import { EMPTY_BOOKMARKS } from "../../lib/bookmarks";
 import type { DrainProgress } from "../../providers/types";
 
 export function DetailPanel() {
@@ -43,6 +44,11 @@ export function DetailPanel() {
 
   // Error from an action (delete/scale/cordon), shown as a header banner.
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // The current context's bookmarks, for the ☆ toggle (B56).
+  const context = useStore((s) => s.connection.context ?? "");
+  const bookmarks = useStore((s) => s.bookmarksByContext[context] ?? EMPTY_BOOKMARKS);
+  const toggleBookmark = useStore((s) => s.toggleBookmark);
 
   // Panel is closed when nothing is selected.
   if (!row) return null;
@@ -62,10 +68,6 @@ export function DetailPanel() {
   // Custom kinds resolve their label from discovery, so this is a runtime lookup.
   const kindLabel = kindMeta(nav, customKinds)?.label ?? nav;
 
-  // The current context's bookmarks, for the ☆ toggle (B56).
-  const context = useStore((s) => s.connection.context ?? "");
-  const bookmarks = useStore((s) => s.bookmarksByContext[context] ?? []);
-  const toggleBookmark = useStore((s) => s.toggleBookmark);
   const isBookmarked = bookmarks.some(
     (b) => b.kind === nav && (b.namespace ?? "") === (row.namespace ?? "") && b.name === row.name,
   );
@@ -133,7 +135,13 @@ export function DetailPanel() {
 
         {/* B44: backfilled CPU/MEM history in the pod header, from Prometheus.
             Renders nothing (and fires no queries) on a cluster without it. */}
-        {isPod && <PodSparklines namespace={row.namespace ?? ""} name={row.name} />}
+        {isPod && (
+          <PodSparklines
+            namespace={row.namespace ?? ""}
+            name={row.name}
+            resources={row.pod?.resources}
+          />
+        )}
 
         <div className={styles.tabs}>
           {tabs.map((t) => (

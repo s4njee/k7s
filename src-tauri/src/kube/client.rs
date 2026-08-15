@@ -107,18 +107,30 @@ pub async fn build_client_from_file(path: &str, context: &str) -> AppResult<(Cli
     Ok((client, server))
 }
 
+/// The separator `$KUBECONFIG` uses between paths: `;` on Windows, where `:`
+/// would also split the drive letter off `C:\Users\…`, `:` elsewhere. Split out
+/// from [`first_kubeconfig_entry`] so the platform behaviour is unit-testable on
+/// the CI matrix, not just macOS (B71).
+fn kubeconfig_separator() -> char {
+    if cfg!(windows) { ';' } else { ':' }
+}
+
+/// First non-empty entry of a `$KUBECONFIG` path list, or None when it's empty.
+fn first_kubeconfig_entry(kubeconfig: &str) -> Option<&str> {
+    kubeconfig.split(kubeconfig_separator()).find(|s| !s.is_empty())
+}
+
 /// Best-effort path to kubectl's default kubeconfig: the first entry of
 /// $KUBECONFIG, else ~/.kube/config. Used to pre-point the import file dialog.
 ///
 /// Both halves are platform-sensitive, and getting either wrong lands the dialog
 /// in the wrong directory rather than failing loudly. `KUBECONFIG` is a path
-/// *list* using the platform's separator — `;` on Windows, where `:` would also
-/// split the drive letter off `C:\Users\…`. And Windows has no `HOME`; kubectl
-/// itself reads `USERPROFILE` there.
+/// *list* using the platform's separator — `;` on Windows (see
+/// [`kubeconfig_separator`]). And Windows has no `HOME`; kubectl itself reads
+/// `USERPROFILE` there.
 pub fn default_kubeconfig_path() -> String {
     if let Ok(kubeconfig) = std::env::var("KUBECONFIG") {
-        let sep = if cfg!(windows) { ';' } else { ':' };
-        if let Some(first) = kubeconfig.split(sep).find(|s| !s.is_empty()) {
+        if let Some(first) = first_kubeconfig_entry(&kubeconfig) {
             return first.to_string();
         }
     }
@@ -314,5 +326,47 @@ users:
     #[test]
     fn extract_unknown_context_is_an_error() {
         assert!(extract_context_yaml(KUBECONFIG, "nope").is_err());
+    }
+
+    // ---- platform-conditional paths (B71): these run on the CI matrix ------
+
+    /// The first non-empty entry of a $KUBECONFIG list wins, whatever the
+    /// platform separator. The expected split is written against the same
+    /// `cfg!(windows)` the code uses, so each platform's test asserts its own
+    /// rule — on Windows the list is `;`-separated, elsewhere `:`.
+    #[test]
+    fn kubeconfig_first_entry_uses_the_platform_separator() {
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        // The separator between entries is the platform's own, so the second
+        // path is a different entry and the first wins.
+        let list = format!("/home/me/.kube/config{sep}/tmp/other");
+        assert_eq!(first_kubeconfig_entry(&list), Some("/home/me/.kube/config"));
+    }
+
+    /// A leading empty entry (an env var starting with the separator) is
+    /// skipped, matching what kubectl itself does.
+    #[test]
+    fn kubeconfig_first_entry_skips_empty_entries() {
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        assert_eq!(
+            first_kubeconfig_entry(&format!("{sep}{sep}/etc/empty{sep}/real")),
+            Some("/etc/empty")
+        );
+    }
+
+    /// The whole point of the `;` separator: `C:\Users\me\.kube\config` must
+    /// survive as a single entry on Windows, where `:` would split it at the
+    /// drive letter. On unix the same string is `:`-split, so the first entry is
+    /// the bare `C` — that platform can't meaningfully parse a Windows path,
+    /// which is fine; this test just pins what each platform actually does.
+    #[test]
+    fn kubeconfig_windows_drive_letter_is_one_entry() {
+        let first = first_kubeconfig_entry(r"C:\Users\me\.kube\config");
+        let expected = if cfg!(windows) {
+            r"C:\Users\me\.kube\config"
+        } else {
+            "C"
+        };
+        assert_eq!(first, Some(expected));
     }
 }

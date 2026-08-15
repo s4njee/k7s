@@ -3,15 +3,8 @@
  * the table's row context menu.
  *
  * This is the *whole* menu: the item list, the confirmations, and the two
- * parameterised forms (scale, port-forward). Everything the two surfaces disagree
- * about is left outside — only positioning, which genuinely differs (anchored
- * under a button vs. at the mouse cursor).
- *
- * Splitting it any other way was the trap. If the row menu kept its own copy of
- * the forms, it would quietly not offer Scale on a Deployment, and the two menus
- * would answer "what can I do to this object" differently depending on how you
- * opened them. Which actions exist is decided in one place (lib/actions.ts) and
- * rendered in one place (here).
+ * parameterised forms (scale, port-forward). Which actions exist is decided in
+ * lib/actions.ts and rendered here.
  */
 
 import { useState } from "react";
@@ -22,14 +15,17 @@ import { selectorFilter } from "../../lib/filter";
 import {
   actionsFor,
   bulkErrorText,
-  confirmText,
   isRolloutKind,
   plural,
   runBulk,
   type ActionDef,
   type ActionId,
 } from "../../lib/actions";
+import { EMPTY_BOOKMARKS } from "../../lib/bookmarks";
 import type { KindId, ResourceRef, Row } from "../../providers/types";
+import { ActionConfirmDialog } from "./ActionConfirmDialog";
+import { ScaleForm } from "./ScaleForm";
+import { PortForwardForm } from "./PortForwardForm";
 
 interface ActionListProps {
   kind: KindId;
@@ -49,26 +45,6 @@ interface ActionListProps {
 
 type Mode = { kind: "menu" } | { kind: "confirm"; id: ActionId } | { kind: "form"; id: ActionId };
 
-/** Replicas shown as the starting value: the desired count from a "3/3" cell. */
-function currentReplicas(row: Row): number {
-  for (const cell of row.cells) {
-    const m = /^(\d+)\/(\d+)$/.exec(cell.text.trim());
-    if (m) return Number(m[2]);
-  }
-  return 1;
-}
-
-/** A sensible default port: the service's first, else the usual HTTP guess. */
-function defaultPort(row: Row, kind: KindId): number {
-  if (kind === "services") {
-    for (const cell of row.cells) {
-      const m = /(\d{2,5})/.exec(cell.text);
-      if (m) return Number(m[1]);
-    }
-  }
-  return 8080;
-}
-
 async function copyToClipboard(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
@@ -82,7 +58,7 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
   const viewPods = useStore((s) => s.viewPods);
   const toggleBookmark = useStore((s) => s.toggleBookmark);
   const context = useStore((s) => s.connection.context ?? "");
-  const bookmarks = useStore((s) => s.bookmarksByContext[context] ?? []);
+  const bookmarks = useStore((s) => s.bookmarksByContext[context] ?? EMPTY_BOOKMARKS);
   const bookmarked = (row: Row) =>
     bookmarks.some(
       (b) => b.kind === kind && (b.namespace ?? "") === (row.namespace ?? "") && b.name === row.name,
@@ -90,10 +66,6 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
 
   const [mode, setMode] = useState<Mode>({ kind: "menu" });
   const [busy, setBusy] = useState(false);
-  const [replicas, setReplicas] = useState(() => currentReplicas(rows[0] ?? { cells: [] } as never));
-  const [port, setPort] = useState(() =>
-    rows[0] ? defaultPort(rows[0], kind) : 8080,
-  );
 
   const actions = actionsFor(kind, rows);
   if (actions.length === 0) return null;
@@ -186,106 +158,49 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
 
   // ---- confirmations ----
   if (mode.kind === "confirm") {
-    const danger = actions.find((a) => a.id === mode.id)?.danger;
     return (
-      <div className={styles.menu}>
-        <div className={styles.confirm}>
-          <div className={styles.confirmText}>{confirmText(mode.id, kind, rows)}</div>
-          <div className={styles.confirmRow}>
-            <div className={styles.cancelBtn} onClick={() => setMode({ kind: "menu" })}>
-              Cancel
-            </div>
-            <div
-              className={danger ? styles.dangerBtn : styles.applyBtn}
-              aria-disabled={busy}
-              onClick={() => confirmed(mode.id)}
-            >
-              {busy ? "…" : label(mode.id)}
-            </div>
-          </div>
-        </div>
-      </div>
+      <ActionConfirmDialog
+        id={mode.id}
+        kind={kind}
+        rows={rows}
+        actions={actions}
+        busy={busy}
+        onCancel={() => setMode({ kind: "menu" })}
+        onConfirm={confirmed}
+      />
     );
   }
 
   // ---- scale ----
   if (mode.kind === "form" && mode.id === "scale") {
     return (
-      <div className={styles.menu}>
-        <div className={styles.confirm}>
-          <div className={styles.confirmText}>Replicas for {single.name}</div>
-          <div className={styles.confirmRow} style={{ justifyContent: "center", gap: 10 }}>
-            <div className={styles.cancelBtn} onClick={() => setReplicas((n) => Math.max(0, n - 1))}>
-              −
-            </div>
-            <span style={{ fontSize: 13, minWidth: 24, textAlign: "center" }}>{replicas}</span>
-            <div className={styles.cancelBtn} onClick={() => setReplicas((n) => n + 1)}>
-              +
-            </div>
-          </div>
-          <div className={styles.confirmRow}>
-            <div className={styles.cancelBtn} onClick={() => setMode({ kind: "menu" })}>
-              Cancel
-            </div>
-            <div
-              className={styles.applyBtn}
-              aria-disabled={busy}
-              onClick={() =>
-                void execute((row) => getProvider().scaleResource(refOf(row), replicas), false)
-              }
-            >
-              Apply
-            </div>
-          </div>
-        </div>
-      </div>
+      <ScaleForm
+        row={single}
+        busy={busy}
+        onCancel={() => setMode({ kind: "menu" })}
+        onApply={(replicas) =>
+          void execute((row) => getProvider().scaleResource(refOf(row), replicas), false)
+        }
+      />
     );
   }
 
   // ---- port-forward ----
   if (mode.kind === "form" && mode.id === "forward") {
     return (
-      <div className={styles.menu}>
-        <div className={styles.confirm}>
-          <div className={styles.confirmText}>
-            {kind === "services" ? "Forward service port" : "Forward pod port"}
-          </div>
-          <input
-            type="number"
-            min={1}
-            max={65535}
-            value={port}
-            onChange={(e) => setPort(Number(e.target.value))}
-            style={{
-              background: "var(--bg-terminal)",
-              border: "1px solid var(--border-control)",
-              borderRadius: "var(--radius-sm)",
-              color: "var(--text-body)",
-              fontFamily: "var(--font-mono)",
-              fontSize: 11.5,
-              padding: "4px 8px",
-            }}
-          />
-          <div className={styles.confirmRow}>
-            <div className={styles.cancelBtn} onClick={() => setMode({ kind: "menu" })}>
-              Cancel
-            </div>
-            <div
-              className={styles.applyBtn}
-              aria-disabled={busy}
-              onClick={() =>
-                void execute(async (row) => {
-                  const fwd = await getProvider().startPortForward(refOf(row), port);
-                  setPortForwards(await getProvider().listPortForwards());
-                  await copyToClipboard(`localhost:${fwd.localPort}`);
-                }, false)
-              }
-            >
-              Forward
-            </div>
-          </div>
-        </div>
-      </div>
+      <PortForwardForm
+        kind={kind}
+        row={single}
+        busy={busy}
+        onCancel={() => setMode({ kind: "menu" })}
+        onForward={(port) =>
+          void execute(async (row) => {
+            const fwd = await getProvider().startPortForward(refOf(row), port);
+            setPortForwards(await getProvider().listPortForwards());
+            await copyToClipboard(`localhost:${fwd.localPort}`);
+          }, false)
+        }
+      />
     );
   }
 
@@ -314,26 +229,4 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
       ))}
     </div>
   );
-}
-
-/** The confirm button's verb — the menu label minus its trailing ellipsis. */
-function label(id: ActionId): string {
-  switch (id) {
-    case "delete":
-      return "Delete";
-    case "restart":
-      return "Restart";
-    case "drain":
-      return "Drain";
-    case "suspend":
-      return "Suspend";
-    case "resume":
-      return "Resume";
-    case "run-now":
-      return "Run now";
-    case "retry":
-      return "Retry";
-    default:
-      return "Confirm";
-  }
 }

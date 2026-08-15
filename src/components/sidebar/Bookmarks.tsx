@@ -8,7 +8,7 @@
 import { useState } from "react";
 import styles from "./Sidebar.module.css";
 import { useStore, rowsFor } from "../../store";
-import { bookmarkKey, type Bookmark } from "../../lib/bookmarks";
+import { bookmarkKey, EMPTY_BOOKMARKS, type Bookmark } from "../../lib/bookmarks";
 import { kindMeta } from "../../lib/kinds";
 import { toneColor } from "../../lib/tone";
 import type { Row, Tone } from "../../providers/types";
@@ -23,7 +23,7 @@ export function statusToneOf(row: Row): Tone | undefined {
 
 export function Bookmarks() {
   const context = useStore((s) => s.connection.context ?? "");
-  const bookmarks = useStore((s) => s.bookmarksByContext[context] ?? []);
+  const bookmarks = useStore((s) => s.bookmarksByContext[context] ?? EMPTY_BOOKMARKS);
   const rows = useStore((s) => s.rows);
   const customKinds = useStore((s) => s.customKinds);
   const navigateTo = useStore((s) => s.navigateTo);

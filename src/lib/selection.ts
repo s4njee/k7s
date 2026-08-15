@@ -96,6 +96,7 @@ export function selectionForContextMenu(
  * list they cannot see.
  */
 export function pruneSelection(state: SelectionState, presentUids: string[]): SelectionState {
+  if (state.selected.length === 0 && state.anchor === null) return state;
   const present = new Set(presentUids);
   const selected = state.selected.filter((u) => present.has(u));
   const anchor = state.anchor !== null && present.has(state.anchor) ? state.anchor : null;

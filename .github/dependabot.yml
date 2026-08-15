@@ -1,0 +1,25 @@
+# Dependabot (B75): open the dependency bumps that keep the supply-chain CI
+# (cargo audit / pnpm audit in release.yml) green. Weekly, grouped per bump so
+# the PRs stay reviewable; the audit gates fail closed on a known vulnerability
+# in either lockfile, so a bad bump shows up immediately.
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      k8s:
+        patterns: ["kube", "k8s-openapi"]
+      tauri:
+        patterns: ["tauri*"]
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      tauri-js:
+        patterns: ["@tauri-apps/*"]

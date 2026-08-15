@@ -1,18 +1,21 @@
 /**
- * Events tab (Design §4-Events). Fetches events for the selected pod on open (and
- * on pod change) and renders them as cards: Normal (green) / Warning (red).
+ * Events tab (Design §4-Events, B57). Fetches events for the selected pod on open (and
+ * on pod change) and renders them as cards (Normal green / Warning red) or as an interactive
+ * canvas timeline.
  */
 
 import { useEffect, useState } from "react";
 import styles from "./EventsTab.module.css";
 import { useStore } from "../../store";
 import { getProvider } from "../../providers";
+import { EventTimeline } from "./EventTimeline";
 import type { EventItem } from "../../providers/types";
 
 export function EventsTab() {
   const row = useStore((s) => s.selectedRow);
   const kind = useStore((s) => s.nav);
   const [events, setEvents] = useState<EventItem[] | null>(null);
+  const [viewMode, setViewMode] = useState<"list" | "timeline">("list");
 
   useEffect(() => {
     if (!row) return;
@@ -47,26 +50,51 @@ export function EventsTab() {
   }
 
   return (
-    <div className={styles.list}>
-      {events.map((ev, i) => (
-        <div key={i} className={styles.card}>
-          <span
-            className={styles.type}
-            style={{ color: ev.type === "Warning" ? "var(--status-err)" : "var(--status-ok)" }}
-          >
-            {ev.type}
-          </span>
-          <div className={styles.body}>
-            <div className={styles.headline}>
-              <span className={styles.reason}>{ev.reason}</span>
-              <span className={styles.meta}>
-                {ev.age} · ×{ev.count}
-              </span>
-            </div>
-            <div className={styles.message}>{ev.message}</div>
+    <div className={styles.wrap}>
+      {events.length >= 2 && (
+        <div className={styles.toolbar}>
+          <div className={styles.viewToggle}>
+            <button
+              className={`${styles.toggleBtn} ${viewMode === "list" ? styles.toggleActive : ""}`}
+              onClick={() => setViewMode("list")}
+            >
+              cards
+            </button>
+            <button
+              className={`${styles.toggleBtn} ${viewMode === "timeline" ? styles.toggleActive : ""}`}
+              onClick={() => setViewMode("timeline")}
+            >
+              timeline
+            </button>
           </div>
         </div>
-      ))}
+      )}
+
+      {viewMode === "timeline" ? (
+        <EventTimeline events={events} />
+      ) : (
+        <div className={styles.list}>
+          {events.map((ev, i) => (
+            <div key={i} className={styles.card}>
+              <span
+                className={styles.type}
+                style={{ color: ev.type === "Warning" ? "var(--status-err)" : "var(--status-ok)" }}
+              >
+                {ev.type}
+              </span>
+              <div className={styles.body}>
+                <div className={styles.headline}>
+                  <span className={styles.reason}>{ev.reason}</span>
+                  <span className={styles.meta}>
+                    {ev.age} · ×{ev.count}
+                  </span>
+                </div>
+                <div className={styles.message}>{ev.message}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

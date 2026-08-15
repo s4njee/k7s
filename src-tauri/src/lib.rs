@@ -5,7 +5,10 @@
 //! pushed back to the webview via Tauri events (see the `kube` module).
 
 pub mod commands;
+mod crash_reporting;
+mod diagnostics;
 mod error;
+mod logging;
 // Public so the live verification harnesses in examples/ can exercise the real
 // mappers rather than a copy of them; nothing outside this crate consumes it.
 pub mod kube;
@@ -28,20 +31,15 @@ use tauri::{Emitter, Manager};
 /// Tauri event emitted when the native File > Settings… item is chosen; the
 /// frontend opens its settings dialog on it.
 const SETTINGS_OPEN_EVENT: &str = "settings-open";
+/// Tauri event emitted when File > Export Diagnostics… is chosen; the frontend
+/// runs the export (B73).
+const EXPORT_DIAGNOSTICS_EVENT: &str = "export-diagnostics";
 
 /// Build and run the Tauri application.
 ///
 /// Kept in the library crate so integration tests can construct pieces of it
 /// without spawning a real window.
 pub fn run() {
-    // Structured logs to stderr; level controlled by RUST_LOG (defaults to info).
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
     tauri::Builder::default()
         // The shell plugin backs the capability that lets us open external URLs
         // (e.g. links in the UI) in the user's default browser.
@@ -52,24 +50,49 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         // Backs the native problem notifications (B50).
         .plugin(tauri_plugin_notification::init())
+        // Automatic updates (B72): a passive endpoint check + signature-verified
+        // download/install, driven by the frontend's useUpdates hook. The plugin
+        // is inert until `check()` is called, so dev/demo builds are unaffected.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // `relaunch()` for applying an installed update (B72).
+        .plugin(tauri_plugin_process::init())
         // Remembers the window's size, position and monitor across launches (B22),
         // saving on exit and restoring on show. There's nothing to gate for demo
         // mode: that runs as a plain browser page with no Tauri backend at all, so
         // this code isn't in the build to begin with.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
+            // Logging first (B73): stderr + a rotating file under the app log
+            // dir, at the level the user last chose (or RUST_LOG in a dev
+            // build). Everything that follows — including panics — lands there.
+            let prefs = commands::read_prefs(app.handle());
+            logging::init(
+                app.handle(),
+                prefs.log_level.as_deref().unwrap_or(logging::DEFAULT_LEVEL),
+            );
+            crash_reporting::install();
+            crash_reporting::set_config(
+                prefs.crash_reporting.unwrap_or(false),
+                prefs.crash_report_endpoint.unwrap_or_default(),
+            );
+
             // The ClientManager owns the active client and all connection-scoped
             // tasks. It needs an AppHandle (to emit events), which only exists once
             // setup runs — so it's constructed here and put into managed state.
             let manager = Arc::new(ClientManager::new(app.handle().clone()));
             app.manage(manager);
             save_window_state_on_sigterm(app.handle().clone());
-            // File > Settings…, which opens the settings dialog via an event.
+            // File > Settings… / Export Diagnostics…, which open their flows via
+            // events the frontend listens for.
             setup_menu(app)?;
-            app.on_menu_event(|app, event| {
-                if event.id() == "file-settings" {
+            app.on_menu_event(|app, event| match event.id().as_ref() {
+                "file-settings" => {
                     let _ = app.emit(SETTINGS_OPEN_EVENT, ());
                 }
+                "file-export-diagnostics" => {
+                    let _ = app.emit(EXPORT_DIAGNOSTICS_EVENT, ());
+                }
+                _ => {}
             });
             Ok(())
         })
@@ -124,6 +147,10 @@ pub fn run() {
             commands::start_service_port_forward,
             commands::stop_port_forward,
             commands::list_port_forwards,
+            // Diagnostics (B73): frontend errors → the log (+ crash reporting),
+            // and the "Export diagnostics…" bundle.
+            commands::log_frontend_error,
+            commands::export_diagnostics,
         ])
         .run(tauri::generate_context!())
         .expect("error while running k7s application");
@@ -132,14 +159,18 @@ pub fn run() {
 /// Install the native app menu.
 ///
 /// macOS's default menu already has a File submenu (with Close Window), so the
-/// "Settings…" item is appended to it — leaving the app, Edit, View and Window
-/// menus intact, so Cmd+Q / Cmd+C and friends keep working. On Windows/Linux
-/// there is no menu at all, so this creates a File menu of its own with
-/// Settings… and Quit. Choosing the item emits [`SETTINGS_OPEN_EVENT`].
+/// "Settings…" and "Export Diagnostics…" items are appended to it — leaving the
+/// app, Edit, View and Window menus intact, so Cmd+Q / Cmd+C and friends keep
+/// working. On Windows/Linux there is no menu at all, so this creates a File
+/// menu of its own with both items and Quit. Choosing an item emits its event
+/// (see the handler in `run`).
 fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
     let settings = MenuItemBuilder::with_id("file-settings", "Settings…")
         // Cmd+, on macOS, Ctrl+, elsewhere — the conventional preferences key.
         .accelerator("CmdOrCtrl+,")
+        .build(app)?;
+    let export = MenuItemBuilder::with_id("file-export-diagnostics", "Export Diagnostics…")
+        .accelerator("CmdOrCtrl+Shift+E")
         .build(app)?;
 
     #[cfg(target_os = "macos")]
@@ -149,6 +180,7 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
             if let MenuItemKind::Submenu(file) = item {
                 if file.text()? == "File" {
                     file.append(&settings)?;
+                    file.append(&export)?;
                     break;
                 }
             }
@@ -161,6 +193,8 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
         let file = SubmenuBuilder::with_id(app, "file", "File", true)
             .item(&settings)
             .separator()
+            .item(&export)
+            .separator()
             .quit()
             .build()?;
         let menu = MenuBuilder::new(app).item(&file).build()?;
@@ -170,15 +204,15 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Save window geometry when the process is asked to terminate (B22).
+/// Save window geometry when the process is killed behind Tauri's back (B22).
 ///
-/// The window-state plugin saves when the app quits *through Tauri* — Cmd+Q, or
-/// closing the window. It never sees a SIGTERM, which is exactly how `dev/run.sh`
-/// stops the app, so without this the geometry would never survive a development
-/// session: B22 would be dead in the workflow B24 standardised.
-///
-/// Unix-only, which is every platform this ships on today; elsewhere the
-/// plugin's own save-on-quit is the whole story.
+/// The window-state plugin saves when the app quits *through Tauri* — Cmd+Q,
+/// closing the window, or app exit — on every platform (its `CloseRequested`
+/// and `Exit` hooks). It never sees a process killed by the OS, which is exactly
+/// how `dev/run.sh` stops the app (SIGTERM), so without this the geometry would
+/// never survive a development session: B22 would be dead in the workflow B24
+/// standardised. Windows has no SIGTERM, so its arm waits on the session-end
+/// ctrl events instead.
 #[cfg(unix)]
 fn save_window_state_on_sigterm(app: tauri::AppHandle) {
     use tauri_plugin_window_state::{AppHandleExt, StateFlags};
@@ -199,5 +233,42 @@ fn save_window_state_on_sigterm(app: tauri::AppHandle) {
     });
 }
 
-#[cfg(not(unix))]
+/// Windows analogue of the SIGTERM handler: a session ending.
+///
+/// Windows delivers CTRL_CLOSE / CTRL_LOGOFF / CTRL_SHUTDOWN to processes that
+/// registered a console-ctrl handler; whichever fires, the process is being torn
+/// down without a Tauri quit, so save and exit. The everyday cases (closing the
+/// window, app quit) are already covered by the plugin's own hooks.
+///
+/// Caveat: the exact delivery of these events to a GUI process is one of the
+/// things the B71 Windows-host pass must verify — this arm is written to the
+/// tokio 1.52 API and compiled only on Windows.
+#[cfg(windows)]
+fn save_window_state_on_sigterm(app: tauri::AppHandle) {
+    use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+
+    tauri::async_runtime::spawn(async move {
+        let (mut close, mut logoff, mut shutdown) = match (
+            tokio::signal::windows::ctrl_close(),
+            tokio::signal::windows::ctrl_logoff(),
+            tokio::signal::windows::ctrl_shutdown(),
+        ) {
+            (Ok(c), Ok(l), Ok(s)) => (c, l, s),
+            // A handler that can't be installed means nothing to wait for; the
+            // plugin's save-on-close/exit still covers the normal cases.
+            _ => return,
+        };
+        tokio::select! {
+            _ = close.recv() => {}
+            _ = logoff.recv() => {}
+            _ = shutdown.recv() => {}
+        }
+        if let Err(e) = app.save_window_state(StateFlags::all()) {
+            tracing::warn!("could not save window state at session end: {e}");
+        }
+        app.exit(0);
+    });
+}
+
+#[cfg(not(any(unix, windows)))]
 fn save_window_state_on_sigterm(_app: tauri::AppHandle) {}

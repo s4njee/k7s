@@ -15,7 +15,9 @@ import styles from "./CommandPalette.module.css";
 import { useStore } from "../../store";
 import { getProvider } from "../../providers";
 import { buildPalette, type ActionId, type PaletteItem } from "../../lib/palette";
-import { bookmarkKey } from "../../lib/bookmarks";
+import { bookmarkKey, EMPTY_BOOKMARKS } from "../../lib/bookmarks";
+
+const EMPTY_ITEMS: PaletteItem[] = [];
 
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen);
@@ -26,7 +28,7 @@ export function CommandPalette() {
   const nav = useStore((s) => s.nav);
   const selectedRow = useStore((s) => s.selectedRow);
   const context = useStore((s) => s.connection.context ?? "");
-  const bookmarks = useStore((s) => s.bookmarksByContext[context] ?? []);
+  const bookmarks = useStore((s) => s.bookmarksByContext[context] ?? EMPTY_BOOKMARKS);
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -43,7 +45,7 @@ export function CommandPalette() {
             selectedRow,
             bookmarks: new Set(bookmarks.map(bookmarkKey)),
           })
-        : [],
+        : EMPTY_ITEMS,
     [open, query, rows, customKinds, nav, selectedRow, bookmarks],
   );
 

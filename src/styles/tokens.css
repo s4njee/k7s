@@ -89,6 +89,7 @@
   /* ---- Typography ---- */
   --font-ui: "IBM Plex Sans", system-ui, sans-serif; /* general UI */
   --font-mono: "JetBrains Mono", ui-monospace, monospace; /* data, code, logs */
+  --font-yaml: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace; /* YAML tab */
 
   /* ---- Radius (design uses 5–6px) ---- */
   --radius-sm: 5px;

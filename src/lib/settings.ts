@@ -12,6 +12,15 @@
 import { asAccent, asUiFont, type Accent, type UiFont } from "./appearance";
 import { asTheme, type Theme } from "./theme";
 
+/** Backend log verbosity (B73), least → most — mirrors logging::LEVELS in Rust. */
+export type LogLevel = "error" | "warn" | "info" | "debug" | "trace";
+export const LOG_LEVELS: LogLevel[] = ["error", "warn", "info", "debug", "trace"];
+
+/** Coerce any value into a known LogLevel, else the default. */
+export function asLogLevel(value: unknown): LogLevel {
+  return LOG_LEVELS.includes(value as LogLevel) ? (value as LogLevel) : DEFAULT_SETTINGS.logLevel;
+}
+
 /** Everything the settings panel controls. */
 export interface Settings {
   /** Lines the log view retains (the design default is 200). */
@@ -45,6 +54,16 @@ export interface Settings {
    * and on an air-gapped cluster must come from a registry the nodes can reach.
    */
   nodeShellImage: string;
+  /** Backend log verbosity (B73): what the app log file captures. */
+  logLevel: LogLevel;
+  /**
+   * Opt-in crash reporting (B73): panics and render errors only. No analytics,
+   * no usage telemetry, ever. Off by default.
+   */
+  crashReporting: boolean;
+  /** Crash-reporting endpoint (Sentry / self-hosted GlitchTip); empty disables
+   *  sending even with consent on. */
+  crashReportEndpoint: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -65,6 +84,11 @@ export const DEFAULT_SETTINGS: Settings = {
   // cluster you may not even be looking at is the kind of thing to ask about.
   notifications: false,
   nodeShellImage: "",
+  // Info is what the app already logs; the others are for troubleshooting.
+  logLevel: "info",
+  // Crash reporting is a deliberate opt-in (B73), with plain consent.
+  crashReporting: false,
+  crashReportEndpoint: "",
 };
 
 /**
@@ -137,5 +161,9 @@ export function sanitizeSettings(raw: SettingsInput | null | undefined): Setting
     reduceMotion: typeof s.reduceMotion === "boolean" ? s.reduceMotion : DEFAULT_SETTINGS.reduceMotion,
     notifications: typeof s.notifications === "boolean" ? s.notifications : DEFAULT_SETTINGS.notifications,
     nodeShellImage: typeof s.nodeShellImage === "string" ? s.nodeShellImage.trim() : "",
+    logLevel: asLogLevel(s.logLevel),
+    crashReporting: typeof s.crashReporting === "boolean" ? s.crashReporting : DEFAULT_SETTINGS.crashReporting,
+    crashReportEndpoint:
+      typeof s.crashReportEndpoint === "string" ? s.crashReportEndpoint.trim() : DEFAULT_SETTINGS.crashReportEndpoint,
   };
 }

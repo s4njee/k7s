@@ -3,8 +3,11 @@
 //! pushed back via events (see kube::events); these commands cover the one-shot
 //! request/response operations plus starting/stopping log streams.
 
+use crate::crash_reporting;
+use crate::diagnostics;
 use crate::error::{AppError, AppResult};
 use crate::kube::client::{self, ClusterInfo, ContextInfo};
+use crate::logging;
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
 use crate::kube::{
     batch, discovery, drain, exec, exporter, helm, logs, mappers, metrics, nodeshell, nodestats,
@@ -15,7 +18,6 @@ use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::Event;
 use crate::kube::dto::EventInvolved;
-use crate::kube::dto::InvolvedRef;
 use kube::api::{
     Api, ApiResource, DeleteParams, DynamicObject, ListParams, Patch, PatchParams, PostParams,
 };
@@ -76,6 +78,16 @@ pub struct Prefs {
     pub bookmarks: Option<serde_json::Value>,
     /// Container image for the node debug shell; None/empty uses the default (B53).
     pub node_shell_image: Option<String>,
+    // ---- diagnostics (B73) ----
+    /// Backend log verbosity, one of logging::LEVELS. Applied to the tracing
+    /// filter at boot and reloaded on save — no restart to capture a crash-loop.
+    pub log_level: Option<String>,
+    /// Opt-in crash reporting consent (panics + render errors only; no analytics,
+    /// no usage telemetry, ever). Off by default.
+    pub crash_reporting: Option<bool>,
+    /// Crash-reporting endpoint (Sentry / self-hosted GlitchTip). Empty disables
+    /// sending even with consent on.
+    pub crash_report_endpoint: Option<String>,
 }
 
 /// Read persisted prefs, or defaults when absent/unreadable.
@@ -83,8 +95,9 @@ pub struct Prefs {
 /// The backend reads the same prefs file the frontend writes rather than having
 /// settings passed in per call: there's then exactly one copy of the truth, and
 /// no way for a command to be invoked with settings that disagree with what the
-/// user last saved.
-fn read_prefs(app: &tauri::AppHandle) -> Prefs {
+/// user last saved. `pub(crate)` so `run()` can apply the log level and crash
+/// consent at boot (B73).
+pub(crate) fn read_prefs(app: &tauri::AppHandle) -> Prefs {
     prefs_path(app)
         .ok()
         .and_then(|p| std::fs::read_to_string(p).ok())
@@ -124,6 +137,10 @@ pub fn load_prefs(app: tauri::AppHandle) -> Option<Prefs> {
 }
 
 /// Save preferences (best-effort; creates the config dir if needed).
+///
+/// The backend-visible fields are applied immediately (B73): the log level
+/// reloads the tracing filter without a restart, and the crash-report consent +
+/// endpoint arm or disarm the reporter. The rest is the frontend's business.
 #[tauri::command]
 pub fn save_prefs(app: tauri::AppHandle, prefs: Prefs) -> AppResult<()> {
     let path = prefs_path(&app)?;
@@ -132,6 +149,16 @@ pub fn save_prefs(app: tauri::AppHandle, prefs: Prefs) -> AppResult<()> {
     }
     let text = serde_json::to_string_pretty(&prefs).map_err(|e| AppError::Other(e.to_string()))?;
     std::fs::write(path, text).map_err(|e| AppError::Other(e.to_string()))?;
+
+    if let Some(level) = &prefs.log_level {
+        if logging::is_valid_level(level) {
+            logging::set_level(level);
+        }
+    }
+    crash_reporting::set_config(
+        prefs.crash_reporting.unwrap_or(false),
+        prefs.crash_report_endpoint.unwrap_or_default(),
+    );
     Ok(())
 }
 
@@ -1146,13 +1173,11 @@ pub async fn get_events(
             count: e.count.unwrap_or(1),
             age: event_age(e),
             timestamp: e.first_timestamp.as_ref().map(|t| t.0.to_rfc3339()),
-            involved: e.involved_object.as_ref().map(|inv| {
-                InvolvedRef {
-                    kind: inv.kind.clone().unwrap_or_default(),
-                    name: inv.name.clone().unwrap_or_default(),
-                    namespace: inv.namespace.clone(),
-                    api_version: inv.api_version.clone(),
-                }
+            involved: Some(EventInvolved {
+                kind: e.involved_object.kind.clone().unwrap_or_default(),
+                name: e.involved_object.name.clone().unwrap_or_default(),
+                namespace: e.involved_object.namespace.clone(),
+                api_version: e.involved_object.api_version.clone(),
             }),
         })
         .collect();
@@ -1654,6 +1679,35 @@ pub async fn stop_port_forward(id: String, mgr: State<'_, Arc<ClientManager>>) -
 #[tauri::command]
 pub async fn list_port_forwards(mgr: State<'_, Arc<ClientManager>>) -> AppResult<Vec<ForwardDto>> {
     Ok(mgr.list_forwards().await)
+}
+
+/// Forward a frontend (React/window) error to the backend log and, when armed,
+/// to crash reporting (B73). Never fails — the UI must not depend on it.
+#[tauri::command]
+pub fn log_frontend_error(source: String, message: String, stack: Option<String>) {
+    let detail = format!("[{source}] {message}\n{}", stack.as_deref().unwrap_or(""));
+    tracing::error!(target: "frontend", "frontend {source}: {detail}");
+    crash_reporting::frontend_error(&source, &message, stack.as_deref());
+}
+
+/// Export the diagnostics bundle (B73): the log tail + versions + redacted
+/// settings + the last boundary trace, zipped to `path`. `context`/`cluster`
+/// come from the frontend's connection state.
+#[tauri::command]
+pub fn export_diagnostics(
+    app: tauri::AppHandle,
+    path: String,
+    context: Option<String>,
+    cluster: Option<String>,
+    boundary_trace: Option<String>,
+) -> AppResult<()> {
+    diagnostics::export(
+        &app,
+        std::path::Path::new(&path),
+        context.as_deref(),
+        cluster.as_deref(),
+        boundary_trace.as_deref(),
+    )
 }
 
 // --------------------------------------------------------------------------

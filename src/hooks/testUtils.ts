@@ -8,7 +8,7 @@
  * rendered markup, which these tests don't.
  */
 
-import { act, createElement } from "react";
+import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 // React refuses to run act() without this, and says so loudly.
@@ -33,6 +33,18 @@ export function renderHook(hook: () => void): void {
     root.render(createElement(Harness));
   });
   mounted.push({ root, container });
+}
+
+/** Mount a component and return its container, so tests can assert on markup. */
+export function renderComponent(node: ReactNode): HTMLElement {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  act(() => {
+    root.render(node);
+  });
+  mounted.push({ root, container });
+  return container;
 }
 
 /** Unmount everything, so a hook's listeners don't leak into the next test. */

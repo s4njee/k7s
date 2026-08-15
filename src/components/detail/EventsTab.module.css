@@ -1,4 +1,47 @@
-/* Events tab (Design §4-Events): a vertical list of event cards. */
+/* Events tab (Design §4-Events): a vertical list of event cards or timeline (B57). */
+
+.wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 6px 14px 0 14px;
+  gap: 8px;
+}
+
+.viewToggle {
+  display: inline-flex;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 1px;
+}
+
+.toggleBtn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.toggleBtn:hover {
+  color: var(--text-primary);
+}
+
+.toggleActive {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
 
 .list {
   flex: 1;

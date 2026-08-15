@@ -70,6 +70,92 @@ are final/exact), and the choices are noted here per Story 7.2.
   Secrets, so raw values never reach the webview and can't be clobbered by an edit.
   Other kinds are fully editable via Apply.
 
+## Per-platform manual QA checklist (B71)
+
+Run once per release, on each OS, against the fixture cluster (`./dev/cluster/up.sh`)
+or a real cluster. Test the artifact a user would actually download, not a dev
+build. Each row is a pass/fail; a release ships only when every box on every
+platform it claims is checked.
+
+| # | Check | macOS | Windows 11 | Ubuntu 24.04 |
+|---|---|---|---|---|
+| 1 | Install without friction: drag to Applications / run the NSIS+MSI installer / AppImage+deb | ☐ | ☐ | ☐ |
+| 2 | App opens to the cluster switcher; connect to the fixture cluster | ☐ | ☐ | ☐ |
+| 3 | Pods table streams; counts and status colours match `kubectl get pods` | ☐ | ☐ | ☐ |
+| 4 | Detail panel: logs follow/pause, since-windows, save-to-file | ☐ | ☐ | ☐ |
+| 5 | Shell into a container; node debug shell | ☐ | ☐ | ☐ |
+| 6 | Port-forward a pod and a Service; the local port is reachable | ☐ | ☐ | ☐ |
+| 7 | YAML edit → dry-run diff → apply against a scratch object | ☐ | ☐ | ☐ |
+| 8 | Theme: light/dark/system; terminal and charts resolve in both palettes | ☐ | ☐ | ☐ |
+| 9 | Window size/position survives closing the window and relaunching | ☐ | ☐ | ☐ |
+| 10 | A new problem raises a native notification | ☐ | ☐ | ☐ |
+| 11 | Import kubeconfig via the native file dialog; QR context export scans | ☐ | ☐ | ☐ |
+| 12 | Fonts render correctly — mono in tables/terminal, tabular numbers in AGE | ☐ | ☐ | ☐ |
+| 13 | Session end (logoff/shutdown) still saves window state | ☐ | ☐ | — |
+| 14 | Auto-update: Settings shows the version, "Check for updates" finds a newer published release, download+install+restart applies it (B72) | ☐ | ☐ | ☐ |
+
+Notes and known gaps to watch on first runs:
+
+- **Windows** — the WebView2 Evergreen runtime is preinstalled on Windows 11;
+  a machine without it gets a silent blank window until it's installed.
+  The `ctrl_logoff`/`ctrl_shutdown` window-state save (row 13) is written but
+  only verifiable on a real Windows host.
+- **Linux** — WebKitGTK in a container/VM may need
+  `WEBKIT_DISABLE_DMABUF_RENDERER=1` to paint; AppImage needs FUSE on the host
+  to *run* (not to build). The CI smoke-launch is a best-effort first-paint
+  probe, not a substitute for rows 1–12.
+- **All** — native notifications need the OS permission prompt accepted once.
+
+## Diagnostics redaction (B73)
+
+The export is only worth attaching to a bug report if it can't leak the cluster.
+Unit tests pin the redaction pass (`redact` in `src-tauri/src/diagnostics.rs`:
+URLs, bearer tokens, long base64 blobs, the user's home path), and the crash
+reporter's "zero network calls when off" invariant is tested in
+`crash_reporting.rs`. The live acceptance — a session against the fixture
+cluster, then grep a generated bundle — runs by hand:
+
+```bash
+# 1. connect to the fixture cluster, then:
+#    File → Export Diagnostics… → save k7s-diagnostics.zip
+unzip -p k7s-diagnostics.zip k7s.log settings.json versions.json \
+  | grep -Ei "https?://|Bearer |kubeconfig" && echo "LEAK" || echo "clean"
+```
+
+Nothing in the exported `settings.json`/`versions.json` is a server URL or a
+kubeconfig path; the `k7s.log` tail is scrubbed the same way. Crash reporting
+off (the default) does no network I/O by construction — the reporter returns
+before building an HTTP client.
+
+## Security hardening (B75)
+
+- **CSP.** `tauri.conf.json` now ships a real CSP: `default-src 'self'`, no
+  remote scripts/objects, `frame-ancestors 'none'`, `style-src 'unsafe-inline'`
+  (the carve-out CodeMirror/xterm/plotly need), `connect-src` including the
+  Tauri IPC. Tauri additionally hashes the app's own scripts at build time.
+  `devCsp` relaxes it for vite's HMR websocket in dev only. **Manual acceptance
+  to run per release:** every view (charts, terminal, QR dialog) renders under
+  the CSP in the packaged app — a broken carve-out shows up as a blank
+  chart/terminal.
+- **Capability audit.** The permission set is now the explicit minimum the
+  frontend provably uses (`core:app/event/window:default` + `allow-set-theme` +
+  webview, plus the plugin surfaces). `core:path/image/resources/menu/tray` are
+  not granted. If a future feature needs one, add it deliberately.
+- **Supply chain.** `cargo audit` (fails on vulnerabilities; the gtk-rs
+  "unmaintained" warnings on the Linux GTK stack are expected and don't gate)
+  and `pnpm audit --audit-level high` run in CI; Dependabot opens weekly bumps.
+  Local runs are clean today:
+  ```bash
+  cargo audit --manifest-path src-tauri/Cargo.toml   # 0 vulnerabilities
+  pnpm audit --prod --audit-level high               # no known vulnerabilities
+  ```
+- **Injection surfaces.** `grep -rn "dangerouslySetInnerHTML\|innerHTML" src/`
+  returns nothing; a vitest (`TableRow.test.tsx`) renders a pod named
+  `<img src=x onerror=alert(1)>` and asserts the literal text appears with no
+  `img`/`onerror` element in the DOM. The demo-mode "everywhere" check (table,
+  detail header, palette, problems) follows the same `{name}` text pattern and
+  is a quick manual pass.
+
 ## Known follow-ups (out of v1 scope, per plan.md)
 
 - Detail panel (YAML/Events) for non-pod kinds — pods-only in v1 by design.

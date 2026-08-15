@@ -53,7 +53,9 @@ export function useTerminal(key: string | null): TerminalHandles {
     // [data-surface="panel"]) win over the document palette.
     const host = hostRef.current;
     const term = new Terminal({
-      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+      // Same stack as --font-yaml (IBM Plex Mono): xterm measures glyph widths
+      // from this string, so it must be the resolved stack, not a var().
+      fontFamily: "'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace",
       fontSize: 12,
       cursorBlink: true,
       theme: termTheme(host),

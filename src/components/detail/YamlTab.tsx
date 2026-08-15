@@ -165,11 +165,22 @@ export function YamlTab() {
         />
       ) : yamlEditing ? (
         <div className={`${styles.editorWrap} ${styles.editing}`}>
-          <CodeEditor key={`edit:${row.uid}`} value={yamlText} editable onChange={setYamlDraft} />
+          <CodeEditor
+            key={`edit:${row.uid}`}
+            value={yamlText}
+            editable
+            fontFamily="var(--font-yaml)"
+            onChange={setYamlDraft}
+          />
         </div>
       ) : (
         <div className={styles.editorWrap}>
-          <CodeEditor key={`read:${row.uid}:${nonce}`} value={yamlText} editable={false} />
+          <CodeEditor
+            key={`read:${row.uid}:${nonce}`}
+            value={yamlText}
+            editable={false}
+            fontFamily="var(--font-yaml)"
+          />
         </div>
       )}
     </>

@@ -12,6 +12,7 @@ import { useCustomKindWatch } from "./hooks/useCustomKindWatch";
 import { useGlobalKeys } from "./hooks/useGlobalKeys";
 import { useProblemNotifications } from "./hooks/useProblemNotifications";
 import { useTheme } from "./hooks/useTheme";
+import { useUpdates } from "./hooks/useUpdates";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { TopBar } from "./components/topbar/TopBar";
 import { StatusBar } from "./components/statusbar/StatusBar";
@@ -33,6 +34,8 @@ export default function App() {
   useTheme();
   // Native problem notifications when opted in (B50).
   useProblemNotifications();
+  // Passive update checks (B72): on launch and once a day, silent on failure.
+  useUpdates();
 
   return (
     <div className={styles.app}>

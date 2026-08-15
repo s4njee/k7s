@@ -18,6 +18,9 @@ import { useStore } from "../../store";
 import { LIMITS, DEFAULT_SETTINGS, sanitizeSettings, type Settings } from "../../lib/settings";
 import { ACCENTS, UI_FONTS, type Accent } from "../../lib/appearance";
 import { asTheme } from "../../lib/theme";
+import { checkForUpdates, installUpdate, restartToApplyUpdate, openChangelog } from "../../lib/updates";
+import { LOG_LEVELS } from "../../lib/settings";
+import { exportDiagnostics } from "../../lib/diagnostics";
 
 /** The swatch colour shown for each accent option (the dark-palette value). */
 const ACCENT_SWATCH: Record<Accent, string> = {
@@ -33,6 +36,11 @@ export function SettingsPanel() {
   const settings = useStore((s) => s.settings);
   const setSettings = useStore((s) => s.setSettings);
   const connected = useStore((s) => s.connection.phase === "connected");
+
+  // Automatic updates (B72): plain store state, driven by lib/updates.ts.
+  const updateStatus = useStore((s) => s.status);
+  const updateVersion = useStore((s) => s.version);
+  const currentVersion = useStore((s) => s.currentVersion);
 
   // Esc closes, matching every other overlay in the app.
   useEffect(() => {
@@ -112,7 +120,7 @@ export function SettingsPanel() {
                 role="switch"
                 aria-checked={settings.reduceMotion}
               >
-                {settings.reduceMotion ? "off" : "on"}
+                {settings.reduceMotion ? "on" : "off"}
               </div>
             </Row>
           </Section>
@@ -203,6 +211,121 @@ export function SettingsPanel() {
                 onChange={(e) => update({ nodeShellImage: e.target.value })}
                 placeholder="(nicolaka/netshoot)"
               />
+            </Row>
+          </Section>
+
+          <Section title="Software updates">
+            <Row
+              label="Version"
+              hint="k7s checks for updates quietly on launch and once a day"
+            >
+              <div className={styles.updateLine}>
+                <span className={styles.updateVersion}>{currentVersion ?? "—"}</span>
+                <button
+                  className={styles.updateBtn}
+                  onClick={() => void checkForUpdates()}
+                  disabled={updateStatus === "checking"}
+                >
+                  {updateStatus === "checking" ? "Checking…" : "Check for updates"}
+                </button>
+              </div>
+            </Row>
+
+            {updateStatus === "none" && (
+              <div className={styles.updateNote}>You're up to date.</div>
+            )}
+
+            {(updateStatus === "available" || updateStatus === "downloading") &&
+              updateVersion && (
+                <div className={styles.updateNote}>
+                  <span>Version {updateVersion} is available.</span>
+                  <span className={styles.updateActions}>
+                    <button
+                      className={styles.updateBtn}
+                      onClick={() => void openChangelog()}
+                    >
+                      What's new
+                    </button>
+                    <button
+                      className={styles.updateBtn}
+                      onClick={() => void installUpdate()}
+                      disabled={updateStatus === "downloading"}
+                    >
+                      {updateStatus === "downloading" ? "Downloading…" : "Download & install"}
+                    </button>
+                  </span>
+                </div>
+              )}
+
+            {updateStatus === "installed" && (
+              <div className={styles.updateNote}>
+                <span>Update installed. Restart k7s to finish applying it.</span>
+                <span className={styles.updateActions}>
+                  <button
+                    className={styles.updateBtn}
+                    onClick={() => void restartToApplyUpdate()}
+                  >
+                    Restart now
+                  </button>
+                </span>
+              </div>
+            )}
+          </Section>
+
+          <Section title="Diagnostics">
+            <Row
+              label="Log level"
+              hint="what the app log file captures; more verbosity when troubleshooting"
+            >
+              <select
+                className={styles.select}
+                value={settings.logLevel}
+                onChange={(e) => update({ logLevel: e.target.value as Settings["logLevel"] })}
+              >
+                {LOG_LEVELS.map((l) => (
+                  <option key={l} value={l}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </Row>
+
+            <Row
+              label="Crash reporting"
+              hint="panics and render errors only, scrubbed; no analytics, no usage telemetry, ever. Off by default."
+            >
+              <div
+                className={`${styles.toggle} ${settings.crashReporting ? styles.toggleOn : ""}`}
+                onClick={() => update({ crashReporting: !settings.crashReporting })}
+                role="switch"
+                aria-checked={settings.crashReporting}
+              >
+                {settings.crashReporting ? "on" : "off"}
+              </div>
+            </Row>
+
+            {settings.crashReporting && (
+              <Row
+                label="Reporting endpoint"
+                hint="Sentry or self-hosted GlitchTip ingestion URL; empty sends nothing"
+              >
+                <input
+                  className={styles.text}
+                  type="text"
+                  value={settings.crashReportEndpoint}
+                  onChange={(e) => update({ crashReportEndpoint: e.target.value })}
+                  placeholder="https://…"
+                />
+              </Row>
+            )}
+
+            <Row
+              label="Export diagnostics"
+              hint="log tail, versions, settings and the last error, scrubbed — for a bug report"
+            >
+              <button className={styles.updateBtn} onClick={() => void exportDiagnostics()}>
+                Export…
+              </button>
             </Row>
           </Section>
         </div>

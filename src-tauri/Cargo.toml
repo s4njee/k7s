@@ -1,7 +1,8 @@
 [package]
 name = "k7s"
-version = "0.4.0"
+version = "0.5.0"
 description = "k7s — a Lens-style Kubernetes visual monitor"
+license = "MIT"
 authors = ["k7s"]
 edition = "2021"
 # 1.77.2 is what our dependency set actually needs (tauri-plugin-window-state
@@ -32,11 +33,27 @@ tauri-plugin-clipboard-manager = "2"
 # Native desktop notifications (B50): shown from Rust when a problem appears,
 # with the target carried as extra payload for click-to-navigate.
 tauri-plugin-notification = "2"
+# Automatic updates (B72): checks the update endpoint, verifies the manifest
+# signature against the configured public key, and downloads/installs. The
+# signing keypair is independent of Apple's Developer ID — CI signs with
+# TAURI_SIGNING_PRIVATE_KEY, which may be absent until the updater goes live.
+tauri-plugin-updater = "2"
+# `relaunch()` for the frontend after an update is installed (B72).
+tauri-plugin-process = "2"
 
-# HTTP client for scraping node-exporter over a port-forward (B27). Already in
-# the tree via kube, so this adds no build time; default features off because the
-# forward is plaintext on localhost and needs no TLS stack of its own.
-reqwest = { version = "0.13", default-features = false }
+# HTTP client for scraping node-exporter over a port-forward (B27) and for the
+# opt-in crash-report POST (B73). Already in the tree via kube, so this adds no
+# build time. `json` powers the report body; `rustls-no-provider` uses TLS
+# without pinning a crypto provider — kube pins ring, and enabling reqwest's
+# `rustls` (aws-lc-rs) instead would enable two providers and panic at runtime.
+# (The node-exporter forward itself stays plaintext on localhost.)
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+
+# --- Diagnostics (B73) ---
+# File logging: non-blocking writer + daily rotation capped at N files, under
+# the platform app log dir. `zip` builds the "Export diagnostics" bundle.
+tracing-appender = "0.2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # --- Serialization ---
 serde = { version = "1", features = ["derive"] }
@@ -62,8 +79,13 @@ k8s-openapi = { version = "0.24", features = ["latest"] }
 # --- Error handling & logging ---
 thiserror = "2"
 anyhow = "1"
+# The redaction pass on exported diagnostics (B73): server URLs, bearer tokens,
+# base64 blobs. Already in the tree via kube, so this adds no build time.
+regex = "1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# `std` exposes the `reload` module, which powers the Settings log-level change
+# without a restart (B73).
+tracing-subscriber = { version = "0.3", features = ["env-filter", "std"] }
 
 # --- Time formatting for log timestamps ---
 chrono = { version = "0.4", features = ["serde"] }

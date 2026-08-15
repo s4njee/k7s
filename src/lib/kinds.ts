@@ -165,7 +165,7 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
   // behind it is the follow-up question.
   persistentvolumeclaims: {
     group: "storage",
-    label: "PersistentVolumeClaims",
+    label: "PVCs",
     icon: "⛁",
     columns: ["NAME", "NAMESPACE", "STATUS", "VOLUME", "CAPACITY", "ACCESS", "CLASS", "AGE"],
   },

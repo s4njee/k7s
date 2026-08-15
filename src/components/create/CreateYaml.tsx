@@ -109,11 +109,11 @@ export function CreateYaml() {
 
         {proposed ? (
           <div className={styles.editor}>
-            <CodeEditor value={proposed} editable={false} />
+            <CodeEditor value={proposed} editable={false} fontFamily="var(--font-yaml)" />
           </div>
         ) : (
           <div className={styles.editor}>
-            <CodeEditor value={draft} editable onChange={setDraft} />
+            <CodeEditor value={draft} editable onChange={setDraft} fontFamily="var(--font-yaml)" />
           </div>
         )}
 

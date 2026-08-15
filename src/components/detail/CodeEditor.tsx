@@ -1,6 +1,6 @@
 /**
  * A thin CodeMirror 6 wrapper for the YAML tab, themed to the design tokens
- * (Design §4-YAML): terminal background, mono 11.5px, right-aligned line numbers,
+ * (Design §4-YAML): terminal background, 11.5px, right-aligned line numbers,
  * and syntax colors for keys/strings/numbers/punctuation.
  *
  * The editor is uncontrolled after mount; YamlTab gives it a React `key` that
@@ -31,7 +31,7 @@ const highlight = HighlightStyle.define([
  * their own; the `dark` flag can't be, since CodeMirror branches on it internally
  * to pick base styles. Hence a factory plus the compartment below.
  */
-const makeTheme = (dark: boolean) =>
+const makeTheme = (dark: boolean, fontFamily = "var(--font-mono)") =>
   EditorView.theme(
     {
       "&": {
@@ -39,24 +39,27 @@ const makeTheme = (dark: boolean) =>
         color: "var(--text-body)",
         fontSize: "11.5px",
         height: "100%",
+        fontFamily,
       },
       ".cm-content": {
-        fontFamily: "var(--font-mono)",
+        fontFamily,
         lineHeight: "1.6",
         padding: "10px 0",
       },
-      ".cm-scroller": { fontFamily: "var(--font-mono)", overflow: "auto" },
+      ".cm-scroller": { fontFamily, overflow: "auto" },
       "&.cm-focused": { outline: "none" },
       ".cm-gutters": {
         backgroundColor: "var(--bg-terminal)",
         color: "var(--text-linenum)",
         border: "none",
+        fontFamily,
       },
       // Right-aligned 30px line-number column.
       ".cm-lineNumbers .cm-gutterElement": {
         padding: "0 14px 0 6px",
         minWidth: "30px",
         textAlign: "right",
+        fontFamily,
       },
       ".cm-activeLine": { backgroundColor: "transparent" },
       ".cm-activeLineGutter": { backgroundColor: "transparent" },
@@ -85,9 +88,10 @@ interface CodeEditorProps {
   editable: boolean;
   /** Called with the new document text on every edit (edit mode only). */
   onChange?: (text: string) => void;
+  fontFamily?: string;
 }
 
-export function CodeEditor({ value, editable, onChange }: CodeEditorProps) {
+export function CodeEditor({ value, editable, onChange, fontFamily = "var(--font-mono)" }: CodeEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   // YAML only mounts in the detail panel. That surface is dark under both
@@ -99,6 +103,8 @@ export function CodeEditor({ value, editable, onChange }: CodeEditorProps) {
   // Read through a ref inside the mount effect, which deliberately runs once.
   const darkRef = useRef(dark);
   darkRef.current = dark;
+  const fontRef = useRef(fontFamily);
+  fontRef.current = fontFamily;
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -107,7 +113,7 @@ export function CodeEditor({ value, editable, onChange }: CodeEditorProps) {
       lineNumbers(),
       yaml(),
       syntaxHighlighting(highlight),
-      themeCompartment.of(makeTheme(darkRef.current)),
+      themeCompartment.of(makeTheme(darkRef.current, fontRef.current)),
       EditorView.lineWrapping,
       EditorState.readOnly.of(!editable),
       EditorView.editable.of(editable),
@@ -143,9 +149,9 @@ export function CodeEditor({ value, editable, onChange }: CodeEditorProps) {
   // flag is stable, but re-running picks up any future theme-extension changes.
   useEffect(() => {
     viewRef.current?.dispatch({
-      effects: themeCompartment.reconfigure(makeTheme(dark)),
+      effects: themeCompartment.reconfigure(makeTheme(dark, fontFamily)),
     });
-  }, [theme, dark]);
+  }, [theme, dark, fontFamily]);
 
   // Fill the available height so the editor scrolls internally.
   return <div ref={hostRef} style={{ flex: 1, minHeight: 0, overflow: "hidden" }} />;

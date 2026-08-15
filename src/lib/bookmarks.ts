@@ -9,6 +9,8 @@ import type { Bookmark } from "../providers/types";
 
 export type { Bookmark };
 
+export const EMPTY_BOOKMARKS: Bookmark[] = [];
+
 /** The stable key for a bookmark, "{kind}:{namespace}/{name}". */
 export function bookmarkKey(b: Bookmark): string {
   return `${b.kind}:${b.namespace ?? ""}/${b.name}`;

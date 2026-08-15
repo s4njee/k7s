@@ -11,6 +11,11 @@ export function StatusBar() {
   const connection = useStore((s) => s.connection);
   const status = useStore((s) => s.clusterStatus);
 
+  // Passive update notice (B72): a quiet pill when a newer version exists.
+  const updateStatus = useStore((s) => s.status);
+  const updateVersion = useStore((s) => s.version);
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen);
+
   const connected = connection.phase === "connected";
   const cluster = connection.clusterName ?? connection.context ?? "k7s";
   const ctx = connection.context ?? "—";
@@ -34,6 +39,15 @@ export function StatusBar() {
       <span>cpu {cpu}</span>
       <span>mem {mem}</span>
       <div className={styles.spacer} />
+      {updateStatus === "available" && updateVersion && (
+        <button
+          className={styles.updateBadge}
+          onClick={() => setSettingsOpen(true)}
+          title={`Version ${updateVersion} is available — open Settings to install`}
+        >
+          update v{updateVersion}
+        </button>
+      )}
       <span>kubectl ctx: {ctx}</span>
     </div>
   );

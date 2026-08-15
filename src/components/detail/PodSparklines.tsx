@@ -23,7 +23,11 @@ export function PodSparklines({
   namespace,
   name,
   resources,
-}: { namespace: string; name: string; resources?: PodResources }) {
+}: {
+  namespace: string;
+  name: string;
+  resources?: PodResources;
+}) {
   const [points, setPoints] = useState<PodPoint[] | null>(null);
 
   useEffect(() => {
@@ -111,9 +115,6 @@ function SparklineCell({
   warn?: boolean;
   warnAmber?: boolean;
 }) {
-  const limitY = limit != null ? H - PAD - ((limit - min) / span) * (H - PAD * 2) : null;
-  const requestY = request != null ? H - PAD - ((request - min) / span) * (H - PAD * 2) : null;
-
   return (
     <div className={styles.cell}>
       <div className={styles.head}>
@@ -123,8 +124,8 @@ function SparklineCell({
       <Sparkline
         series={series}
         color={color}
-        limitY={limitY}
-        requestY={requestY}
+        limit={limit}
+        request={request}
         warn={warn}
         warnAmber={warnAmber}
       />
@@ -132,30 +133,31 @@ function SparklineCell({
   );
 }
 
+const W = 96;
+const H = 22;
+const PAD = 2;
+
 /** A minimal inline-SVG sparkline: a normalised line over a soft area fill.
  *  B58: supports limit/request reference lines and warning tints.
  */
 function Sparkline({
   series,
   color,
-  limitY,
-  requestY,
+  limit,
+  request,
   warn,
   warnAmber,
 }: {
   series: number[];
   color: string;
-  limitY?: number | null;
-  requestY?: number | null;
+  limit?: number | null;
+  request?: number | null;
   warn?: boolean;
   warnAmber?: boolean;
 }) {
-  const W = 96;
-  const H = 22;
-  const PAD = 2;
-
-  const min = Math.min(...series);
-  const max = Math.max(...series);
+  const dataMin = Math.min(...series);
+  const min = Math.min(dataMin, 0);
+  const max = Math.max(...series, limit ?? 0, request ?? 0);
   const span = max - min || 1;
   const step = (W - PAD * 2) / (series.length - 1);
 
@@ -170,6 +172,9 @@ function Sparkline({
   const lastX = pts[pts.length - 1][0].toFixed(1);
   const firstX = pts[0][0].toFixed(1);
   const area = `${line} L${lastX},${H} L${firstX},${H} Z`;
+
+  const limitY = limit != null ? H - PAD - ((limit - min) / span) * (H - PAD * 2) : null;
+  const requestY = request != null ? H - PAD - ((request - min) / span) * (H - PAD * 2) : null;
 
   // Warning tints: red above 95%, amber 80-95%
   const warnAmberY = max - (max - min) * 0.8;
@@ -197,7 +202,8 @@ function Sparkline({
               style={{ fill: "var(--status-warn)", opacity: 0.12 }}
             />
           )}
-        )}
+        </>
+      )}
       {/* Limit line (solid red) */}
       {limitY != null && (
         <line

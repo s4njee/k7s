@@ -5,160 +5,313 @@
  * - Swim-lanes by involved object (when viewing workload-level)
  * - Wheel-zoom + drag-pan
  * - Hover tooltip with full event details
- * - Falls back to list view when < 5 events
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./EventTimeline.module.css";
-import { useStore } from "../../store";
-import { getProvider } from "../../providers";
-import { formatAge } from "../../lib/format";
 import type { EventItem } from "../../providers/types";
 
-export function EventTimeline({ events, involved }: { events: EventItem[]; involved?: string }) {
-  const [viewMode, setViewMode] = useState<"list" | "timeline">("list");
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [hoveredEvent, setHoveredEvent] = useState<EventItem | null>(null);
+interface EventTimelineProps {
+  events: EventItem[];
+}
+
+interface RenderedDot {
+  x: number;
+  y: number;
+  radius: number;
+  event: EventItem;
+}
+
+export function EventTimeline({ events }: EventTimelineProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Pan and zoom state
+  const [zoom, setZoom] = useState(1);
+  const [panX, setPanX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const dragStartRef = useRef({ x: 0, panX: 0 });
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Hover state for tooltips
+  const [hovered, setHovered] = useState<{
+    event: EventItem;
+    x: number;
+    y: number;
+  } | null>(null);
 
-  // Compute layout
-  useEffect(() => {
-    if (!canvasRef.current || !events.length) return;
+  const dotsRef = useRef<RenderedDot[]>([]);
+
+  // Parse event timestamps (falling back to age or now)
+  const parsedEvents = useMemo(() => {
+    const now = Date.now();
+    return events.map((e) => {
+      let ts = e.timestamp ? new Date(e.timestamp).getTime() : NaN;
+      if (isNaN(ts)) {
+        ts = now;
+      }
+      return { event: e, time: ts };
+    });
+  }, [events]);
+
+  const { minTime, maxTime } = useMemo(() => {
+    const times = parsedEvents.map((p) => p.time);
+    if (times.length === 0) {
+      const now = Date.now();
+      return { minTime: now - 3600000, maxTime: now };
+    }
+    const min = Math.min(...times);
+    const max = Math.max(...times);
+    // At least 5 minutes range so points don't collapse to one spot
+    const span = Math.max(max - min, 300000);
+    return { minTime: max - span, maxTime: max };
+  }, [parsedEvents]);
+
+  // Group events by involved object (swim lanes)
+  const lanes = useMemo(() => {
+    const map = new Map<string, { label: string; items: typeof parsedEvents }>();
+    for (const item of parsedEvents) {
+      const inv = item.event.involved;
+      const key = inv?.kind && inv?.name ? `${inv.kind}/${inv.name}` : "Events";
+      if (!map.has(key)) {
+        map.set(key, { label: key, items: [] });
+      }
+      map.get(key)!.items.push(item);
+    }
+    return Array.from(map.values());
+  }, [parsedEvents]);
+
+  // Redraw canvas
+  const draw = useCallback(() => {
     const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = canvas.clientWidth * window.devicePixelRatio;
-    canvas.height = canvas.clientHeight * window.devicePixelRatio;
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    const width = container.clientWidth;
+    const height = container.clientHeight;
 
-    // Draw logic here
-    drawTimeline(ctx, canvas.clientWidth, canvas.clientHeight);
-  }, [events]);
-
-  const drawTimeline = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-    if (!events.length) return;
-
-    const PAD = 40;
-    const LEFT_PAD = 80;
-    const RIGHT_PAD = 20;
-    const TOP_PAD = 40;
-    const BOTTOM_PAD = 40;
-    const plotWidth = width - LEFT_PAD - RIGHT_PAD;
-    const plotHeight = height - 100;
-
-    // Find time range
-    const times = events.map(e => new Date(e.timestamp || e.age).getTime()).filter(t => !isNaN(t));
-    if (times.length === 0) return;
-    const minTime = Math.min(...times);
-    const maxTime = Math.max(...times);
-    const timeRange = maxTime - minTime || 1;
-
-    // Group by involved object for swim lanes
-    const involvedMap = new Map<string, EventItem[]>();
-    events.forEach(e => {
-      const key = e.involved?.kind && e.involved?.name
-        ? `${e.involved.kind}/${e.involved.namespace ?? ""}/${e.involved.name}`
-        : "other";
-      if (!involvedMap.has(key)) involvedMap.set(key, []);
-      involvedMap.get(key)!.push(e);
+    if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
     }
 
-    const lanes = Array.from(involvedMap.entries());
-    const laneHeight = 30;
-    const laneGap = 10;
-    const startY = 60;
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, width, height);
 
-    // Time scale
-    const timeToX = (time: number) => {
-      return 60 + ((time - Date.now() + 3600000) / 3600000) * 600; // 1 hour window
+    const LEFT_PAD = 120;
+    const RIGHT_PAD = 30;
+    const TOP_PAD = 40;
+    const BOTTOM_PAD = 30;
+    const plotWidth = width - LEFT_PAD - RIGHT_PAD;
+    const timeSpan = maxTime - minTime || 1;
+
+    // Time to X coordinate mapper
+    const timeToX = (t: number) => {
+      const fraction = (t - minTime) / timeSpan;
+      return LEFT_PAD + (fraction * plotWidth * zoom) + panX;
     };
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    // Draw horizontal lane guides and labels
+    const laneHeight = Math.max(40, (height - TOP_PAD - BOTTOM_PAD) / Math.max(lanes.length, 1));
 
-    // Clear
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = "10px JetBrains Mono, monospace";
+    ctx.fillStyle = "rgba(140, 150, 170, 0.8)";
+    ctx.strokeStyle = "rgba(140, 150, 170, 0.15)";
+    ctx.lineWidth = 1;
 
-    // Draw time axis
-    ctx.font = "10px monospace";
-    ctx.fillStyle = "var(--text-muted)";
-    ctx.strokeStyle = "var(--border-default)";
-
-    // Time axis line
+    // Time axis top line
     ctx.beginPath();
-    ctx.moveTo(60, 30);
-    ctx.lineTo(ctx.canvas.width - 20, 30);
+    ctx.moveTo(LEFT_PAD, TOP_PAD - 10);
+    ctx.lineTo(width - RIGHT_PAD, TOP_PAD - 10);
     ctx.stroke();
 
-    // Time labels
-    for (let i = 0; i <= 6; i++) {
-      const time = Date.now() - 3600000 + i * 600000;
-      const x = 60 + i * 100;
-      ctx.beginPath();
-      ctx.moveTo(x, 25);
-      ctx.lineTo(x, 35);
-      ctx.stroke();
-      const date = new Date(Date.now() - 3600000 + i * 600000);
-      ctx.fillText(date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), x - 20, 22);
+    // Time ticks
+    const tickCount = 6;
+    for (let i = 0; i <= tickCount; i++) {
+      const t = minTime + (timeSpan / tickCount) * i;
+      const x = timeToX(t);
+      if (x >= LEFT_PAD && x <= width - RIGHT_PAD) {
+        ctx.beginPath();
+        ctx.moveTo(x, TOP_PAD - 15);
+        ctx.lineTo(x, TOP_PAD - 8);
+        ctx.stroke();
+
+        const date = new Date(t);
+        const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        ctx.fillText(timeStr, x - 25, TOP_PAD - 20);
+      }
     }
 
-    // Draw events
-    events.forEach((event, idx) => {
-      const time = new Date(event.timestamp || event.age).getTime();
-      if (isNaN(time)) return;
-      const x = 60 + ((time - (Date.now() - 3600000)) / 3600000) * 600;
-      if (x < 60 || x > 660) return;
+    const dots: RenderedDot[] = [];
 
-      const color = event.type === "Warning" ? "#f7768e" : "#9ece6a";
-      const radius = 6;
+    lanes.forEach((lane, laneIdx) => {
+      const laneY = TOP_PAD + laneIdx * laneHeight + laneHeight / 2;
 
-      // Draw event dot
+      // Lane line
       ctx.beginPath();
-      ctx.arc(60 + (Date.now() - (Date.now() - 3600000)) / 3600000 * 600, 50, 5, 0, 2 * Math.PI);
-      ctx.fillStyle = event.type === "Warning" ? "#f7768e" : "#9ece6a";
-      ctx.fill();
+      ctx.strokeStyle = "rgba(140, 150, 170, 0.08)";
+      ctx.moveTo(LEFT_PAD, laneY);
+      ctx.lineTo(width - RIGHT_PAD, laneY);
+      ctx.stroke();
 
-      // Event label on hover - handled separately
+      // Lane label (truncated)
+      ctx.fillStyle = "rgba(180, 190, 210, 0.7)";
+      const label = lane.label.length > 14 ? lane.label.slice(0, 13) + "…" : lane.label;
+      ctx.fillText(label, 12, laneY + 3);
+
+      // Event dots
+      for (const item of lane.items) {
+        const x = timeToX(item.time);
+        if (x < LEFT_PAD - 10 || x > width - RIGHT_PAD + 10) continue;
+
+        const isWarn = item.event.type === "Warning";
+        const dotRadius = Math.min(8, Math.max(4, 3 + Math.log2(item.event.count || 1)));
+
+        // Outer glow/ring for multiple counts
+        if (item.event.count > 1) {
+          ctx.beginPath();
+          ctx.arc(x, laneY, dotRadius + 3, 0, Math.PI * 2);
+          ctx.fillStyle = isWarn ? "rgba(247, 118, 142, 0.2)" : "rgba(158, 206, 106, 0.2)";
+          ctx.fill();
+        }
+
+        // Dot fill
+        ctx.beginPath();
+        ctx.arc(x, laneY, dotRadius, 0, Math.PI * 2);
+        ctx.fillStyle = isWarn ? "#f7768e" : "#9ece6a";
+        ctx.fill();
+
+        dots.push({
+          x,
+          y: laneY,
+          radius: dotRadius + 4,
+          event: item.event,
+        });
+      }
     });
+
+    dotsRef.current = dots;
+    ctx.restore();
+  }, [lanes, minTime, maxTime, zoom, panX]);
+
+  useEffect(() => {
+    draw();
+  }, [draw]);
+
+  // Window resize observer
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const ro = new ResizeObserver(() => draw());
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [draw]);
+
+  // Mouse interaction handlers
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    setIsDragging(true);
+    dragStartRef.current = { x: e.clientX, panX };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    if (isDragging) {
+      const dx = e.clientX - dragStartRef.current.x;
+      setPanX(dragStartRef.current.panX + dx);
+      return;
+    }
+
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Check hit test against dots
+    const hit = dotsRef.current.find((dot) => {
+      const dx = dot.x - mouseX;
+      const dy = dot.y - mouseY;
+      return Math.sqrt(dx * dx + dy * dy) <= dot.radius;
+    });
+
+    if (hit) {
+      setHovered({ event: hit.event, x: mouseX + 12, y: mouseY + 12 });
+    } else {
+      setHovered(null);
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.15 : 0.87;
+    setZoom((z) => Math.min(20, Math.max(0.5, z * factor)));
+  };
+
+  const resetView = () => {
+    setZoom(1);
+    setPanX(0);
   };
 
   return (
-    <div className="event-timeline">
-      <div className="timeline-toolbar">
-        <button onClick={() => setViewMode(v => v === "list" ? "timeline" : "list")}>
-          {viewMode === "timeline" ? "List" : "Timeline"}
-        </button>
-        <span className="event-count">{events.length} events</span>
+    <div className={styles.wrap}>
+      <div className={styles.toolbar}>
+        <span className={styles.count}>{events.length} events</span>
+        <div className={styles.controls}>
+          <span>scroll to zoom · drag to pan</span>
+          {(zoom !== 1 || panX !== 0) && (
+            <button className={styles.resetBtn} onClick={resetView}>
+              reset view
+            </button>
+          )}
+        </div>
       </div>
-      <canvas
-        ref={canvasRef}
-        className="timeline-canvas"
-        width={800}
-        height={400}
+      <div
+        className={styles.canvasWrap}
+        ref={containerRef}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        onMouseLeave={() => {
+          handleMouseUp();
+          setHovered(null);
+        }}
         onWheel={handleWheel}
-        onMouseMove={handleHover}
-        onMouseLeave={() => setHoveredEvent(null)}
-      />
-      {hoveredEvent && (
-        <div className="event-tooltip">
-          <strong>{hoveredEvent.type}</strong> {hoveredEvent.reason}
-          <br />
-          {hoveredEvent.message}
-          <br />
-          <small>{hoveredEvent.age} · ×{hoveredEvent.count}</small>
-        </div>
-      )}
+      >
+        <canvas ref={canvasRef} className={styles.canvas} />
+        {hovered && (
+          <div
+            className={styles.tooltip}
+            style={{
+              left: Math.min(hovered.x, (containerRef.current?.clientWidth ?? 400) - 290),
+              top: Math.max(10, hovered.y),
+            }}
+          >
+            <div className={styles.headline}>
+              <span
+                className={styles.tooltipType}
+                style={{
+                  color: hovered.event.type === "Warning" ? "var(--status-err)" : "var(--status-ok)",
+                }}
+              >
+                {hovered.event.type}
+              </span>
+              <span className={styles.tooltipReason}>{hovered.event.reason}</span>
+            </div>
+            <div className={styles.tooltipMsg}>{hovered.event.message}</div>
+            <div className={styles.tooltipMeta}>
+              {hovered.event.age} · count: {hovered.event.count}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

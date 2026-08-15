@@ -137,10 +137,11 @@ function drawGraph(
     ctx.fill();
     ctx.stroke();
 
-    ctx.font = FONT;
-    ctx.fillStyle = isSeed ? colors.accent : colors.axis;
+    ctx.font = isSeed ? "600 10px 'JetBrains Mono', ui-monospace, monospace" : FONT;
+    ctx.fillStyle = isSeed ? "#0a0a0c" : colors.axis;
     ctx.fillText(n.kind, n.x + 8, n.y + 13);
-    ctx.fillStyle = colors.axis;
+    ctx.font = FONT;
+    ctx.fillStyle = isSeed ? "#121216" : colors.axis;
     ctx.fillText(shortName(n.name), n.x + 8, n.y + 27);
   }
 }

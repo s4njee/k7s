@@ -8,6 +8,10 @@ dist-ssr/
 src-tauri/target/
 src-tauri/gen/
 
+# CI/build artifacts written to the repo root (B72)
+updater-overlay.json
+latest.json
+
 # Editor / OS
 .DS_Store
 .idea/

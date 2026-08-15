@@ -1,10 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Core permissions for the k7s main window. All Kubernetes access goes through our own Rust commands, so we only need the minimal window/event surface plus the shell plugin scaffold.",
+  "description": "Core permissions for the k7s main window (B75 audit). All Kubernetes access goes through our own Rust commands, so the frontend only needs what it provably uses: invoke/listen/getVersion (core:app/event), the window (getCurrentWindow + setTheme), plus the plugin surfaces (shell open, file dialogs, window-state, updater, process relaunch). core:path/image/resources/menu/tray are deliberately not granted.",
   "windows": ["main"],
   "permissions": [
-    "core:default",
+    "core:app:default",
     "core:event:default",
     "core:window:default",
     "core:window:allow-set-theme",
@@ -12,6 +12,8 @@
     "shell:allow-open",
     "dialog:allow-open",
     "dialog:allow-save",
-    "window-state:default"
+    "window-state:default",
+    "updater:default",
+    "process:default"
   ]
 }

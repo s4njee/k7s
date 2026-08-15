@@ -22,6 +22,9 @@ const PAD = 20;
 
 /** The canvas dimensions the layout needs. */
 export function graphSize(nodes: LayoutNode[]): { width: number; height: number } {
+  if (nodes.length === 0) {
+    return { width: 320, height: 160 };
+  }
   const w = Math.max(...nodes.map((n) => n.x + n.w)) + PAD;
   const h = Math.max(...nodes.map((n) => n.y + n.h)) + PAD;
   return { width: Math.max(w, 320), height: Math.max(h, 160) };
@@ -37,11 +40,18 @@ export function layoutGraph(nodes: TopologyNode[], edges: TopologyEdge[]): Layou
   for (const e of edges) incoming.get(e.to)?.push(e.from);
 
   const layer = new Map<string, number>();
+  const visiting = new Set<string>();
+
   const compute = (id: string): number => {
     const known = layer.get(id);
     if (known !== undefined) return known;
+    if (visiting.has(id)) return 0; // Break cycle
+    visiting.add(id);
+
     const parents = incoming.get(id) ?? [];
     const l = parents.length ? Math.max(...parents.map(compute)) + 1 : 0;
+
+    visiting.delete(id);
     layer.set(id, l);
     return l;
   };
