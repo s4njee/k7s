@@ -8,6 +8,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { IS_DEMO } from "../providers";
 import { useStore } from "../store";
+import { errEnvelope } from "./errors";
 
 /** The last ErrorBoundary trace, kept for the diagnostics bundle. */
 let lastBoundaryTrace: string | null = null;
@@ -50,7 +51,15 @@ export async function exportDiagnostics(): Promise<void> {
  */
 export function logFrontendError(source: string, error: unknown): void {
   if (IS_DEMO) return; // browser page: nothing to forward to
-  const message = error instanceof Error ? error.message : String(error);
+  // B74-L: a command rejection is the typed envelope — its `detail` carries the
+  // raw backend string, which is exactly what belongs in diagnostics (the UI
+  // shows the safe `message`; the raw text goes to the log/export).
+  const env = errEnvelope(error);
+  const message = env
+    ? env.detail ?? env.message
+    : error instanceof Error
+      ? error.message
+      : String(error);
   const stack = error instanceof Error ? error.stack : undefined;
   void invoke("log_frontend_error", { source, message, stack }).catch(() => {});
 }

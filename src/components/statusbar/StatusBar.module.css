@@ -63,3 +63,21 @@
   background: var(--bg-selected-row);
   color: var(--text-primary);
 }
+
+/* B74-L: a connected-but-unreachable cluster — amber pill, click to re-probe. */
+.staleBadge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: color-mix(in srgb, var(--status-warn) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--status-warn) 40%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--status-warn);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.staleBadge:hover {
+  background: color-mix(in srgb, var(--status-warn) 22%, transparent);
+}

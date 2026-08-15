@@ -16,6 +16,7 @@ import { getProvider } from "../../providers";
 import { useTerminal } from "../detail/useTerminal";
 import type { ShellHandle } from "../../providers/types";
 import type { TerminalInfo } from "../../store/types";
+import { errDisplay } from "../../lib/errors";
 
 export function KubectlTerminal({ terminal, active }: { terminal: TerminalInfo; active: boolean }) {
   const closeTerminal = useStore((s) => s.closeTerminal);
@@ -52,7 +53,7 @@ export function KubectlTerminal({ terminal, active }: { terminal: TerminalInfo; 
         h.resize(term.cols, term.rows);
       })
       .catch((e) => {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errDisplay(e);
         term.write(`\r\n\x1b[31m${msg}\x1b[0m\r\n`);
         if (!cancelled) closeTerminal(terminal.id);
       });

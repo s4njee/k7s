@@ -97,7 +97,7 @@ pub async fn resolve_service(
     let svc = svc_api
         .get_opt(service)
         .await
-        .map_err(|e| AppError::Kube(e.to_string()))?
+        .map_err(AppError::from)?
         .ok_or_else(|| AppError::NotFound(format!("service {service} not found")))?;
     let spec = svc
         .spec
@@ -132,7 +132,7 @@ pub async fn resolve_service(
     let list = pods
         .list(&ListParams::default().labels(&label_selector))
         .await
-        .map_err(|e| AppError::Kube(e.to_string()))?;
+        .map_err(AppError::from)?;
     let pod = list
         .items
         .iter()
@@ -189,7 +189,7 @@ pub async fn ensure_pod(client: Client, namespace: &str, pod: &str) -> Result<()
     match api.get_opt(pod).await {
         Ok(Some(_)) => Ok(()),
         Ok(None) => Err(AppError::NotFound(format!("pod {pod} not found"))),
-        Err(e) => Err(AppError::Kube(e.to_string())),
+        Err(e) => Err(AppError::from(e)),
     }
 }
 

@@ -146,6 +146,9 @@ pub mod events {
     pub const CLUSTER_STATUS: &str = "cluster-status";
     /// Count of live watcher + log-stream tasks (sidebar footer).
     pub const WATCH_STATUS: &str = "watch-status";
+    /// Per-kind watcher health (B74-L): `{ [kind]: { state, lastSuccessMs,
+    /// retries, error? } }`, pushed whenever a watcher's state changes.
+    pub const WATCHER_STATUS: &str = "watcher-status";
     /// The active port-forwards, pushed whenever one is added, removed, or fails
     /// (B16) — so the strip reflects failures without the UI polling for them.
     pub const FORWARDS_UPDATE: &str = "forwards-update";

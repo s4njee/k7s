@@ -11,6 +11,7 @@ import { useEffect } from "react";
 import { getProvider, IS_DEMO } from "../providers";
 import { useStore } from "../store";
 import { connectTo } from "../lib/connect";
+import { errDisplay } from "../lib/errors";
 import { isCustomKind, KIND_META } from "../lib/kinds";
 import { sanitizeSettings } from "../lib/settings";
 
@@ -24,6 +25,7 @@ export function useBootstrap(): void {
       setNodeMetrics,
       setClusterStatus,
       setWatchCount,
+      setWatcherHealth,
       setConnection,
       setContexts,
       setCustomKinds,
@@ -34,20 +36,16 @@ export function useBootstrap(): void {
       addPodSample,
     } = useStore.getState();
 
-    // Reconcile cluster-status into the connection lifecycle (Story 6.2): a live
-    // cluster going unreachable flips the UI to disconnected, and recovery flips it
-    // back — without a manual reconnect. Also clears stale metrics when the metrics
-    // API disappears (cpuPercent goes null) so CPU/MEM fall back to "—".
+    // Reconcile cluster-status into the store (B74-L): a live cluster going
+    // unreachable is marked *stale* (rows retained, age shown, auto-clears when
+    // the next probe succeeds) rather than flipping the whole connection to
+    // "error" — a single probe failure must not make the cluster look
+    // disconnected. The connection phase stays "connected"; the switcher and
+    // status bar read `status.stale`. Metrics that disappear drop their cached
+    // values so CPU/MEM fall back to "—".
     const onClusterStatus = (cid: string, status: Parameters<typeof setClusterStatus>[1]) => {
       setClusterStatus(cid, status);
-      const { connections, setConnection, setPodMetrics: setPM, setNodeMetrics: setNM } =
-        useStore.getState();
-      const conn = connections[cid];
-      if (conn?.phase === "connected" && !status.connected) {
-        setConnection(cid, { phase: "error", error: "cluster unreachable" });
-      } else if (conn?.phase === "error" && status.connected) {
-        setConnection(cid, { phase: "connected", error: undefined });
-      }
+      const { setPodMetrics: setPM, setNodeMetrics: setNM } = useStore.getState();
       if (status.cpuPercent == null) {
         // metrics-server gone: drop cached usage so nothing stale lingers.
         setPM(cid, {});
@@ -68,6 +66,9 @@ export function useBootstrap(): void {
       provider.onNodeMetrics(setNodeMetrics),
       provider.onClusterStatus(onClusterStatus),
       provider.onWatchStatus(setWatchCount),
+      // Per-kind watcher health (B74-L): a forbidden kind is different from an
+      // empty table, and a backoff kind from a healthy one.
+      provider.onWatcherHealth(setWatcherHealth),
       // CRD-backed kinds, re-emitted on every connect (B15).
       provider.onCustomKinds(setCustomKinds),
       // Forwards are pushed on add/remove/failure, so a forward that starts
@@ -146,7 +147,9 @@ export function useBootstrap(): void {
         }
         await connectTo(target.name);
       } catch (e) {
-        setConnection("", { phase: "error", error: e instanceof Error ? e.message : String(e) });
+        // The typed error envelope (B74-L): show the safe message, never a raw
+        // backend string.
+        setConnection("", { phase: "error", error: errDisplay(e) });
       }
     })();
 

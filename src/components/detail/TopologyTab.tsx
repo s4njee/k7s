@@ -14,6 +14,7 @@ import { useResolvedTheme } from "../../hooks/useTheme";
 import { layoutGraph, graphSize, type LayoutNode } from "../../lib/topology";
 import { plotColors } from "../../lib/theme";
 import type { Topology, TopologyEdge } from "../../providers/types";
+import { errDisplay } from "../../lib/errors";
 
 const FONT = "10px 'JetBrains Mono', ui-monospace, monospace";
 
@@ -38,7 +39,7 @@ export function TopologyTab() {
         if (!cancelled) setTopo(t);
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setError(errDisplay(e));
       });
     return () => {
       cancelled = true;

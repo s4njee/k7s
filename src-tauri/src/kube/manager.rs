@@ -15,6 +15,7 @@ use super::client::ClusterInfo;
 use super::discovery::CustomKind;
 use super::metrics::ClusterStatusPayload;
 use super::{dto::Row, events, ResourceDelta, ResourceUpdate, Cid};
+use crate::error::ErrorEnvelope;
 use kube::Client;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -29,6 +30,42 @@ pub struct ShellSession {
     pub task: JoinHandle<()>,
     pub input_tx: mpsc::Sender<Vec<u8>>,
     pub resize_tx: mpsc::Sender<(u16, u16)>,
+}
+
+/// A watcher's lifecycle state (B74-L). The frontend keys off this to tell a
+/// forbidden kind from a healthy empty table and from a kind that's still
+/// reconnecting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WatcherState {
+    /// Spawned, waiting for the first successful sync.
+    Starting,
+    /// Successfully streaming rows.
+    Live,
+    /// Transiently failing; the watcher's backoff is retrying.
+    Backoff,
+    /// The API denies this kind (403); retries won't help until RBAC changes.
+    Forbidden,
+    /// Deliberately stopped (e.g. the user navigated away from a custom kind).
+    Stopped,
+}
+
+/// One kind's watcher health (B74-L): state, last success, retry count, and the
+/// last safe error. Emitted as part of `watcher-status:{cid}`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WatcherHealth {
+    pub state: WatcherState,
+    /// Unix millis of the last successful row emit (the "age" the UI shows).
+    pub last_success_ms: Option<u64>,
+    /// How many times this watcher has entered a failure state.
+    pub retries: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ErrorEnvelope>,
+    /// Last time a health event was emitted for this kind, to throttle Live
+    /// refreshes (they're not transitions). Not part of the wire contract.
+    #[serde(skip)]
+    last_emit_ms: u64,
 }
 
 /// Frontend-facing description of an active port-forward (B6).
@@ -109,6 +146,12 @@ pub struct ImportedContext {
     pub cluster: String,
 }
 
+/// Current unix time in milliseconds (for watcher-health `last_success_ms`).
+fn now_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
 /// Owns every cluster's client + connection-scoped tasks. Stored in Tauri managed
 /// state and shared across commands via `State<Arc<ClientManager>>`.
 ///
@@ -130,6 +173,9 @@ pub struct ClientManager<R: Runtime = tauri::Wry> {
     /// so stop/disconnect can delete the temp file even though aborting a task
     /// can't run its async cleanup.
     terminals: RwLock<HashMap<String, (Cid, PathBuf)>>,
+    /// Per-{cid, kind} watcher health (B74-L): lifecycle state, last success,
+    /// retries, and last safe error — the "honest under failure" feed.
+    watcher_health: RwLock<HashMap<Cid, HashMap<String, WatcherHealth>>>,
     /// Live port-forwards keyed by id, tagged with their cluster.
     forwards: RwLock<HashMap<String, ForwardEntry>>,
     /// Contexts imported from extra kubeconfig files, keyed by context name.
@@ -146,6 +192,7 @@ impl<R: Runtime> ClientManager<R> {
             logs: RwLock::new(HashMap::new()),
             shells: RwLock::new(HashMap::new()),
             terminals: RwLock::new(HashMap::new()),
+            watcher_health: RwLock::new(HashMap::new()),
             forwards: RwLock::new(HashMap::new()),
             imports: RwLock::new(HashMap::new()),
         }
@@ -260,6 +307,8 @@ impl<R: Runtime> ClientManager<R> {
                 let _ = std::fs::remove_file(path);
             }
         }
+        // Watcher health dies with the cluster (its kinds are gone with it).
+        self.watcher_health.write().await.remove(cid);
         let dead: Vec<String> = self
             .forwards
             .write()
@@ -459,6 +508,115 @@ impl<R: Runtime> ClientManager<R> {
         self.terminals.write().await.remove(id).map(|(_, path)| path)
     }
 
+    // ---- watcher health (B74-L) ----
+
+    /// How often a Live (no state change) refresh is emitted. Live is the steady
+    /// state, so without throttling a busy cluster would ship the whole health
+    /// map every debounce window; a few seconds of lag on the "last update" age
+    /// is invisible.
+    const LIVE_EMIT_INTERVAL_MS: u64 = 5000;
+
+    /// Update one kind's watcher health and emit `watcher-status:{cid}` when
+    /// anything visible changed (or a Live refresh is due). `Live` refreshes
+    /// `last_success_ms`; entering a failure state bumps `retries`.
+    pub async fn report_watcher(&self, cid: &Cid, kind: &str, state: WatcherState, error: Option<ErrorEnvelope>) {
+        let now = now_ms();
+        let emit;
+        {
+            let mut health = self.watcher_health.write().await;
+            let kinds = health.entry(cid.clone()).or_default();
+            let entry = kinds.entry(kind.to_string()).or_insert(WatcherHealth {
+                state: WatcherState::Starting,
+                last_success_ms: None,
+                retries: 0,
+                error: None,
+                last_emit_ms: 0,
+            });
+            let changed = entry.state != state || entry.error != error;
+            if state == WatcherState::Live {
+                entry.last_success_ms = Some(now);
+                entry.error = None;
+                // A transition back to Live clears the retry count.
+                if entry.state != WatcherState::Live {
+                    entry.retries = 0;
+                }
+            } else if entry.state != state {
+                entry.retries += 1;
+            }
+            entry.state = state;
+            entry.error = error;
+            emit = changed || now.saturating_sub(entry.last_emit_ms) >= Self::LIVE_EMIT_INTERVAL_MS;
+            if emit {
+                entry.last_emit_ms = now;
+            }
+        }
+        if emit {
+            self.emit_watcher_health(cid).await;
+        }
+    }
+
+    /// Reset a kind's health to `Starting` (a user Retry) without touching rows.
+    pub async fn reset_watcher(&self, cid: &Cid, kind: &str) {
+        {
+            let mut health = self.watcher_health.write().await;
+            let kinds = health.entry(cid.clone()).or_default();
+            if let Some(h) = kinds.get_mut(kind) {
+                h.state = WatcherState::Starting;
+                h.error = None;
+                h.last_emit_ms = 0;
+            }
+        }
+        self.emit_watcher_health(cid).await;
+    }
+
+    /// The health map for one cluster (empty when none is tracked yet).
+    pub async fn watcher_health(&self, cid: &Cid) -> HashMap<String, WatcherHealth> {
+        self.watcher_health.read().await.get(cid).cloned().unwrap_or_default()
+    }
+
+    /// Reset every kind's health to `Starting` (a user cluster-level Retry) and
+    /// emit once. Watchers self-heal via their backoff; nothing is torn down and
+    /// retained rows are untouched.
+    pub async fn reset_all_watchers(&self, cid: &Cid) {
+        {
+            let mut health = self.watcher_health.write().await;
+            if let Some(kinds) = health.get_mut(cid) {
+                for h in kinds.values_mut() {
+                    h.state = WatcherState::Starting;
+                    h.error = None;
+                    h.last_emit_ms = 0;
+                }
+            }
+        }
+        self.emit_watcher_health(cid).await;
+    }
+
+    /// Re-emit a kind's retained rows (the cached snapshot) — a Retry's "show me
+    /// the data I still have" step. No-op if the kind never emitted rows.
+    pub async fn reemit_kind(&self, cid: &Cid, kind: &str) {
+        let rows = self
+            .clusters
+            .read()
+            .await
+            .get(cid)
+            .and_then(|s| s.last_rows.get(kind))
+            .cloned();
+        if let Some(rows) = rows {
+            self.emit_rows(cid, kind.to_string(), rows).await;
+        }
+    }
+
+    /// The cached cluster-status payload (for the retry command to build on).
+    pub(crate) async fn last_status(&self, cid: &Cid) -> Option<ClusterStatusPayload> {
+        self.clusters.read().await.get(cid).and_then(|s| s.last_status.clone())
+    }
+
+    /// Push the whole per-kind health map for one cluster to the UI.
+    async fn emit_watcher_health(&self, cid: &Cid) {
+        let map = self.watcher_health(cid).await;
+        let _ = self.app.emit(&events::channel(events::WATCHER_STATUS, cid), map);
+    }
+
     // ---- port-forwards (B6) ----
 
     /// Register a port-forward.
@@ -577,6 +735,9 @@ impl<R: Runtime> ClientManager<R> {
         };
         if existed {
             self.emit_watch(cid).await;
+            // It's gone by design, not failing — mark it stopped so the UI never
+            // shows a CRD kind as a broken empty table after you navigate away.
+            self.report_watcher(cid, id, WatcherState::Stopped, None).await;
         }
     }
 
@@ -767,6 +928,44 @@ mod tests {
         cached.sort();
         expected.sort();
         assert_eq!(cached, expected, "delta path must match the snapshot reference");
+    }
+
+    /// Watcher health tracks the lifecycle: Starting → Live (last success set,
+    /// retries cleared), then a failure marks Backoff with a typed envelope and a
+    /// bump of retries. The map is keyed per kind within a cid.
+    #[tokio::test]
+    async fn watcher_health_tracks_lifecycle_and_retries() {
+        let mgr = manager();
+        mgr.report_watcher(&"a".into(), "pods", WatcherState::Starting, None).await;
+        mgr.report_watcher(&"a".into(), "pods", WatcherState::Live, None).await;
+        let live = mgr.watcher_health(&"a".into()).await;
+        assert_eq!(live["pods"].state, WatcherState::Live);
+        assert!(live["pods"].last_success_ms.is_some(), "Live stamps the last-success age");
+
+        let err = crate::error::AppError::envelope_for_code(crate::error::ErrorCode::Forbidden, "forbidden".to_string(), Some("pods"));
+        mgr.report_watcher(&"a".into(), "pods", WatcherState::Forbidden, Some(err)).await;
+        let forbidden = mgr.watcher_health(&"a".into()).await;
+        assert_eq!(forbidden["pods"].state, WatcherState::Forbidden);
+        assert_eq!(forbidden["pods"].retries, 1);
+        assert_eq!(forbidden["pods"].error.as_ref().unwrap().code, crate::error::ErrorCode::Forbidden);
+        // The last success survives the failure (retained rows + age).
+        assert!(forbidden["pods"].last_success_ms.is_some());
+
+        // A recovery back to Live clears retries and the error.
+        mgr.report_watcher(&"a".into(), "pods", WatcherState::Live, None).await;
+        let live = mgr.watcher_health(&"a".into()).await;
+        assert_eq!(live["pods"].retries, 0);
+        assert!(live["pods"].error.is_none());
+    }
+
+    /// Disconnect drops the cluster's watcher health map entirely.
+    #[tokio::test]
+    async fn disconnect_clears_watcher_health() {
+        let mgr = manager();
+        mgr.push_task("a".into(), tokio::spawn(async {})).await;
+        mgr.report_watcher(&"a".into(), "secrets", WatcherState::Live, None).await;
+        mgr.disconnect(&"a".into()).await;
+        assert!(mgr.watcher_health(&"a".into()).await.is_empty(), "health dies with the cluster");
     }
 
     /// Cached snapshots are kept per kind and replayed by refresh (the

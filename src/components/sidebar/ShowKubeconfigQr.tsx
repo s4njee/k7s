@@ -11,6 +11,7 @@ import QRCode from "qrcode";
 import styles from "./ShowKubeconfigQr.module.css";
 import { getProvider } from "../../providers";
 import { encodeHandoff } from "../../lib/handoff";
+import { errDisplay } from "../../lib/errors";
 
 interface ShowKubeconfigQrProps {
   context: string;
@@ -48,7 +49,7 @@ export function ShowKubeconfigQr({ context, onClose }: ShowKubeconfigQrProps) {
           setImages(urls);
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setError(errDisplay(e));
       }
     })();
     return () => {

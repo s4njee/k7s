@@ -143,7 +143,7 @@ async fn exec_pump(
     let mut proc = api
         .exec(pod, argv, &ap)
         .await
-        .map_err(|e| AppError::Kube(e.to_string()))?;
+        .map_err(AppError::from)?;
 
     let mut stdout = proc.stdout().ok_or_else(|| AppError::Other("no stdout".into()))?;
     let mut stdin = proc.stdin().ok_or_else(|| AppError::Other("no stdin".into()))?;

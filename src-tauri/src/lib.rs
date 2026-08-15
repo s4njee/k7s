@@ -13,7 +13,7 @@ mod logging;
 // mappers rather than a copy of them; nothing outside this crate consumes it.
 pub mod kube;
 
-pub use error::{AppError, AppResult};
+pub use error::{AppError, AppResult, ErrorCode, ErrorEnvelope};
 
 use kube::ClientManager;
 use std::sync::Arc;
@@ -84,6 +84,17 @@ pub fn run() {
             // B82: a crashed session can strand a temp kubeconfig; sweep the
             // leftovers at every boot.
             kube::terminal::sweep_orphan_kubeconfigs();
+            // B74-L: a Finder-launched app has no login PATH, which is exactly
+            // where kubectl's exec credential plugins live. Resolve the login
+            // shell's PATH once and make it the process PATH, so exec auth (and
+            // the kubectl terminal) work in the packaged app without a terminal.
+            #[cfg(unix)]
+            {
+                let login_path = kube::terminal::login_shell_path();
+                if !login_path.is_empty() {
+                    std::env::set_var("PATH", login_path);
+                }
+            }
             save_window_state_on_sigterm(app.handle().clone());
             // File > Settings… / Export Diagnostics…, which open their flows via
             // events the frontend listens for.
@@ -109,6 +120,8 @@ pub fn run() {
             commands::save_prefs,
             commands::connect,
             commands::disconnect,
+            commands::retry_cluster,
+            commands::retry_kind,
             commands::cluster_overview,
             commands::get_yaml,
             commands::get_diff,

@@ -99,9 +99,11 @@ pub async fn build_client_from_file(path: &str, context: &str) -> AppResult<(Cli
         cluster: None,
         user: None,
     };
+    // Classify through AppError so an exec/parse failure gets its real code
+    // (exec-missing / exec-failed / kubeconfig) rather than a generic string.
     let config = Config::from_custom_kubeconfig(kubeconfig, &options)
         .await
-        .map_err(|e| AppError::Kubeconfig(e.to_string()))?;
+        .map_err(AppError::from)?;
     let server = config.cluster_url.to_string();
     let client = Client::try_from(config)?;
     Ok((client, server))
@@ -158,7 +160,7 @@ pub async fn build_client(context: &str) -> AppResult<(Client, String)> {
     };
     let config = Config::from_kubeconfig(&options)
         .await
-        .map_err(|e| AppError::Kubeconfig(e.to_string()))?;
+        .map_err(AppError::from)?;
 
     let server = config.cluster_url.to_string();
     let client = Client::try_from(config)?;

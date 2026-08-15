@@ -20,6 +20,7 @@ import { useStore } from "../../store";
 import { getProvider } from "../../providers";
 import { useTerminal } from "./useTerminal";
 import type { ShellHandle } from "../../providers/types";
+import { errDisplay } from "../../lib/errors";
 
 export function ShellTab() {
   const pod = useStore((s) => s.selectedRow);
@@ -77,7 +78,7 @@ export function ShellTab() {
         h.resize(term.cols, term.rows);
       })
       .catch((e) => {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errDisplay(e);
         term.write(`\r\n\x1b[31m${msg}\x1b[0m\r\n`);
         if (!cancelled) setEnded(msg);
       });

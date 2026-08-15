@@ -23,6 +23,9 @@ export function NavList() {
   const rows = useStore((s) => s.rows);
   const setNav = useStore((s) => s.setNav);
   const customKinds = useStore((s) => s.customKinds);
+  // B74-L: a kind whose watcher is Forbidden or Backoff gets a warning dot, so
+  // "secrets can't be read" is visible at a glance — never a quiet empty count.
+  const watcherHealth = useStore((s) => s.watcherHealth);
 
   return (
     <div className={styles.nav}>
@@ -51,6 +54,24 @@ export function NavList() {
                   ) : (
                     <span className={styles.navCount}>{rows[kind].length}</span>
                   )}
+                  {!["problems", "overview", "events"].includes(kind) &&
+                    (watcherHealth[kind]?.state === "forbidden" ||
+                      watcherHealth[kind]?.state === "backoff") && (
+                      <span
+                        className={`${styles.navHealthDot} ${
+                          watcherHealth[kind].state === "forbidden"
+                            ? styles.navHealthDotErr
+                            : styles.navHealthDotWarn
+                        }`}
+                        title={
+                          watcherHealth[kind].state === "forbidden"
+                            ? `${kind}: permission denied — can't read this kind`
+                            : `${kind}: watcher reconnecting — last update ${
+                                watcherHealth[kind].lastSuccessMs != null ? "a while ago" : "never"
+                              }`
+                        }
+                      />
+                    )}
                 </div>
               );
             })}

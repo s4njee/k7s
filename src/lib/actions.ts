@@ -19,6 +19,7 @@
  */
 
 import type { KindId, Row } from "../providers/types";
+import { errMsg } from "./errors";
 
 export type ActionId =
   | "view-pods"
@@ -272,7 +273,7 @@ export async function runBulk<T extends { name: string }>(
       const reason: unknown = r.reason;
       failures.push({
         name: rows[i].name,
-        error: reason instanceof Error ? reason.message : String(reason),
+        error: errMsg(reason),
       });
     }
   });

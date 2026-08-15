@@ -19,6 +19,7 @@ import {
   sourceColor,
 } from "../../lib/logview";
 import type { LogLine } from "../../providers/types";
+import { errDisplay } from "../../lib/errors";
 
 /** Color per log level for the level column. */
 const LEVEL_COLOR: Record<string, string> = {
@@ -98,7 +99,7 @@ export function LogsTab() {
       // null means the dialog was cancelled — not an error, and not worth a note.
       setSaveNote(result ? `saved ${result.lines} lines` : null);
     } catch (e) {
-      setSaveNote(`save failed: ${e instanceof Error ? e.message : String(e)}`);
+      setSaveNote(`save failed: ${errDisplay(e)}`);
     }
   }
 

@@ -251,6 +251,48 @@ export interface ClusterStatus {
   /** null when metrics-server is unavailable — UI renders "—". */
   cpuPercent: number | null;
   memPercent: number | null;
+  /**
+   * True when the cluster was connected but its API has stopped answering
+   * (B74-L). Rows are retained with an age, and this clears automatically when
+   * the next probe succeeds. Distinct from a failed connect: the connection
+   * isn't torn down, nothing is dropped.
+   */
+  stale: boolean;
+  /** Unix ms of the last successful probe — the age shown on stale rows. */
+  lastSeenMs: number;
+  /** Classified probe failure, when stale. */
+  error?: ErrorEnvelope;
+}
+
+/** The B74-L typed error envelope (mirrors src-tauri/src/error.rs). */
+export interface ErrorEnvelope {
+  /** Stable machine code: "auth", "forbidden", "unreachable", … */
+  code: string;
+  /** Safe, human-facing message — the primary display text. */
+  message: string;
+  /** Whether retrying is likely to help. */
+  retryable: boolean;
+  /** The specific next step, as a label + explainer. */
+  action: { label: string; hint: string };
+  /** The affected resource kind, when the error is about one. */
+  kind?: string;
+  /** Raw backend/diagnostic text — for diagnostics, never the primary message. */
+  detail?: string;
+}
+
+/** One kind's watcher lifecycle state (B74-L) — a forbidden kind is different
+ *  from a healthy empty table. */
+export type WatcherState = "starting" | "live" | "backoff" | "forbidden" | "stopped";
+
+/** One kind's watcher health (B74-L), carried by `onWatcherHealth`. */
+export interface WatcherHealth {
+  state: WatcherState;
+  /** Unix ms of the last successful row emit — the "age" the UI shows. */
+  lastSuccessMs?: number;
+  /** How many times this watcher has entered a failure state. */
+  retries: number;
+  /** The last safe error, when not live. */
+  error?: ErrorEnvelope;
 }
 
 /** A kubeconfig context entry for the cluster switcher. */
@@ -853,6 +895,13 @@ export interface DataProvider {
   onNodeMetrics(cb: (cid: string, metrics: NodeMetricsMap) => void): Unsub;
   onClusterStatus(cb: (cid: string, status: ClusterStatus) => void): Unsub;
   onWatchStatus(cb: (cid: string, activeStreams: number) => void): Unsub;
+  /** Per-kind watcher health (B74-L): state/lastSuccess/retries/error per kind,
+   *  pushed whenever a watcher's state changes. */
+  onWatcherHealth(cb: (cid: string, health: Record<string, WatcherHealth>) => void): Unsub;
+  /** Retry one kind's watcher without dropping its retained rows (B74-L). */
+  retryKind(cid: string, kind: KindId): Promise<void>;
+  /** Re-probe a cluster now and re-arm its watchers without dropping rows (B74-L). */
+  retryCluster(cid: string): Promise<void>;
   /** Progress of running node drains (B20). */
   onDrainProgress(cb: (cid: string, progress: DrainProgress) => void): Unsub;
   /** node-exporter samples for nodes being watched (B27). */

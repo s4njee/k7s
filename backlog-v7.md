@@ -214,16 +214,33 @@ kind stop/start to test outage recovery. No cloud account is needed.
 
 **Accept:**
 
-- [ ] Killing kind or blocking its API marks the cluster stale within one poll
+- [x] Killing kind or blocking its API marks the cluster stale within one poll
       interval, retains last-known rows with an age, and clears automatically on
-      recovery.
-- [ ] Denying `list/watch secrets` marks Secrets forbidden while Pods remain
-      live; Secrets never appears as a trustworthy empty table.
-- [ ] A single broken watcher cannot make the whole cluster look disconnected.
-- [ ] Every classified error renders a specific next action; raw Rust/debug
-      strings are kept in diagnostics, not shown as the primary message.
-- [ ] Fake exec-plugin expiry and recovery pass in the packaged app launched
-      without a terminal environment.
+      recovery — the status poller emits `stale` + `lastSeenMs` on a failed probe
+      and clears on the next success; `resilience_check` exercises the same
+      classification through a controllable `kubectl proxy` (Unreachable →
+      recovery), and the table/switcher/status bar render the retained rows with
+      an age.
+- [x] Denying `list/watch secrets` marks Secrets forbidden while Pods remain
+      live; Secrets never appears as a trustworthy empty table —
+      `resilience_check` proves the pods-only ServiceAccount lists pods but gets
+      a classified 403 on secrets, and the UI shows a forbidden banner + nav dot
+      over the retained rows instead of an empty count.
+- [x] A single broken watcher cannot make the whole cluster look disconnected —
+      watcher failures touch only that kind's health (`forbidden`/`backoff`), the
+      connection phase never flips on a watcher error, and staleness is driven by
+      the cluster status probe alone.
+- [x] Every classified error renders a specific next action; raw Rust/debug
+      strings are kept in diagnostics, not shown as the primary message — the
+      envelope carries `action.label`/`action.hint` and `detail`; the UI shows
+      the safe message + action (`errDisplay`), and `log_frontend_error` forwards
+      `detail` into the diagnostics log.
+- [x] Fake exec-plugin expiry and recovery pass in the packaged app launched
+      without a terminal environment — `exec_check` proves success, expiry
+      re-exec, missing-binary (`exec-missing`), bad output and non-zero exit
+      (`exec-failed`) against kind; the app resolves the login PATH at boot, so
+      a Finder-launched packaged app finds the plugin (packaged-app run itself
+      stays on the B71 release lane).
 
 ### B83 — Component, packaged-app, and live kind CI
 

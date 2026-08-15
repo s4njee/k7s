@@ -11,6 +11,7 @@ import styles from "./CreateYaml.module.css";
 import { useStore } from "../../store";
 import { getProvider } from "../../providers";
 import { CodeEditor } from "../detail/CodeEditor";
+import { errDisplay } from "../../lib/errors";
 
 /** A starter manifest, so an empty editor never greets anyone. */
 const EXAMPLE = `apiVersion: v1
@@ -58,7 +59,7 @@ export function CreateYaml() {
       const out = await getProvider().createResource(draft, ns, true);
       setProposed(out.proposed);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errDisplay(e));
     } finally {
       setBusy(false);
     }
@@ -72,7 +73,7 @@ export function CreateYaml() {
       setOpen(false);
       if (out.created) navigateTo(out.created);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errDisplay(e));
     } finally {
       setBusy(false);
     }

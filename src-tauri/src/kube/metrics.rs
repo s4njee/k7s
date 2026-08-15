@@ -11,6 +11,7 @@
 //! event can include them without re-fetching.
 
 use super::{events, ClientManager, Cid};
+use crate::error::{AppError, ErrorEnvelope};
 use k8s_openapi::api::core::v1::Node;
 use kube::api::{Api, ListParams};
 use kube::Client;
@@ -60,18 +61,29 @@ struct NodeUsage {
     mem_percent: f64,
 }
 
-/// Cluster-wide status for the status bar / switcher.
-#[derive(Serialize, Clone)]
+/// Cluster-wide status for the status bar / switcher. Fields are `pub(crate)`
+/// so the `retry_cluster` command can build a retry payload on the cached one.
+#[derive(Serialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ClusterStatusPayload {
-    connected: bool,
-    version: String,
-    api_latency_ms: u64,
-    nodes_ready: i32,
-    nodes_total: i32,
+    pub(crate) connected: bool,
+    pub(crate) version: String,
+    pub(crate) api_latency_ms: u64,
+    pub(crate) nodes_ready: i32,
+    pub(crate) nodes_total: i32,
     /// null (None) when metrics are unavailable.
-    cpu_percent: Option<f64>,
-    mem_percent: Option<f64>,
+    pub(crate) cpu_percent: Option<f64>,
+    pub(crate) mem_percent: Option<f64>,
+    /// True when the cluster was connected but its API has stopped answering
+    /// (B74-L). The UI shows "stale" — rows are retained with an age, and this
+    /// clears automatically when the next probe succeeds. Distinct from a failed
+    /// connect: the connection isn't torn down, nothing is dropped.
+    pub(crate) stale: bool,
+    /// Unix millis of the last successful probe — the age shown on stale rows.
+    pub(crate) last_seen_ms: u64,
+    /// The classified probe failure, when stale.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) error: Option<ErrorEnvelope>,
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +257,8 @@ async fn fetch_node_metrics(
 }
 
 /// Poll cluster status on an interval: version, latency, nodes ready, cpu/mem %.
+/// A failed probe marks the cluster *stale* (B74-L) rather than dropping the
+/// connection — the next successful probe clears it automatically.
 async fn status_loop<R: Runtime>(
     mgr: Arc<ClientManager<R>>,
     cid: Cid,
@@ -253,45 +267,81 @@ async fn status_loop<R: Runtime>(
     every: Duration,
 ) {
     let mut tick = interval(every);
+    // The age shown while stale is the last *successful* probe; it must survive
+    // failures, so it's threaded through the loop rather than recomputed.
+    let mut last_ok_ms = 0u64;
     loop {
         tick.tick().await;
-
-        // Timed version probe doubles as the reachability + latency check.
-        let start = Instant::now();
-        let version_res = client.apiserver_version().await;
-        let latency = start.elapsed().as_millis() as u64;
-
-        let (connected, version) = match version_res {
-            Ok(info) => (true, info.git_version),
-            Err(e) => {
-                tracing::warn!("cluster status probe failed: {e}");
-                (false, String::new())
-            }
-        };
-
-        // Node readiness (best-effort; 0/0 if the list fails).
-        let (ready, total) = if connected {
-            count_ready_nodes(&client).await
-        } else {
-            (0, 0)
-        };
-
-        let (cpu, mem) = match *shared.lock().await {
-            Some((c, m)) => (Some(round1(c)), Some(round1(m))),
-            None => (None, None),
-        };
-
-        let payload = ClusterStatusPayload {
-            connected,
-            version,
-            api_latency_ms: latency,
-            nodes_ready: ready,
-            nodes_total: total,
-            cpu_percent: cpu,
-            mem_percent: mem,
-        };
+        let payload = probe_status(&client, &shared, &mut last_ok_ms).await;
         mgr.emit_status(&cid, payload).await;
     }
+}
+
+/// One status probe: version + latency (the reachability check), node readiness,
+/// and the shared CPU/MEM %. On a failed probe the cluster is marked stale with
+/// the classified error, retaining whatever rows the UI already has. `last_ok_ms`
+/// is the previous successful probe; a success replaces it with now.
+pub(crate) async fn probe_status(
+    client: &Client,
+    shared: &SharedClusterPct,
+    last_ok_ms: &mut u64,
+) -> ClusterStatusPayload {
+    // Timed version probe doubles as the reachability + latency check.
+    let start = Instant::now();
+    let version_res = client.apiserver_version().await;
+    let latency = start.elapsed().as_millis() as u64;
+
+    let (connected, version, stale, error) = match version_res {
+        Ok(info) => {
+            *last_ok_ms = now_ms();
+            (true, info.git_version, false, None)
+        }
+        Err(e) => {
+            tracing::warn!("cluster status probe failed: {e}");
+            (
+                false,
+                String::new(),
+                true,
+                Some(AppError::envelope_for_code(
+                    crate::error::ErrorCode::Unreachable,
+                    e.to_string(),
+                    None,
+                )),
+            )
+        }
+    };
+
+    // Node readiness (best-effort; 0/0 if the list fails).
+    let (ready, total) = if connected {
+        count_ready_nodes(client).await
+    } else {
+        (0, 0)
+    };
+
+    let (cpu, mem) = match *shared.lock().await {
+        Some((c, m)) => (Some(round1(c)), Some(round1(m))),
+        None => (None, None),
+    };
+
+    ClusterStatusPayload {
+        connected,
+        version,
+        api_latency_ms: latency,
+        nodes_ready: ready,
+        nodes_total: total,
+        cpu_percent: cpu,
+        mem_percent: mem,
+        stale,
+        // 0 until the first successful probe; afterwards the last good one.
+        last_seen_ms: *last_ok_ms,
+        error,
+    }
+}
+
+/// Current unix time in milliseconds.
+fn now_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 /// Count Ready nodes / total nodes.

@@ -18,8 +18,11 @@ export function StatusBar() {
   // Local kubectl terminal (B82): open one for the viewed cluster.
   const activeCid = useStore((s) => s.activeCid);
   const openTerminal = useStore((s) => s.openTerminal);
+  // B74-L: a connected-but-unreachable cluster is stale; Retry re-probes it.
+  const retryCluster = useStore((s) => s.retryCluster);
 
   const connected = connection.phase === "connected";
+  const stale = connected && status?.stale === true;
   const cluster = connection.clusterName ?? connection.context ?? "k7s";
   const ctx = connection.context ?? "—";
 
@@ -31,10 +34,19 @@ export function StatusBar() {
     <div className={styles.statusbar}>
       <span
         className={styles.cluster}
-        style={{ color: connected ? "var(--status-ok)" : "var(--status-err)" }}
+        style={{ color: stale ? "var(--status-warn)" : connected ? "var(--status-ok)" : "var(--status-err)" }}
       >
         ● {cluster}
       </span>
+      {stale && (
+        <button
+          className={styles.staleBadge}
+          onClick={retryCluster}
+          title={status?.error?.action.hint ?? "the API server stopped answering — re-probe now, retained data stays"}
+        >
+          ⚠ stale · retry
+        </button>
+      )}
       <span>api: {status ? `${status.apiLatencyMs}ms` : "—"}</span>
       <span>
         nodes {status ? `${status.nodesReady}/${status.nodesTotal}` : "0/0"} ready

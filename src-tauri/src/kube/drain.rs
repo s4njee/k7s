@@ -167,7 +167,7 @@ pub async fn cordon(client: Client, node: &str) -> AppResult<()> {
     let patch = serde_json::json!({ "spec": { "unschedulable": true } });
     api.patch(node, &PatchParams::default(), &Patch::Merge(patch))
         .await
-        .map_err(|e| AppError::Kube(e.to_string()))?;
+        .map_err(AppError::from)?;
     Ok(())
 }
 

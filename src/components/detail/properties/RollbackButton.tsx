@@ -6,6 +6,7 @@
 import { useState } from "react";
 import styles from "../PropertiesTab.module.css";
 import { getProvider } from "../../../providers";
+import { errDisplay } from "../../../lib/errors";
 
 export interface RolloutRef {
   namespace: string;
@@ -30,7 +31,7 @@ export function RollbackButton({ revision, rollout }: { revision: number; rollou
       // table now shows the controller's new revision in progress.
       rollout.onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errDisplay(e));
       setBusy(false);
       setConfirming(false);
     }

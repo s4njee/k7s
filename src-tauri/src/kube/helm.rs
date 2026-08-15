@@ -433,7 +433,7 @@ async fn release_secrets(client: &Client, ns: &str, name: &str) -> AppResult<Vec
     let lp = ListParams::default()
         .labels(&format!("owner=helm,name={name}"))
         .fields(&format!("type={RELEASE_SECRET_TYPE}"));
-    let list = api.list(&lp).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let list = api.list(&lp).await.map_err(AppError::from)?;
     if list.items.is_empty() {
         return Err(AppError::NotFound(format!("no Helm release {name} in {ns}")));
     }
@@ -521,7 +521,7 @@ async fn apply_manifest(client: &Client, ns: &str, manifest: &str) -> AppResult<
         };
         api.patch(&name, &pp, &Patch::Apply(doc))
             .await
-            .map_err(|e| AppError::Kube(e.to_string()))?;
+            .map_err(AppError::from)?;
     }
     Ok(())
 }
@@ -587,7 +587,7 @@ pub async fn rollback(client: Client, ns: &str, name: &str, revision: i64) -> Ap
             })),
         )
         .await
-        .map_err(|e| AppError::Kube(e.to_string()))?;
+        .map_err(AppError::from)?;
     }
 
     // 3. Write the new revision.
@@ -597,7 +597,7 @@ pub async fn rollback(client: Client, ns: &str, name: &str, revision: i64) -> Ap
     let api: Api<Secret> = Api::namespaced(client.clone(), ns);
     api.create(&PostParams::default(), &secret)
         .await
-        .map_err(|e| AppError::Kube(e.to_string()))?;
+        .map_err(AppError::from)?;
     Ok(max_version + 1)
 }
 
@@ -640,7 +640,7 @@ pub async fn uninstall(client: Client, ns: &str, name: &str) -> AppResult<Uninst
             Ok(_) => objects_deleted += 1,
             // Already gone — the accept's "missing manifest object degrades gracefully".
             Err(kube::Error::Api(resp)) if resp.code == 404 => {}
-            Err(e) => return Err(AppError::Kube(e.to_string())),
+            Err(e) => return Err(AppError::from(e)),
         }
     }
 
@@ -651,7 +651,7 @@ pub async fn uninstall(client: Client, ns: &str, name: &str) -> AppResult<Uninst
         match api.delete(&secret_name, &DeleteParams::default()).await {
             Ok(_) => secrets_deleted += 1,
             Err(kube::Error::Api(resp)) if resp.code == 404 => {}
-            Err(e) => return Err(AppError::Kube(e.to_string())),
+            Err(e) => return Err(AppError::from(e)),
         }
     }
 

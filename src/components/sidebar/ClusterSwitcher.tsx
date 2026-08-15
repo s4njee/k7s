@@ -36,6 +36,7 @@ export function railColor(cid: string, colors: Record<string, string>): string {
 export function ClusterSwitcher() {
   const connection = useStore((s) => s.connection);
   const clusterStatus = useStore((s) => s.clusterStatus);
+  const clusterStatusByCid = useStore((s) => s.clusterStatusByCid);
   const activeCid = useStore((s) => s.activeCid);
   const connections = useStore((s) => s.connections);
   const rowsByCid = useStore((s) => s.rowsByCid);
@@ -66,8 +67,13 @@ export function ClusterSwitcher() {
   // Display name: the connected cluster, else the selected context, else a stub.
   const name = connection.clusterName ?? connection.context ?? "no cluster";
 
-  // Status line: dot color + text reflect the connection lifecycle.
-  const { dotColor, statusText } = statusDisplay(connection.phase, clusterStatus?.version);
+  // Status line: dot color + text reflect the connection lifecycle (B74-L: a
+  // stale cluster shows amber "stale", not green "connected").
+  const { dotColor, statusText } = statusDisplay(
+    connection.phase,
+    clusterStatus?.stale ?? false,
+    clusterStatus?.version,
+  );
 
   // The rail: every connected cluster, each with its worst-problem tint.
   const rail = Object.keys(connections).map((cid) => {
@@ -79,12 +85,17 @@ export function ClusterSwitcher() {
       : problems.length
         ? "warn"
         : null;
+    // B74-L: a connected-but-stale cluster reads amber, not green — its rows are
+    // retained, but the API isn't answering.
+    const stale = clusterStatusByCid[cid]?.stale ?? false;
     const dot =
-      conn.phase === "connected"
-        ? "var(--status-ok)"
-        : conn.phase === "connecting"
-          ? "var(--status-warn)"
-          : "var(--status-err)";
+      stale
+        ? "var(--status-warn)"
+        : conn.phase === "connected"
+          ? "var(--status-ok)"
+          : conn.phase === "connecting"
+            ? "var(--status-warn)"
+            : "var(--status-err)";
     return {
       cid,
       dot,
@@ -190,11 +201,16 @@ export function ClusterSwitcher() {
   );
 }
 
-/** Map connection phase → status dot color + text (with version when connected). */
+/** Map connection phase (+ staleness) → status dot color + text. */
 function statusDisplay(
   phase: "idle" | "connecting" | "connected" | "error",
+  stale: boolean,
   version?: string,
 ): { dotColor: string; statusText: string } {
+  if (stale && phase === "connected") {
+    // B74-L: connected but the API isn't answering — retained rows, stale age.
+    return { dotColor: "var(--status-warn)", statusText: "stale · showing last data" };
+  }
   switch (phase) {
     case "connected":
       return {

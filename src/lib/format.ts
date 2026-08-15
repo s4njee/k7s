@@ -25,6 +25,11 @@
  * @param creationTs RFC3339 / ISO timestamp string.
  * @param now        Reference time (defaults to Date.now()); injectable for tests.
  */
+/** "N ago" for a unix-ms timestamp (B74-L's stale/backoff ages). */
+export function formatMsAge(ms: number, now: number = Date.now()): string {
+  return formatAge(new Date(ms).toISOString(), now);
+}
+
 export function formatAge(creationTs: string, now: number = Date.now()): string {
   const start = new Date(creationTs).getTime();
   if (Number.isNaN(start)) return "";

@@ -12,6 +12,7 @@ import { useStore } from "../../store";
 import { getProvider } from "../../providers";
 import { DiffView } from "./DiffView";
 import type { YamlDiff } from "../../providers/types";
+import { errDisplay } from "../../lib/errors";
 
 export function DiffTab() {
   const row = useStore((s) => s.selectedRow);
@@ -39,7 +40,7 @@ export function DiffTab() {
         setDiff({ current: d.baseline, proposed: d.live });
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setError(errDisplay(e));
       });
     return () => {
       cancelled = true;

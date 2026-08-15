@@ -465,7 +465,7 @@ fn backend_port(p: Option<&k8s_openapi::api::networking::v1::ServiceBackendPort>
 /// isn't there is one of the most common ways this breaks.
 async fn gather_ingress(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<Ingress> = Api::namespaced(client.clone(), namespace);
-    let ing = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let ing = api.get(name).await.map_err(AppError::from)?;
     let spec = ing.spec.clone().unwrap_or_default();
     let mut props = Properties::default();
 
@@ -629,7 +629,7 @@ async fn gather_helm(client: Client, namespace: &str, name: &str) -> AppResult<P
     // Helm labels every release Secret with owner + release name; filtering here
     // avoids decoding every Secret in the namespace.
     let lp = ListParams::default().labels(&format!("owner=helm,name={name}"));
-    let secrets = api.list(&lp).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let secrets = api.list(&lp).await.map_err(AppError::from)?;
 
     let releases: Vec<helm::Release> =
         secrets.items.iter().filter_map(helm::decode_release).collect();
@@ -732,7 +732,7 @@ fn build_helm_properties(mut releases: Vec<helm::Release>) -> Properties {
 
 async fn gather_pod(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let pods: Api<Pod> = Api::namespaced(client.clone(), namespace);
-    let pod = pods.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let pod = pods.get(name).await.map_err(AppError::from)?;
 
     let spec = pod.spec.clone().unwrap_or_default();
     let status = pod.status.clone().unwrap_or_default();
@@ -1350,7 +1350,7 @@ fn service_ports_text(spec: &k8s_openapi::api::core::v1::ServiceSpec) -> String 
 
 async fn gather_deployment(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<Deployment> = Api::namespaced(client.clone(), namespace);
-    let dep = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let dep = api.get(name).await.map_err(AppError::from)?;
     let spec = dep.spec.clone().unwrap_or_default();
     let status = dep.status.clone().unwrap_or_default();
     let mut props = Properties::default();
@@ -1510,7 +1510,7 @@ fn int_or_string(v: &k8s_openapi::apimachinery::pkg::util::intstr::IntOrString) 
 
 async fn gather_service(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<Service> = Api::namespaced(client.clone(), namespace);
-    let svc = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let svc = api.get(name).await.map_err(AppError::from)?;
     let spec = svc.spec.clone().unwrap_or_default();
     let mut props = Properties::default();
 
@@ -1627,7 +1627,7 @@ async fn gather_service(client: Client, namespace: &str, name: &str) -> AppResul
 
 async fn gather_statefulset(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<StatefulSet> = Api::namespaced(client.clone(), namespace);
-    let sts = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let sts = api.get(name).await.map_err(AppError::from)?;
     let spec = sts.spec.clone().unwrap_or_default();
     let status = sts.status.clone().unwrap_or_default();
     let mut props = Properties::default();
@@ -1864,7 +1864,7 @@ fn phase_tone(phase: &str) -> Tone {
 /// its events.
 async fn gather_pvc(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<PersistentVolumeClaim> = Api::namespaced(client.clone(), namespace);
-    let pvc = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let pvc = api.get(name).await.map_err(AppError::from)?;
     let spec = pvc.spec.clone().unwrap_or_default();
     let status = pvc.status.clone().unwrap_or_default();
     let mut props = Properties::default();
@@ -1956,7 +1956,7 @@ async fn gather_pvc(client: Client, namespace: &str, name: &str) -> AppResult<Pr
 /// resolve the claim's own namespace.
 async fn gather_pv(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<PersistentVolume> = Api::all(client.clone());
-    let pv = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let pv = api.get(name).await.map_err(AppError::from)?;
     let spec = pv.spec.clone().unwrap_or_default();
     let status = pv.status.clone().unwrap_or_default();
     let mut props = Properties::default();
@@ -2010,7 +2010,7 @@ async fn gather_pv(client: Client, namespace: &str, name: &str) -> AppResult<Pro
 /// owning Deployment, and the pods it owns.
 async fn gather_replicaset(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<ReplicaSet> = Api::namespaced(client.clone(), namespace);
-    let rs = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let rs = api.get(name).await.map_err(AppError::from)?;
     let spec = rs.spec.clone().unwrap_or_default();
     let status = rs.status.clone().unwrap_or_default();
     let desired = spec.replicas.unwrap_or(0);
@@ -2126,7 +2126,7 @@ fn join_csv(items: &Option<Vec<String>>) -> String {
 /// roles' rules as a compact verb×resource table.
 async fn gather_serviceaccount(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<ServiceAccount> = Api::namespaced(client.clone(), namespace);
-    let sa = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let sa = api.get(name).await.map_err(AppError::from)?;
     let mut props = Properties::default();
 
     props.fields(
@@ -2222,7 +2222,7 @@ async fn gather_serviceaccount(client: Client, namespace: &str, name: &str) -> A
 /// ServiceAccount subjects existence-checked (an absent SA renders "not found").
 async fn gather_rolebinding(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<RoleBinding> = Api::namespaced(client.clone(), namespace);
-    let b = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let b = api.get(name).await.map_err(AppError::from)?;
     let mut props = Properties::default();
 
     props.fields(
@@ -2256,7 +2256,7 @@ async fn gather_rolebinding(client: Client, namespace: &str, name: &str) -> AppR
 /// scoped — each subject's SA is checked in its own namespace.
 async fn gather_clusterrolebinding(client: Client, name: &str) -> AppResult<Properties> {
     let api: Api<ClusterRoleBinding> = Api::all(client.clone());
-    let b = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let b = api.get(name).await.map_err(AppError::from)?;
     let mut props = Properties::default();
 
     props.fields(
@@ -2307,7 +2307,7 @@ fn role_nav_of(r: &k8s_openapi::api::rbac::v1::RoleRef, binding_ns: &str) -> Opt
 /// decodes and writes in Rust so the plaintext never enters the webview.
 async fn gather_secret(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<Secret> = Api::namespaced(client, namespace);
-    let secret = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let secret = api.get(name).await.map_err(AppError::from)?;
     let data = secret.data.clone().unwrap_or_default();
     let string_data = secret.string_data.clone().unwrap_or_default();
     let mut props = Properties::default();
@@ -2400,7 +2400,7 @@ async fn secret_cert_tone(api: &Api<Secret>, name: &str) -> Option<Tone> {
 
 async fn gather_node(client: Client, name: &str) -> AppResult<Properties> {
     let api: Api<Node> = Api::all(client);
-    let node = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let node = api.get(name).await.map_err(AppError::from)?;
     let spec = node.spec.clone().unwrap_or_default();
     let status = node.status.clone().unwrap_or_default();
     let info = status.node_info.clone();
@@ -2510,7 +2510,7 @@ async fn gather_node(client: Client, name: &str) -> AppResult<Properties> {
 /// and the conditions that say whether it's being held back (ScalingLimited).
 async fn gather_hpa(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<HorizontalPodAutoscaler> = Api::namespaced(client.clone(), namespace);
-    let hpa = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let hpa = api.get(name).await.map_err(AppError::from)?;
     let spec = hpa.spec.clone().unwrap_or_default();
     let status = hpa.status.clone();
     let mut props = Properties::default();
@@ -2650,7 +2650,7 @@ fn hpa_metric_current(c: &MetricStatus) -> String {
 /// PodDisruptionBudgets: the availability math and the pods it protects.
 async fn gather_pdb(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<PodDisruptionBudget> = Api::namespaced(client.clone(), namespace);
-    let pdb = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let pdb = api.get(name).await.map_err(AppError::from)?;
     let spec = pdb.spec.clone().unwrap_or_default();
     let status = pdb.status.clone();
     let selector = spec.selector.as_ref();
@@ -2704,7 +2704,7 @@ async fn gather_pdb(client: Client, namespace: &str, name: &str) -> AppResult<Pr
 /// that answers "why can't this connect".
 async fn gather_networkpolicy(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<NetworkPolicy> = Api::namespaced(client.clone(), namespace);
-    let np = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let np = api.get(name).await.map_err(AppError::from)?;
     let spec = np.spec.clone().unwrap_or_default();
     let selector = &spec.pod_selector;
     let mut props = Properties::default();
@@ -2819,7 +2819,7 @@ fn rule_ports_text(ports: Option<&Vec<k8s_openapi::api::networking::v1::NetworkP
 /// ResourceQuotas: the hard limits and the used-vs-hard breakdown.
 async fn gather_resourcequota(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<ResourceQuota> = Api::namespaced(client.clone(), namespace);
-    let rq = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let rq = api.get(name).await.map_err(AppError::from)?;
     let spec = rq.spec.clone().unwrap_or_default();
     let used = rq.status.as_ref().and_then(|s| s.used.as_ref());
     let hard = spec.hard.clone().unwrap_or_default();
@@ -2892,7 +2892,7 @@ fn qty_numeric(qty: &str) -> Option<f64> {
 /// LimitRanges: the per-type min/max/default constraints.
 async fn gather_limitrange(client: Client, namespace: &str, name: &str) -> AppResult<Properties> {
     let api: Api<LimitRange> = Api::namespaced(client.clone(), namespace);
-    let lr = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let lr = api.get(name).await.map_err(AppError::from)?;
     let spec = lr.spec.clone().unwrap_or_default();
     let mut props = Properties::default();
 
@@ -3044,14 +3044,14 @@ async fn webhook_config_panel(client: Client, infos: Vec<WebhookInfo>, meta: &im
 
 async fn gather_mutatingwebhookconfiguration(client: Client, name: &str) -> AppResult<Properties> {
     let api: Api<MutatingWebhookConfiguration> = Api::all(client.clone());
-    let cfg = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let cfg = api.get(name).await.map_err(AppError::from)?;
     let infos = cfg.webhooks.as_ref().map(|ws| ws.iter().map(webhook_info).collect()).unwrap_or_default();
     webhook_config_panel(client, infos, &cfg).await
 }
 
 async fn gather_validatingwebhookconfiguration(client: Client, name: &str) -> AppResult<Properties> {
     let api: Api<ValidatingWebhookConfiguration> = Api::all(client.clone());
-    let cfg = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let cfg = api.get(name).await.map_err(AppError::from)?;
     let infos = cfg.webhooks.as_ref().map(|ws| ws.iter().map(webhook_info_v).collect()).unwrap_or_default();
     webhook_config_panel(client, infos, &cfg).await
 }
@@ -3061,7 +3061,7 @@ async fn gather_validatingwebhookconfiguration(client: Client, name: &str) -> Ap
 /// won't anything schedule here?".
 async fn gather_namespace(client: Client, name: &str) -> AppResult<Properties> {
     let api: Api<Namespace> = Api::all(client.clone());
-    let ns = api.get(name).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let ns = api.get(name).await.map_err(AppError::from)?;
     let mut props = Properties::default();
 
     props.fields(

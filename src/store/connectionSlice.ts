@@ -10,6 +10,7 @@
 
 import type { StateCreator } from "zustand";
 import type { AppState, ConnectionActions, ConnectionSliceState } from "./types";
+import { getProvider } from "../providers";
 import { sameBookmark } from "../lib/bookmarks";
 import { EMPTY_SELECTION } from "../lib/selection";
 import { emptyRows } from "./dataSlice";
@@ -23,6 +24,8 @@ export const initialConnectionState: ConnectionSliceState = {
   clusterStatus: null,
   watchCountByCid: {},
   watchCount: 0,
+  watcherHealthByCid: {},
+  watcherHealth: {},
   contexts: [],
   importedFiles: [],
   bookmarksByContext: {},
@@ -35,7 +38,7 @@ export const createConnectionSlice: StateCreator<
   [],
   [],
   ConnectionSliceState & ConnectionActions
-> = (set) => ({
+> = (set, get) => ({
   ...initialConnectionState,
 
   /**
@@ -78,6 +81,7 @@ export const createConnectionSlice: StateCreator<
         connection: s.connections[cid] ?? { phase: "idle", context: cid, clusterName: cid },
         clusterStatus: s.clusterStatusByCid[cid] ?? null,
         watchCount: s.watchCountByCid[cid] ?? 0,
+        watcherHealth: s.watcherHealthByCid[cid] ?? {},
         rows: s.rowsByCid[cid] ?? emptyRows(),
         customKinds: s.customKindsByCid[cid] ?? [],
         podMetrics: s.podMetricsByCid[cid] ?? {},
@@ -162,4 +166,23 @@ export const createConnectionSlice: StateCreator<
       watchCountByCid: { ...s.watchCountByCid, [cid]: n },
       ...(cid === s.activeCid ? { watchCount: n } : {}),
     })),
+
+  // Per-kind watcher health (B74-L): the whole map for a cid arrives on any
+  // change, retained like every other cid-keyed slice.
+  setWatcherHealth: (cid, health) =>
+    set((s) => ({
+      watcherHealthByCid: { ...s.watcherHealthByCid, [cid]: health },
+      ...(cid === s.activeCid ? { watcherHealth: health } : {}),
+    })),
+
+  // Retry actions (B74-L): imperative, so they live in the store but delegate to
+  // whatever provider is active. Nothing is torn down — retained rows stay.
+  retryKind: (kind) => {
+    const cid = get().activeCid;
+    if (cid) void getProvider().retryKind(cid, kind);
+  },
+  retryCluster: () => {
+    const cid = get().activeCid;
+    if (cid) void getProvider().retryCluster(cid);
+  },
 });

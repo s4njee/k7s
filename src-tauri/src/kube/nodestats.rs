@@ -56,7 +56,7 @@ pub struct NodeStatsError {
 pub async fn find_exporter(client: Client, node: &str) -> AppResult<(String, String)> {
     let pods: Api<Pod> = Api::all(client);
     let lp = ListParams::default().fields(&format!("spec.nodeName={node},status.phase=Running"));
-    let list = pods.list(&lp).await.map_err(|e| AppError::Kube(e.to_string()))?;
+    let list = pods.list(&lp).await.map_err(AppError::from)?;
 
     for p in list.items {
         let serves_9100 = p

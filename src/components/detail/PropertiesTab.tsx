@@ -13,6 +13,7 @@ import { getProvider } from "../../providers";
 import { useNow } from "../../hooks/useNow";
 import { SectionView } from "./properties/SectionView";
 import type { Properties } from "../../providers/types";
+import { errDisplay } from "../../lib/errors";
 
 export function PropertiesTab() {
   const row = useStore((s) => s.selectedRow);
@@ -35,7 +36,7 @@ export function PropertiesTab() {
         if (!cancelled) setProps(p);
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setError(errDisplay(e));
       });
     return () => {
       cancelled = true;

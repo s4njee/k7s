@@ -312,6 +312,49 @@ KUBECONFIG=$HOME/.kube/config cargo run --example terminal_check
   session keeps running while you look at another. Windows defaults to
   PowerShell (code path — on the B71 QA checklist thereafter).
 
+## Local connection resilience and typed failure states (B74-L)
+
+Errors are no longer opaque strings. Every command error serializes as a typed
+envelope — stable `code`, a *safe* human `message`, `retryable`, and a specific
+next `action` (label + hint) — with the raw Rust/debug text kept in `detail` for
+diagnostics, never shown as the primary message. Per-`{cid, kind}` watcher
+health (`starting | live | backoff | forbidden | stopped`, last-success age,
+retries, last error) streams on `watcher-status:{cid}`, and an unreachable
+cluster is *stale* (rows retained with an age, auto-clears on recovery) rather
+than looking disconnected.
+
+```bash
+./dev/cluster/up.sh
+KUBECONFIG=$HOME/.kube/config cargo run --example exec_check
+KUBECONFIG=$HOME/.kube/config cargo run --example resilience_check
+```
+
+- `exec_check` proves the exec-credential path end to end: a fake plugin
+  (`dev/cluster/fake-exec.sh`) mints a real ServiceAccount token kind accepts,
+  a *success* token is never re-exec'd by requests, an *expired* token forces
+  kube to re-exec on the next request (observed via an invocation-count file),
+  and the failure modes classify — a missing plugin binary → `exec-missing`, bad
+  output / non-zero exit → `exec-failed` — instead of a generic string. The app
+  also resolves the login shell's PATH at boot, so exec plugins work in a
+  Finder-launched packaged app with no login PATH.
+- `resilience_check` proves per-kind isolation and outage recovery: a
+  pods-only ServiceAccount lists pods (live) while listing secrets is classified
+  `forbidden`; and a `kubectl proxy` the harness controls — killed and restarted
+  — makes the same client classify `unreachable`, then recover. Killing kind
+  itself (or blocking its API) exercises the same path in the running app: the
+  status poller marks the cluster stale within one poll interval (~10s), the
+  table keeps its rows with an age, and the next successful probe clears it.
+- `cargo test` covers the classification matrix (401/403/404/409/5xx/transport/
+  TLS/exec), the watcher-health lifecycle and disconnect cleanup, and the status
+  payload; `npm test` covers the store's per-{cid, kind} health retention (a
+  forbidden kind keeps its rows) and the error helpers.
+- UI surfaces: a forbidden kind shows a red "permission denied" banner with the
+  next action and a Retry over its (retained) rows, plus a red nav dot; a
+  backoff kind shows an amber "still reconnecting" banner with the last-update
+  age; a stale cluster shows an amber banner on the table, a stale badge in the
+  switcher and status bar, and a cluster-level Retry. Raw error text appears
+  only in `detail`/diagnostics, never as the primary message.
+
 ## Known follow-ups (out of v1 scope, per plan.md)
 
 - Detail panel (YAML/Events) for non-pod kinds — pods-only in v1 by design.

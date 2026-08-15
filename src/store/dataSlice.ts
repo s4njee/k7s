@@ -237,6 +237,8 @@ export const createDataSlice: StateCreator<
         nodeSamplesByCid: omit(s.nodeSamplesByCid, cid),
         nodeStatsErrorsByCid: omit(s.nodeStatsErrorsByCid, cid),
         podSamplesByCid: omit(s.podSamplesByCid, cid),
+        // B74-L: watcher health dies with the cluster, like its rows.
+        watcherHealthByCid: omit(s.watcherHealthByCid, cid),
       };
       if (cid === s.activeCid) {
         patch.rows = emptyRows();
@@ -252,6 +254,7 @@ export const createDataSlice: StateCreator<
         patch.selection = EMPTY_SELECTION;
         patch.logBuffer = [];
         patch.clusterStatus = null;
+        patch.watcherHealth = {};
         patch.openMenu = null;
       }
       return patch;

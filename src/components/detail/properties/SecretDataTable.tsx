@@ -11,6 +11,7 @@ import { toneColor } from "../../../lib/tone";
 import { NavLink } from "./NavLink";
 import { cellText, wraps } from "./propertiesUtils";
 import type { Cell } from "../../../providers/types";
+import { errDisplay } from "../../../lib/errors";
 
 export interface SecretRef {
   namespace: string;
@@ -44,7 +45,7 @@ export function SecretDataTable({
       setFlash(null);
       window.setTimeout(() => setCopiedKey((cur) => (cur === key ? null : cur)), 2000);
     } catch (e) {
-      setFlash(e instanceof Error ? e.message : String(e));
+      setFlash(errDisplay(e));
       setCopiedKey(null);
     }
   };

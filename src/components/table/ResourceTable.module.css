@@ -164,6 +164,59 @@
   white-space: pre-wrap;
 }
 
+/* "Honest under failure" banner (B74-L): a forbidden kind, a backoff watcher,
+   or a stale cluster — above the retained rows, with a Retry. */
+.healthBanner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 12px;
+  font-size: 11px;
+  border-top: 1px solid var(--border-row);
+}
+.healthBannerForbidden {
+  color: var(--status-err);
+  background: color-mix(in srgb, var(--status-err) 10%, transparent);
+}
+.healthBannerWarn {
+  color: var(--status-warn);
+  background: color-mix(in srgb, var(--status-warn) 10%, transparent);
+}
+.healthText {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+.healthAge {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.healthAction {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.retryBtn {
+  flex: none;
+  background: var(--bg-control);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.retryBtn:hover {
+  background: var(--bg-selected-row);
+  color: var(--text-primary);
+}
+
 /* Problems "all clusters" scope toggle (B77). */
 .scopeToggle {
   flex: none;

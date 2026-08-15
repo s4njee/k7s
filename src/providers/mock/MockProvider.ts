@@ -35,6 +35,7 @@ import type {
   RowUpdate,
   SavedLog,
   Topology,
+  WatcherHealth,
   TopologyEdge,
   TopologyNode,
   Unsub,
@@ -68,7 +69,17 @@ const MOCK_STATUS: ClusterStatus = {
   nodesTotal: 6,
   cpuPercent: 41,
   memPercent: 63,
+  stale: false,
+  lastSeenMs: Date.now(),
 };
+
+/** A fully-live watcher-health map (B74-L): every mock kind is healthy. */
+function allLiveHealth(): Record<string, WatcherHealth> {
+  const now = Date.now();
+  const health: Record<string, WatcherHealth> = {};
+  for (const kind of KIND_ORDER) health[kind] = { state: "live", lastSuccessMs: now, retries: 0 };
+  return health;
+}
 
 /** Cadence of the demo node-exporter series (B27) — brisk enough to watch. */
 const NODE_STATS_TICK_MS = 2000;
@@ -92,6 +103,7 @@ export class MockProvider implements DataProvider {
   private resourceCbs = new Set<(cid: string, kind: KindId, update: RowUpdate) => void>();
   private statusCbs = new Set<(cid: string, s: ClusterStatus) => void>();
   private watchCbs = new Set<(cid: string, n: number) => void>();
+  private healthCbs = new Set<(cid: string, h: Record<string, WatcherHealth>) => void>();
   private customKindCbs = new Set<(cid: string, k: CustomKind[]) => void>();
   private forwardCbs = new Set<(cid: string, f: ForwardInfo[]) => void>();
   private drainCbs = new Set<(cid: string, p: DrainProgress) => void>();
@@ -117,6 +129,7 @@ export class MockProvider implements DataProvider {
     this.emitAllRows();
     for (const cb of this.statusCbs) cb(context, MOCK_STATUS);
     for (const cb of this.watchCbs) cb(context, MOCK_WATCH_COUNT);
+    for (const cb of this.healthCbs) cb(context, allLiveHealth());
     return { context, clusterName: context, server: "https://mock.local:6443", version: "v1.31" };
   }
 
@@ -448,6 +461,26 @@ export class MockProvider implements DataProvider {
     return () => {
       this.watchCbs.delete(cb);
     };
+  }
+
+  // Per-kind watcher health (B74-L): the mock is always live.
+  onWatcherHealth(cb: (cid: string, h: Record<string, WatcherHealth>) => void): Unsub {
+    this.healthCbs.add(cb);
+    queueMicrotask(() => cb(this.currentContext ?? "", allLiveHealth()));
+    return () => {
+      this.healthCbs.delete(cb);
+    };
+  }
+
+  async retryKind(_cid: string, _kind: KindId): Promise<void> {
+    // The mock is always healthy; a retry re-emits the live health so the UI's
+    // "retrying" state clears immediately.
+    const health = allLiveHealth();
+    for (const cb of this.healthCbs) cb(_cid, health);
+  }
+
+  async retryCluster(cid: string): Promise<void> {
+    for (const cb of this.healthCbs) cb(cid, allLiveHealth());
   }
 
   onDrainProgress(cb: (cid: string, p: DrainProgress) => void): Unsub {

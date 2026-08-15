@@ -13,6 +13,7 @@ import type {
   NavTarget,
   NodeMetricsMap,
   NodeSample,
+  WatcherHealth,
   PodMetricsMap,
   PodSample,
   Row,
@@ -98,6 +99,11 @@ export interface ConnectionSliceState {
   clusterStatus: ClusterStatus | null;
   watchCountByCid: Record<Cid, number>;
   watchCount: number;
+  /** Per-{cid, kind} watcher health (B74-L): lifecycle state, last success,
+   *  retries, and last safe error. */
+  watcherHealthByCid: Record<Cid, Record<string, WatcherHealth>>;
+  /** Active slice of watcher health. */
+  watcherHealth: Record<string, WatcherHealth>;
   contexts: ContextInfo[];
   importedFiles: string[];
   bookmarksByContext: Record<string, Bookmark[]>;
@@ -120,6 +126,11 @@ export interface ConnectionActions {
   setClusterNamespace: (cid: string, ns: string) => void;
   setClusterStatus: (cid: Cid, s: ClusterStatus) => void;
   setWatchCount: (cid: Cid, n: number) => void;
+  setWatcherHealth: (cid: Cid, health: Record<string, WatcherHealth>) => void;
+  /** Retry one kind's watcher on the active cluster (B74-L), keeping its rows. */
+  retryKind: (kind: KindId) => void;
+  /** Re-probe + re-arm the active cluster (B74-L), keeping its rows. */
+  retryCluster: () => void;
 }
 
 export interface DataSliceState {

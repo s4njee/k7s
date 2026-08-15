@@ -11,6 +11,7 @@ import { getProvider } from "../../providers";
 import { CodeEditor } from "./CodeEditor";
 import { DiffView } from "./DiffView";
 import type { ResourceRef, YamlDiff } from "../../providers/types";
+import { errDisplay } from "../../lib/errors";
 
 export function YamlTab() {
   const row = useStore((s) => s.selectedRow);
@@ -48,7 +49,7 @@ export function YamlTab() {
         setError(null);
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setError(errDisplay(e));
       });
     return () => {
       cancelled = true;
@@ -76,7 +77,7 @@ export function YamlTab() {
       setReview(await getProvider().dryRunYaml(ref, yamlDraft));
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errDisplay(e));
     } finally {
       setApplying(false);
     }
@@ -95,7 +96,7 @@ export function YamlTab() {
       setError(null);
     } catch (e) {
       // Keep the draft and surface the API error inline (Story 5.4).
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errDisplay(e));
     } finally {
       setApplying(false);
     }

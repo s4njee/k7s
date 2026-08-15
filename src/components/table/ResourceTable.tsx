@@ -16,6 +16,7 @@ import { isClusterScoped, kindMeta, navIdForKind } from "../../lib/kinds";
 import { sortRows } from "../../lib/sort";
 import { parseFilter, matchesFilter } from "../../lib/filter";
 import { scrollToShow } from "../../lib/virtual";
+import { formatMsAge } from "../../lib/format";
 import { applyClick, pruneSelection, selectedInOrder, selectionForContextMenu } from "../../lib/selection";
 import { RowContextMenu, type ContextMenuAt } from "../actions/RowContextMenu";
 import { useVirtualRows, headerHeight, ROW_HEIGHT } from "./useVirtualRows";
@@ -24,6 +25,44 @@ import { TableToolbar } from "./TableToolbar";
 import { TableHeader } from "./TableHeader";
 import { TableRow } from "./TableRow";
 import type { NavTarget, Row } from "../../providers/types";
+
+/**
+ * The "honest under failure" banner (B74-L): when the current kind is Forbidden,
+ * when it's Backoff (still reconnecting), or when the whole cluster is stale.
+ * Rows below are retained — a forbidden kind is never a trustworthy empty table,
+ * and an outage never reads as "there's nothing here."
+ */
+function HealthBanner({
+  state,
+  message,
+  ageMs,
+  action,
+  onRetry,
+}: {
+  state: "forbidden" | "backoff" | "stale";
+  message: string;
+  ageMs?: number;
+  action?: string;
+  onRetry: () => void;
+}) {
+  const now = Date.now();
+  return (
+    <div
+      className={`${styles.healthBanner} ${
+        state === "forbidden" ? styles.healthBannerForbidden : styles.healthBannerWarn
+      }`}
+    >
+      <span className={styles.healthText}>
+        {message}
+        {ageMs != null && <span className={styles.healthAge}> · data {formatMsAge(ageMs, now)} old</span>}
+        {action && <span className={styles.healthAction}>{action}</span>}
+      </span>
+      <button className={styles.retryBtn} onClick={onRetry} title="retry now, keeping the data you have">
+        retry
+      </button>
+    </div>
+  );
+}
 
 export function ResourceTable() {
   const nav = useStore((s) => s.nav);
@@ -59,8 +98,52 @@ export function ResourceTable() {
   const clearSelection = useStore((s) => s.clearSelection);
   const navigateTo = useStore((s) => s.navigateTo);
   const customKinds = useStore((s) => s.customKinds);
+  // B74-L: per-kind watcher health + cluster staleness, for the banner above the
+  // retained rows.
+  const health = useStore((s) => s.watcherHealth[nav]);
+  const clusterStatus = useStore((s) => s.clusterStatus);
+  const retryKind = useStore((s) => s.retryKind);
+  const retryCluster = useStore((s) => s.retryCluster);
 
   const now = useNow();
+
+  // The banner to show (if any): the kind's own failure outranks cluster
+  // staleness, and a live kind on a stale cluster shows the stale banner.
+  const banner = useMemo(() => {
+    if (health?.state === "forbidden") {
+      return (
+        <HealthBanner
+          state="forbidden"
+          message={`k7s can't read ${nav} — permission denied`}
+          action={health.error?.action.hint}
+          onRetry={() => retryKind(nav)}
+        />
+      );
+    }
+    if (health?.state === "backoff") {
+      return (
+        <HealthBanner
+          state="backoff"
+          message={`still reconnecting ${nav} — the watcher hit an error`}
+          ageMs={health.lastSuccessMs}
+          action={health.error?.action.hint}
+          onRetry={() => retryKind(nav)}
+        />
+      );
+    }
+    if (clusterStatus?.stale) {
+      return (
+        <HealthBanner
+          state="stale"
+          message={`cluster unreachable — showing what we have`}
+          ageMs={clusterStatus.lastSeenMs}
+          action={clusterStatus.error?.action.hint}
+          onRetry={retryCluster}
+        />
+      );
+    }
+    return null;
+  }, [health, clusterStatus, nav, retryKind, retryCluster]);
 
   const meta = kindMeta(nav, customKinds);
   const columns =
@@ -196,6 +279,7 @@ export function ResourceTable() {
         tableFilter={tableFilter}
         setTableFilter={setTableFilter}
       />
+      {banner}
       <div className={styles.wrap} ref={scrollRef}>
         <table className={`${styles.table} ${virtual ? styles.tableFixed : ""}`}>
           <TableHeader

@@ -5,7 +5,7 @@
 
 use crate::crash_reporting;
 use crate::diagnostics;
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::kube::client::{self, ClusterInfo, ContextInfo};
 use crate::logging;
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
@@ -352,7 +352,7 @@ pub async fn connect(
 #[tauri::command]
 pub async fn cluster_overview(cid: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<overview::ClusterOverview> {
     let client = require_client(&mgr, &cid).await?;
-    overview::cluster_overview(client).await.map_err(|e| AppError::Kube(e.to_string()))
+    overview::cluster_overview(client).await.map_err(AppError::from)
 }
 
 /// Tear down one cluster's connection: its watchers, pollers, streams and
@@ -361,6 +361,73 @@ pub async fn cluster_overview(cid: String, mgr: State<'_, Arc<ClientManager>>) -
 pub async fn disconnect(cid: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
     mgr.disconnect(&cid).await;
     Ok(())
+}
+
+/// Re-probe a cluster's reachability now and re-arm its watchers (B74-L),
+/// without dropping retained rows or UI state. A stale cluster comes back the
+/// moment its API answers; a forbidden kind stays forbidden until RBAC changes.
+/// The watchers' own backoff does the actual re-sync — this is the user-facing
+/// "try again" that gives immediate feedback on the retained rows.
+#[tauri::command]
+pub async fn retry_cluster(cid: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+    let manager: Arc<ClientManager> = (*mgr).clone();
+    let client = require_client(&mgr, &cid).await?;
+
+    // Build on the cached status so metrics/readiness survive the retry; only
+    // the reachability fields change.
+    let mut payload = manager.last_status(&cid).await.unwrap_or_else(metrics::ClusterStatusPayload::default);
+    let start = std::time::Instant::now();
+    match client.apiserver_version().await {
+        Ok(info) => {
+            payload.connected = true;
+            payload.version = info.git_version;
+            payload.stale = false;
+            payload.last_seen_ms = now_ms();
+            payload.error = None;
+        }
+        Err(e) => {
+            payload.connected = false;
+            payload.stale = true;
+            payload.error = Some(AppError::envelope_for_code(ErrorCode::Unreachable, e.to_string(), None));
+        }
+    }
+    payload.api_latency_ms = start.elapsed().as_millis() as u64;
+
+    // Retained rows re-emit first, then the updated status wins (refresh would
+    // otherwise replay the cached pre-retry status).
+    manager.refresh(&cid).await;
+    manager.emit_status(&cid, payload).await;
+    manager.reset_all_watchers(&cid).await;
+    Ok(())
+}
+
+/// Retry one kind's watcher (B74-L): reset its health to `Starting` and re-emit
+/// its retained rows. Custom (CRD-backed) kinds are aborted and respawned so a
+/// genuinely stopped watcher actually restarts; built-ins rely on their own
+/// backoff. Retained rows are never dropped.
+#[tauri::command]
+pub async fn retry_kind(cid: String, kind: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
+    let manager: Arc<ClientManager> = (*mgr).clone();
+    // Custom kinds restart their watcher outright (it may have stopped entirely).
+    if kind.contains('/') {
+        if let Some(ck) = manager.custom_kind(&cid, &kind).await {
+            manager.remove_custom_watcher(&cid, &kind).await;
+            if let Some(client) = manager.client(&cid).await {
+                watchers::spawn_custom(&manager, &cid, client, &ck).await;
+            }
+        }
+    }
+    manager.reset_watcher(&cid, &kind).await;
+    manager.reemit_kind(&cid, &kind).await;
+    Ok(())
+}
+
+/// Current unix time in milliseconds (retry's `last_seen`).
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Map a frontend kind id to its `ApiResource` and whether it is namespaced. The
@@ -1344,7 +1411,7 @@ pub async fn export_logs(cid: String,
     // view interleaves — one block per container, labelled, rather than a soup of
     // lines whose origin the file can't show.
     let containers = if container.is_empty() {
-        let p = api.get(&pod).await.map_err(|e| AppError::Kube(e.to_string()))?;
+        let p = api.get(&pod).await.map_err(AppError::from)?;
         p.spec
             .map(|s| s.containers.into_iter().map(|c| c.name).collect::<Vec<_>>())
             .unwrap_or_default()
@@ -1357,7 +1424,7 @@ pub async fn export_logs(cid: String,
         let mut lp = logs::log_params(name, &opts);
         // log_params follows unless reading `previous`; an export must always end.
         lp.follow = false;
-        let text = api.logs(&pod, &lp).await.map_err(|e| AppError::Kube(e.to_string()))?;
+        let text = api.logs(&pod, &lp).await.map_err(AppError::from)?;
         if containers.len() > 1 {
             out.push_str(&format!("===== container: {name} =====\n"));
         }
@@ -1802,7 +1869,7 @@ async fn spawn_forward(
     let local_port = ready_rx
         .await
         .map_err(|_| AppError::Other("port-forward task ended before binding".into()))?
-        .map_err(AppError::Kube)?;
+        .map_err(AppError::Other)?;
 
     let (service_name, service_port) = match service {
         // Only carry the service port when it differs; an identical one is noise.

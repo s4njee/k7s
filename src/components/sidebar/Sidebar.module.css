@@ -344,6 +344,21 @@
   color: var(--text-muted);
 }
 
+/* B74-L: a warning dot on kinds whose watcher is Forbidden (red) or Backoff
+   (amber) — a forbidden kind must never read as a healthy empty table. */
+.navHealthDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.navHealthDotErr {
+  background: var(--status-err);
+}
+.navHealthDotWarn {
+  background: var(--status-warn);
+}
+
 /* Bookmarks (B56): a collapsible section of quick-access resources below the
    cluster switcher, above the kind nav. */
 .bookmarks {

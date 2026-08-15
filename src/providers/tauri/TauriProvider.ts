@@ -42,6 +42,7 @@ import type {
   SavedLog,
   Topology,
   Unsub,
+  WatcherHealth,
   YamlDiff,
 } from "../types";
 
@@ -464,6 +465,20 @@ export class TauriProvider implements DataProvider {
 
   onWatchStatus(cb: (cid: string, activeStreams: number) => void): Unsub {
     return this.subscribeCluster<number>("watch-status", cb);
+  }
+
+  // Per-kind watcher health (B74-L): low-churn (state transitions + throttled
+  // Live refreshes), so it's subscribed for every connected cid like watch-status.
+  onWatcherHealth(cb: (cid: string, health: Record<string, WatcherHealth>) => void): Unsub {
+    return this.subscribeCluster<Record<string, WatcherHealth>>("watcher-status", cb);
+  }
+
+  retryKind(cid: string, kind: KindId): Promise<void> {
+    return invoke("retry_kind", { cid, kind });
+  }
+
+  retryCluster(cid: string): Promise<void> {
+    return invoke("retry_cluster", { cid });
   }
 
   onDrainProgress(cb: (cid: string, progress: DrainProgress) => void): Unsub {

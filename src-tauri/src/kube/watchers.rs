@@ -11,7 +11,9 @@
 //! uses it to order and cap a stream that can otherwise run to thousands of rows.
 
 use super::discovery::{CustomKind, PrinterColumn};
+use super::manager::WatcherState;
 use super::{dto::Row, helm, mappers, Cid, ClientManager, ResourceKind};
+use crate::error::{AppError, ErrorCode, ErrorEnvelope};
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use k8s_openapi::api::admissionregistration::v1::{
@@ -287,6 +289,10 @@ async fn pump<R: Runtime, K>(
     let mut ticker = interval(DEBOUNCE);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
+    // B74-L: the kind is spawned and trying to sync until the first emit proves
+    // it live — the UI shows "starting" rather than an empty table meanwhile.
+    mgr.report_watcher(&cid, &kind, WatcherState::Starting, None).await;
+
     // B78: within the debounce window, accumulate the changed rows by uid
     // (Some(row) = upsert, None = delete) from the watch events themselves,
     // instead of re-reading and re-mapping all N rows on every tick.
@@ -310,8 +316,12 @@ async fn pump<R: Runtime, K>(
                 }
                 Some(Ok(_)) => {} // Init/InitDone/Restarted markers carry no row
                 Some(Err(e)) => {
-                    // Logged, not fatal — backoff will retry this one kind.
-                    tracing::warn!("watch {kind} error: {e}");
+                    // Logged, not fatal — backoff will retry this one kind (B74-L).
+                    // A 403 marks it Forbidden (retries won't help until RBAC
+                    // changes); anything else is a transient Backoff.
+                    let (state, env) = classify_watch_error(&e, &kind);
+                    tracing::warn!("watch {kind} error ({state:?}): {e}");
+                    mgr.report_watcher(&cid, &kind, state, Some(env)).await;
                 }
                 None => break, // stream ended (client dropped on reset)
             },
@@ -335,8 +345,81 @@ async fn pump<R: Runtime, K>(
                         .collect();
                     mgr.emit_delta(&cid, kind.clone(), upserts, deletes).await;
                 }
+                if resync || !changed.is_empty() {
+                    // Any emit proves the watcher is live; refresh the last-success
+                    // age (throttled by the manager, so this isn't chatty).
+                    mgr.report_watcher(&cid, &kind, WatcherState::Live, None).await;
+                }
                 changed.clear();
             }
         }
+    }
+}
+
+/// Classify a watcher stream error into a health state + typed envelope (B74-L).
+/// A 403 marks the kind Forbidden — retrying won't help until RBAC changes — and
+/// everything else is a transient Backoff the watcher's own backoff will retry.
+fn classify_watch_error(e: &watcher::Error, kind: &str) -> (WatcherState, ErrorEnvelope) {
+    let code = match e {
+        watcher::Error::WatchError(resp) => api_status_code(resp.code),
+        watcher::Error::InitialListFailed(k)
+        | watcher::Error::WatchStartFailed(k)
+        | watcher::Error::WatchFailed(k) => match k {
+            kube::Error::Api(a) => api_status_code(a.code),
+            _ => ErrorCode::Unreachable,
+        },
+        // NoResourceVersion and anything else: transient.
+        _ => ErrorCode::Unreachable,
+    };
+    let state = if code == ErrorCode::Forbidden {
+        WatcherState::Forbidden
+    } else {
+        WatcherState::Backoff
+    };
+    let env = AppError::envelope_for_code(code, e.to_string(), Some(kind));
+    (state, env)
+}
+
+/// Map an HTTP status from an API error to the envelope code.
+fn api_status_code(code: u16) -> ErrorCode {
+    match code {
+        401 => ErrorCode::Auth,
+        403 => ErrorCode::Forbidden,
+        404 | 410 => ErrorCode::NotFound,
+        409 => ErrorCode::Conflict,
+        // 5xx / 429 are transient; the watcher's backoff retries them.
+        _ => ErrorCode::Unreachable,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::ErrorCode;
+    use kube::core::ErrorResponse;
+
+    /// A 403 on the initial list is Forbidden; a transport failure is Backoff.
+    #[test]
+    fn watch_errors_classify_forbidden_vs_transient() {
+        let forbidden = watcher::Error::WatchError(ErrorResponse {
+            status: "Failure".into(),
+            message: "forbidden".into(),
+            reason: "Forbidden".into(),
+            code: 403,
+        });
+        let (state, env) = classify_watch_error(&forbidden, "secrets");
+        assert_eq!(state, WatcherState::Forbidden);
+        assert_eq!(env.code, ErrorCode::Forbidden);
+        assert_eq!(env.kind.as_deref(), Some("secrets"));
+
+        let transport = watcher::Error::WatchError(ErrorResponse {
+            status: "Failure".into(),
+            message: "gone".into(),
+            reason: "Expired".into(),
+            code: 410,
+        });
+        let (state, env) = classify_watch_error(&transport, "pods");
+        assert_eq!(state, WatcherState::Backoff);
+        assert_eq!(env.code, ErrorCode::NotFound);
     }
 }

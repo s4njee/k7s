@@ -9,6 +9,7 @@
 
 import { getProvider } from "../providers";
 import { useStore } from "../store";
+import { errDisplay } from "./errors";
 
 export async function connectTo(context: string): Promise<void> {
   const provider = getProvider();
@@ -38,7 +39,7 @@ export async function connectTo(context: string): Promise<void> {
   } catch (e) {
     store.setConnection(context, {
       phase: "error",
-      error: e instanceof Error ? e.message : String(e),
+      error: errDisplay(e),
     });
   }
 }

@@ -145,7 +145,7 @@ async fn stream_one(
     let reader = api
         .log_stream(pod, &log_params(container, &opts))
         .await
-        .map_err(|e| AppError::Kube(e.to_string()))?;
+        .map_err(AppError::from)?;
     let mut lines = reader.lines();
 
     let line_event = events::stream_channel(events::LOG_LINE_PREFIX, cid, stream_id);
@@ -166,7 +166,7 @@ async fn stream_one(
                 }
                 Some(Err(e)) => {
                     flush_batch(app, &line_event, &mut batch);
-                    return Err(AppError::Kube(e.to_string()));
+                    return Err(AppError::Other(e.to_string()));
                 }
             },
             _ = flush.tick() => flush_batch(app, &line_event, &mut batch),
@@ -484,7 +484,7 @@ pub async fn export_workload_text(
         for container in containers {
             let mut lp = log_params(&container, &opts);
             lp.follow = false;
-            let text = api.logs(pod, &lp).await.map_err(|e| AppError::Kube(e.to_string()))?;
+            let text = api.logs(pod, &lp).await.map_err(AppError::from)?;
             out.push_str(&format!("===== pod: {pod} / container: {container} =====\n"));
             out.push_str(&text);
             if !text.ends_with('\n') {

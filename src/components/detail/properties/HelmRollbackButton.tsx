@@ -8,6 +8,7 @@
 import { useState } from "react";
 import styles from "../PropertiesTab.module.css";
 import { getProvider } from "../../../providers";
+import { errDisplay } from "../../../lib/errors";
 
 export interface HelmRollbackRef {
   namespace: string;
@@ -32,7 +33,7 @@ export function HelmRollbackButton({ revision, helm }: { revision: number; helm:
       // revision the rollback wrote, and this row's target becomes superseded.
       helm.onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errDisplay(e));
       setBusy(false);
       setConfirming(false);
     }

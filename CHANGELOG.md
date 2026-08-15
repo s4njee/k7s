@@ -27,6 +27,20 @@ and CI refuses a tag whose three versions disagree.
   cluster terminates the shell itself (a pty child wouldn't die on its own),
   and an opening terminal grabs the keyboard. Multiple terminals with
   cluster-badged tabs, reusing the existing xterm/shell plumbing end to end.
+- Local connection resilience and typed failure states (B74-L): command errors
+  now serialize as a typed envelope — a stable `code`, a safe human `message`,
+  whether it's retryable, and a specific next `action` — with the raw backend
+  text kept in `detail` (diagnostics only, never the primary message), so a 403
+  reads "permission denied — ask for the missing RBAC role" instead of a raw
+  API string. Per-kind watcher health (`starting | live | backoff | forbidden |
+  stopped`) streams to the UI: a forbidden kind shows a banner + nav dot and is
+  never mistaken for a healthy empty table, and a backoff kind shows its
+  last-update age. An unreachable cluster is now *stale*, not disconnected —
+  rows are retained with an age, the switcher/status bar show an amber stale
+  badge, and the next successful probe clears it automatically. Retry works at
+  the kind and cluster level without dropping rows, and exec-credential plugins
+  are exercised by a live harness (success, expiry re-exec, missing binary, bad
+  output) with the login PATH resolved at boot so they work in a packaged app.
 - Helm write path, phase 1 (B81): **rollback** and **uninstall**. A release's
   History panel now has a per-revision "roll back" button (like a Deployment's
   ReplicaSets), which applies that revision's stored manifest via server-side
