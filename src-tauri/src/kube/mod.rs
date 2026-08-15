@@ -172,3 +172,16 @@ pub struct ResourceUpdate {
     pub kind: String,
     pub rows: Vec<Row>,
 }
+
+/// Payload for a delta [`events::RESOURCE_UPDATE`] (B78): only the rows that
+/// changed since the last emit, instead of a full snapshot. The frontend applies
+/// upserts/deletes by uid. Full snapshots (via [`ResourceUpdate`]) still arrive
+/// on watcher start, the periodic resync, the Events kind, and re-switch.
+#[derive(Serialize, Clone)]
+pub struct ResourceDelta {
+    pub kind: String,
+    /// Rows to add or replace, keyed by `Row.uid`.
+    pub upserts: Vec<Row>,
+    /// Uids to remove.
+    pub deletes: Vec<String>,
+}

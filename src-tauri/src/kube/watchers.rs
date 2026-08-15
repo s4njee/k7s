@@ -30,12 +30,17 @@ use kube::{Api, Client, Resource};
 use serde::de::DeserializeOwned;
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::Runtime;
 use tokio::time::{interval, Duration, MissedTickBehavior};
 
 /// Maximum snapshot emit rate per kind (coalesces bursts of watch events).
 const DEBOUNCE: Duration = Duration::from_millis(150);
+
+/// Emit a full-snapshot resync every N debounce windows (B78) — the escape hatch
+/// that corrects any drift a missed watch event could cause between deltas.
+const RESYNC_EVERY: u32 = 100;
 
 /// Cap on the cluster-wide events feed (B14) — busy clusters produce thousands.
 const EVENTS_CAP: usize = 500;
@@ -152,7 +157,7 @@ async fn run_watcher<R: Runtime, K>(
         .default_backoff()
         .boxed();
 
-    pump(mgr, cid, reader, stream, kind.id().to_string(), |o| Some(map_fn(o)), post_fn).await;
+    pump(mgr, cid, reader, stream, kind.id().to_string(), super::mappers::uid_of, |o| Some(map_fn(o)), post_fn).await;
 }
 
 /// Ordering/reduction for the Helm feed: newest revision per release (B26).
@@ -179,6 +184,7 @@ async fn run_helm_watcher<R: Runtime>(mgr: Arc<ClientManager<R>>, cid: Cid, clie
         reader,
         stream,
         ResourceKind::Helm.id().to_string(),
+        super::mappers::uid_of,
         helm::map_release,
         helm_latest,
     )
@@ -232,6 +238,7 @@ async fn run_custom_watcher<R: Runtime>(
         reader,
         stream,
         id,
+        super::mappers::uid_of,
         move |o| Some(mappers::map_dynamic(o, namespaced, &columns)),
         identity,
     )
@@ -241,12 +248,17 @@ async fn run_custom_watcher<R: Runtime>(
 /// The shared watch loop: coalesce watch events, then emit a full post-processed
 /// snapshot at most once per [`DEBOUNCE`]. Generic over the object type so typed
 /// and dynamic watchers share one implementation.
+#[allow(clippy::too_many_arguments)]
 async fn pump<R: Runtime, K>(
     mgr: Arc<ClientManager<R>>,
     cid: Cid,
     reader: reflector::Store<K>,
     mut stream: BoxStream<'static, Result<watcher::Event<K>, watcher::Error>>,
     kind: String,
+    // The stable row uid for an object (k8s uid, else namespace/name) — passed
+    // in because K's DynamicType varies across callers and the bound would
+    // otherwise be ambiguous.
+    uid_of: fn(&K) -> String,
     // Option, not Row: the Helm watcher (B26) sees Secrets it can't decode, and a
     // watcher that must invent a row for every object it's handed would have to
     // put junk in the table.
@@ -260,30 +272,55 @@ async fn pump<R: Runtime, K>(
     let mut ticker = interval(DEBOUNCE);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-    let mut dirty = false;
+    // B78: within the debounce window, accumulate the changed rows by uid
+    // (Some(row) = upsert, None = delete) from the watch events themselves,
+    // instead of re-reading and re-mapping all N rows on every tick.
+    let mut changed: HashMap<String, Option<Row>> = HashMap::new();
+    // The Events kind's post-processor sorts + caps the whole set (B14), so it
+    // can't delta; and a periodic full-snapshot resync is the escape hatch that
+    // corrects any drift a missed event could cause.
+    let is_events = kind == ResourceKind::Events.id();
+    let mut since_snapshot = 0u32;
+
     loop {
         tokio::select! {
-            // A watch event arrived; the store is already updated. Mark dirty so the
-            // next tick emits a fresh snapshot.
+            // A watch event carries the changed object; the reflector store is
+            // already updated. Collect it for the next delta.
             ev = stream.next() => match ev {
-                Some(Ok(_)) => { dirty = true; }
+                Some(Ok(watcher::Event::Apply(obj))) => {
+                    changed.insert(uid_of(&obj), map_fn(&obj));
+                }
+                Some(Ok(watcher::Event::Delete(obj))) => {
+                    changed.insert(uid_of(&obj), None);
+                }
+                Some(Ok(_)) => {} // Init/InitDone/Restarted markers carry no row
                 Some(Err(e)) => {
                     // Logged, not fatal — backoff will retry this one kind.
                     tracing::warn!("watch {kind} error: {e}");
                 }
                 None => break, // stream ended (client dropped on reset)
             },
-            // Debounce window elapsed; emit if anything changed.
+            // Debounce window elapsed; emit a delta (or a resync snapshot).
             _ = ticker.tick() => {
-                if dirty {
-                    dirty = false;
+                since_snapshot += 1;
+                let resync = is_events || since_snapshot >= RESYNC_EVERY;
+                if resync {
+                    since_snapshot = 0;
                     let rows: Vec<Row> =
                         reader.state().iter().filter_map(|o| map_fn(o.as_ref())).collect();
                     let rows = post_fn(rows);
-                    // The manager emits on `resource-update:{cid}` and caches the
-                    // snapshot for an instant re-switch (B76).
+                    // Full snapshot on `resource-update:{cid}` (cached for re-switch).
                     mgr.emit_rows(&cid, kind.clone(), rows).await;
+                } else if !changed.is_empty() {
+                    let upserts: Vec<Row> = changed.values().filter_map(|v| v.clone()).collect();
+                    let deletes: Vec<String> = changed
+                        .iter()
+                        .filter(|(_, v)| v.is_none())
+                        .map(|(uid, _)| uid.clone())
+                        .collect();
+                    mgr.emit_delta(&cid, kind.clone(), upserts, deletes).await;
                 }
+                changed.clear();
             }
         }
     }

@@ -171,6 +171,14 @@ export interface InvolvedRef {
   apiVersion?: string;
 }
 
+/**
+ * What a `resource-update` carries for one kind (B78): either a full row
+ * snapshot (watcher start / resync / the Events kind / re-switch) or a delta of
+ * upserts + deletes keyed by uid. The store applies the latter without a full
+ * rebuild.
+ */
+export type RowUpdate = { rows: Row[] } | { upserts: Row[]; deletes: string[] };
+
 /** One row in a resource table. */
 export interface Row {
   /** Stable identity for React keys and selection (k8s uid, or a synthetic id). */
@@ -774,7 +782,7 @@ export interface DataProvider {
   onOpenSettings(cb: () => void): Unsub;
   /** Cluster callbacks lead with the cid (B77) — every provider event is routed
    *  to the cluster it came from, and the store retains per-cid data. */
-  onResourceUpdate(cb: (cid: string, kind: KindId, rows: Row[]) => void): Unsub;
+  onResourceUpdate(cb: (cid: string, kind: KindId, update: RowUpdate) => void): Unsub;
   /** CRD-backed kinds discovered on connect; re-emitted on every connect. */
   onCustomKinds(cb: (cid: string, kinds: CustomKind[]) => void): Unsub;
   onPodMetrics(cb: (cid: string, metrics: PodMetricsMap) => void): Unsub;

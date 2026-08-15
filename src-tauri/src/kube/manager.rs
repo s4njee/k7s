@@ -14,7 +14,7 @@
 use super::client::ClusterInfo;
 use super::discovery::CustomKind;
 use super::metrics::ClusterStatusPayload;
-use super::{dto::Row, events, ResourceUpdate, Cid};
+use super::{dto::Row, events, ResourceDelta, ResourceUpdate, Cid};
 use kube::Client;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -297,6 +297,37 @@ impl<R: Runtime> ClientManager<R> {
         let _ = self
             .app
             .emit(&events::channel(events::RESOURCE_UPDATE, cid), ResourceUpdate { kind, rows });
+    }
+
+    /// Emit a row *delta* on `resource-update:{cid}` (B78): only the changed rows,
+    /// keyed by uid, instead of a full snapshot. Keeps the full-snapshot cache (for
+    /// refresh / resync) consistent by applying the delta.
+    pub async fn emit_delta(&self, cid: &Cid, kind: String, upserts: Vec<Row>, deletes: Vec<String>) {
+        {
+            let mut clusters = self.clusters.write().await;
+            if let Some(s) = clusters.get_mut(cid) {
+                let rows = s.last_rows.entry(kind.clone()).or_default();
+                if !deletes.is_empty() || !upserts.is_empty() {
+                    let delete_set: std::collections::HashSet<&String> = deletes.iter().collect();
+                    let mut merged: Vec<Row> = rows
+                        .iter()
+                        .filter(|r| !delete_set.contains(&r.uid))
+                        .cloned()
+                        .collect();
+                    for u in upserts.iter() {
+                        if let Some(slot) = merged.iter_mut().find(|r| r.uid == u.uid) {
+                            *slot = u.clone();
+                        } else {
+                            merged.push(u.clone());
+                        }
+                    }
+                    *rows = merged;
+                }
+            }
+        }
+        let _ = self
+            .app
+            .emit(&events::channel(events::RESOURCE_UPDATE, cid), ResourceDelta { kind, upserts, deletes });
     }
 
     /// Emit a cluster-status payload on `cluster-status:{cid}`, caching it.
@@ -637,6 +668,69 @@ mod tests {
         assert!(mgr.forwards.read().await.get("pf-b").is_some(), "b's forward kept");
         assert_eq!(mgr.list_forwards(&"b".to_string()).await.len(), 1);
         assert_eq!(mgr.list_forwards(&"a".to_string()).await.len(), 0);
+    }
+
+    /// A delta sequence keeps the full-snapshot cache equivalent to what a
+    /// stream of snapshots would have produced (B78's property test).
+    #[tokio::test]
+    async fn emit_delta_keeps_the_cache_equivalent_to_snapshots() {
+        let mgr = manager();
+        mgr.push_task("a".into(), tokio::spawn(async {})).await;
+        let row = |uid: &str, seed: usize| Row {
+            uid: uid.to_string(),
+            name: format!("p-{uid}-{seed}"),
+            namespace: None,
+            cells: vec![],
+            pod: None,
+            labels: None,
+            selector: None,
+            involved: None,
+            job: None,
+            cron: None,
+        };
+
+        // Seed with a full snapshot.
+        let seed: Vec<Row> = (0..20).map(|i| row(&format!("u{i}"), i)).collect();
+        mgr.emit_rows(&"a".into(), "pods".into(), seed.clone()).await;
+        let mut ref_map: HashMap<String, Row> = seed.iter().map(|r| (r.uid.clone(), r.clone())).collect();
+
+        // Apply a deterministic delta sequence: upsert/delete/snapshot.
+        for i in 0..60 {
+            let uid = format!("u{}", i % 30); // 10 beyond the seed → adds
+            match i % 3 {
+                0 => {
+                    let r = row(&uid, i);
+                    ref_map.insert(uid.clone(), r.clone());
+                    mgr.emit_delta(&"a".into(), "pods".into(), vec![r], vec![]).await;
+                }
+                1 => {
+                    ref_map.remove(&uid);
+                    mgr.emit_delta(&"a".into(), "pods".into(), vec![], vec![uid]).await;
+                }
+                _ => {
+                    // Full-snapshot resync of the reference (the escape hatch).
+                    let snap: Vec<Row> = ref_map.values().cloned().collect();
+                    mgr.emit_rows(&"a".into(), "pods".into(), snap).await;
+                }
+            }
+        }
+
+        let mut cached: Vec<String> = mgr
+            .clusters
+            .read()
+            .await
+            .get("a")
+            .unwrap()
+            .last_rows
+            .get("pods")
+            .unwrap()
+            .iter()
+            .map(|r| r.uid.clone())
+            .collect();
+        let mut expected: Vec<String> = ref_map.keys().cloned().collect();
+        cached.sort();
+        expected.sort();
+        assert_eq!(cached, expected, "delta path must match the snapshot reference");
     }
 
     /// Cached snapshots are kept per kind and replayed by refresh (the

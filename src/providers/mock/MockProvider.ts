@@ -30,7 +30,7 @@ import type {
   KindId,
   ResourceRef,
   ShellHandle,
-  Row,
+  RowUpdate,
   SavedLog,
   Topology,
   TopologyEdge,
@@ -87,7 +87,7 @@ export class MockProvider implements DataProvider {
   // the cluster switcher clears data on a context switch). The real backend
   // re-emits from its watchers/pollers; the mock re-emits from here.
   private currentContext: string | null = null;
-  private resourceCbs = new Set<(cid: string, kind: KindId, rows: Row[]) => void>();
+  private resourceCbs = new Set<(cid: string, kind: KindId, update: RowUpdate) => void>();
   private statusCbs = new Set<(cid: string, s: ClusterStatus) => void>();
   private watchCbs = new Set<(cid: string, n: number) => void>();
   private customKindCbs = new Set<(cid: string, k: CustomKind[]) => void>();
@@ -158,7 +158,7 @@ export class MockProvider implements DataProvider {
   private emitAllRows(): void {
     for (const kind of KIND_ORDER) {
       const rows = buildKindRows(kind, this.currentContext ?? undefined);
-      for (const cb of this.resourceCbs) cb(this.currentContext ?? "", kind, rows);
+      for (const cb of this.resourceCbs) cb(this.currentContext ?? "", kind, { rows });
     }
   }
 
@@ -351,11 +351,11 @@ export class MockProvider implements DataProvider {
   // subscriptions emit a single initial value. Each returns a no-op unsubscribe
   // (nothing keeps running that needs teardown).
 
-  onResourceUpdate(cb: (cid: string, kind: KindId, rows: Row[]) => void): Unsub {
+  onResourceUpdate(cb: (cid: string, kind: KindId, update: RowUpdate) => void): Unsub {
     this.resourceCbs.add(cb);
     // Emit asynchronously so subscribers finish wiring up before the first snapshot.
     queueMicrotask(() => {
-      for (const kind of KIND_ORDER) cb(this.currentContext ?? "", kind, buildKindRows(kind, this.currentContext ?? undefined));
+      for (const kind of KIND_ORDER) cb(this.currentContext ?? "", kind, { rows: buildKindRows(kind, this.currentContext ?? undefined) });
     });
     return () => {
       this.resourceCbs.delete(cb);
@@ -382,7 +382,7 @@ export class MockProvider implements DataProvider {
 
   async watchCustomKind(id: string): Promise<void> {
     const rows = buildCustomRows(id);
-    for (const cb of this.resourceCbs) cb(this.currentContext ?? "", id, rows);
+    for (const cb of this.resourceCbs) cb(this.currentContext ?? "", id, { rows });
   }
 
   async unwatchCustomKind(_id: string): Promise<void> {

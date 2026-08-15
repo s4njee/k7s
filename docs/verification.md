@@ -190,6 +190,29 @@ Against a real kubeconfig with ≥2 contexts, the same flow exercises the live
 backend. The lifecycle is unit-tested in `store.test.ts` (per-cid setters route
 to retention + active slice) and the manager tests from B76.
 
+## Scale at 10k objects (B78)
+
+The row path is delta-driven: watchers emit `upserts`/`deletes` keyed by uid
+instead of full snapshots each debounce tick, with a periodic full-snapshot
+resync as the escape hatch; the store applies deltas by uid; high-churn
+channels subscribe for the active cluster only. Property tests pin delta ≡
+snapshot in `store.test.ts` (row deltas) and `manager.rs`
+(`emit_delta_keeps_the_cache_equivalent_to_snapshots`).
+
+**Measured acceptance** (the "no >100 ms frames while scrolling" criterion):
+
+```bash
+VITE_STRESS=10000 VITE_DEMO=1 npm run dev
+```
+
+Open the Pods table, enable the browser performance profiler, and scroll
+through the 10k rows — the virtual window keeps ~69 rows mounted, so frame
+time stays bounded; the delta path means a churn of changed pods carries only
+the changed rows over the wire. Two clusters at 5k each: while viewing one,
+the other's `resource-update` channel is not subscribed (no IPC) — its rail
+chip still shows the last-known state, and switching back replays the retained
+rows.
+
 ## Known follow-ups (out of v1 scope, per plan.md)
 
 - Detail panel (YAML/Events) for non-pod kinds — pods-only in v1 by design.

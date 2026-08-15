@@ -36,17 +36,20 @@ import type {
   ResourceRef,
   ShellHandle,
   Row,
+  RowUpdate,
   SavedLog,
   Topology,
   Unsub,
   YamlDiff,
 } from "../types";
 
-/** Wire payload for the `resource-update` event. */
+/** Wire payload for the `resource-update` event (B78): delta or full snapshot. */
 interface ResourceUpdatePayload {
   /** Built-in kind id, or a custom kind's "group/plural" id (B15). */
   kind: KindId;
-  rows: Row[];
+  rows?: Row[];
+  upserts?: Row[];
+  deletes?: string[];
 }
 
 /**
@@ -89,7 +92,17 @@ export class TauriProvider implements DataProvider {
   private cid: string | null = null;
   private subscribedCids = new Set<string>();
   private clusterUnsubs: (() => void)[] = [];
-  private clusterHandlers: { event: string; handler: (cid: string, p: unknown) => void }[] = [];
+  private throttledSubs: (() => void)[] = [];
+  // A `throttle` handler (B78) is high-churn (rows at 50/sec, per-node stats) and
+  // only subscribed for the ACTIVE cluster — an unviewed background cluster's
+  // rows cost no IPC, per the 10k-object accept. Low-churn channels
+  // (cluster-status, watch-status, pod-metrics, …) stay live for every connected
+  // cluster so the rail dots and switch-back stay fresh.
+  private clusterHandlers: {
+    event: string;
+    handler: (cid: string, p: unknown) => void;
+    throttle?: boolean;
+  }[] = [];
 
   /** Invoke a backend command with the active cid injected. Commands that don't
    *  take one ignore it (serde drops unknown fields). */
@@ -97,20 +110,40 @@ export class TauriProvider implements DataProvider {
     return invoke<T>(cmd, { cid: this.cid, ...args });
   }
 
-  /** Subscribe every registered cluster handler to `cid`'s `{event}:{cid}` channels. */
+  /** Subscribe `cid`'s low-churn channels (throttle'd handlers are active-only). */
   private subscribeCid(cid: string): void {
     if (this.subscribedCids.has(cid)) return;
     this.subscribedCids.add(cid);
-    for (const { event, handler } of this.clusterHandlers) {
+    for (const { event, handler, throttle } of this.clusterHandlers) {
+      if (throttle) continue;
       this.clusterUnsubs.push(subscribe(`${event}:${cid}`, (p: unknown) => handler(cid, p)));
     }
   }
 
+  /** Swap the active cluster's high-churn subscriptions to a new cid. */
+  private activateCid(cid: string): void {
+    for (const u of this.throttledSubs) u();
+    this.throttledSubs = [];
+    this.cid = cid;
+    for (const { event, handler, throttle } of this.clusterHandlers) {
+      if (!throttle) continue;
+      this.throttledSubs.push(subscribe(`${event}:${cid}`, (p: unknown) => handler(cid, p)));
+    }
+  }
+
   /** Register a cluster-channel handler; subscribed for every connected cid. */
-  private subscribeCluster<T>(event: string, handler: (cid: string, p: T) => void): Unsub {
-    const entry = { event, handler: handler as (cid: string, p: unknown) => void };
+  private subscribeCluster<T>(
+    event: string,
+    handler: (cid: string, p: T) => void,
+    opts?: { throttle?: boolean },
+  ): Unsub {
+    const entry = { event, handler: handler as (cid: string, p: unknown) => void, throttle: opts?.throttle };
     this.clusterHandlers.push(entry);
-    for (const cid of this.subscribedCids) this.subscribeCid(cid);
+    if (entry.throttle) {
+      if (this.cid) this.activateCid(this.cid);
+    } else {
+      for (const cid of this.subscribedCids) this.subscribeCid(cid);
+    }
     return () => {
       const i = this.clusterHandlers.indexOf(entry);
       if (i >= 0) this.clusterHandlers.splice(i, 1);
@@ -124,10 +157,11 @@ export class TauriProvider implements DataProvider {
   }
 
   async connect(context: string): Promise<ClusterInfo> {
-    // Switch the active cid and add its channels (kept for every connected
-    // cluster), then invoke — the reuse path's replayed snapshots land on the
-    // new channels (B76).
-    this.cid = context;
+    // Switch the active cid (B78: only the active cluster's high-churn rows
+    // flow; the new cid's throttle channels re-attach here), add its low-churn
+    // channels if new, then invoke — the reuse path's replayed snapshots land
+    // on the new channels (B76).
+    this.activateCid(context);
     this.subscribeCid(context);
     return this.invokeCmd<ClusterInfo>("connect", { context });
   }
@@ -384,9 +418,14 @@ export class TauriProvider implements DataProvider {
     return this.subscribeCluster<CustomKind[]>("custom-kinds", cb);
   }
 
-  onResourceUpdate(cb: (cid: string, kind: KindId, rows: Row[]) => void): Unsub {
-    return this.subscribeCluster<ResourceUpdatePayload>("resource-update", (cid, p) =>
-      cb(cid, p.kind, p.rows),
+  onResourceUpdate(cb: (cid: string, kind: KindId, update: RowUpdate) => void): Unsub {
+    return this.subscribeCluster<ResourceUpdatePayload>(
+      "resource-update",
+      (cid, p) => {
+        if (p.rows !== undefined) cb(cid, p.kind, { rows: p.rows });
+        else cb(cid, p.kind, { upserts: p.upserts ?? [], deletes: p.deletes ?? [] });
+      },
+      { throttle: true }, // B78: 50/sec rows; background clusters don't get these
     );
   }
 
@@ -411,13 +450,15 @@ export class TauriProvider implements DataProvider {
   }
 
   onNodeStats(cb: (cid: string, node: string, sample: NodeSample) => void): Unsub {
-    return this.subscribeCluster<{ node: string; sample: NodeSample }>("node-stats", (cid, p) =>
-      cb(cid, p.node, p.sample),
+    return this.subscribeCluster<{ node: string; sample: NodeSample }>(
+      "node-stats",
+      (cid, p) => cb(cid, p.node, p.sample),
+      { throttle: true }, // per-scrape; active cluster only (B78)
     );
   }
 
   onNodeStatsError(cb: (cid: string, err: NodeStatsError) => void): Unsub {
-    return this.subscribeCluster<NodeStatsError>("node-stats-error", cb);
+    return this.subscribeCluster<NodeStatsError>("node-stats-error", cb, { throttle: true });
   }
 
   onPodStats(cb: (cid: string, key: string, sample: PodSample) => void): Unsub {

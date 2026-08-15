@@ -27,6 +27,22 @@ function omit<T>(obj: Record<string, T>, key: string): Record<string, T> {
   return next;
 }
 
+// The kinds deriveProblems actually scans (src/lib/problems.ts). Memoising by
+// these arrays' identities means a high-rate pods update doesn't re-scan every
+// kind's rows when only one array changed (B78).
+const PROBLEM_KINDS = ["pods", "nodes", "deployments", "statefulsets", "daemonsets", "jobs", "cronjobs", "replicasets"] as const;
+let problemsMemoRefs = new Map<string, Row[] | undefined>();
+let problemsMemoResult: Row[] = [];
+
+/** `deriveProblems`, but only re-scans when a scanned kind's row array changed. */
+function deriveProblemsMemo(rows: RowMap): Row[] {
+  const same = PROBLEM_KINDS.every((k) => (rows[k] as Row[] | undefined) === problemsMemoRefs.get(k));
+  if (same) return problemsMemoResult;
+  problemsMemoRefs = new Map(PROBLEM_KINDS.map((k) => [k, rows[k] as Row[] | undefined]));
+  problemsMemoResult = deriveProblems(rows);
+  return problemsMemoResult;
+}
+
 export const initialDataState: DataSliceState = {
   rows: emptyRows(),
   rowsByCid: {},
@@ -70,9 +86,34 @@ export const createDataSlice: StateCreator<
       const nextMap = { ...s.rowsByCid, [cid]: { ...base, [kind]: rows } };
       const patch: Partial<AppState> = { rowsByCid: nextMap };
       if (cid === s.activeCid) {
-        // Problems are derived from the row set (B32) — retained per cid too.
+        // Problems are derived from the row set (B32) — retained per cid too,
+        // memoised so a churn of one kind doesn't re-scan them all (B78).
         const next = nextMap[cid];
-        patch.rows = { ...next, problems: deriveProblems(next) };
+        patch.rows = { ...next, problems: deriveProblemsMemo(next) };
+      }
+      return patch;
+    }),
+
+  setRowsDelta: (cid, kind, upserts, deletes) =>
+    set((s) => {
+      const base = s.rowsByCid[cid] ?? emptyRows();
+      const current = base[kind] ?? [];
+      const upsertByUid = new Map(upserts.map((r) => [r.uid, r]));
+      const deleteSet = new Set(deletes);
+      // Replace/add by uid, drop deletes — preserving the existing order of
+      // untouched rows (B78: a small delta against 10k rows copies ~10k refs,
+      // cheap; the win is the wire payload).
+      const merged = current
+        .map((r) => upsertByUid.get(r.uid) ?? r)
+        .filter((r) => !deleteSet.has(r.uid));
+      for (const [uid, u] of upsertByUid) {
+        if (!current.some((r) => r.uid === uid)) merged.push(u);
+      }
+      const nextMap = { ...s.rowsByCid, [cid]: { ...base, [kind]: merged } };
+      const patch: Partial<AppState> = { rowsByCid: nextMap };
+      if (cid === s.activeCid) {
+        const next = nextMap[cid];
+        patch.rows = { ...next, problems: deriveProblemsMemo(next) };
       }
       return patch;
     }),

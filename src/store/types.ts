@@ -155,6 +155,7 @@ export interface DataSliceState {
 
 export interface DataActions {
   setRows: (cid: Cid, kind: KindId, rows: Row[]) => void;
+  setRowsDelta: (cid: Cid, kind: KindId, upserts: Row[], deletes: string[]) => void;
   setCustomKinds: (cid: Cid, kinds: CustomKind[]) => void;
   setPodMetrics: (cid: Cid, m: PodMetricsMap) => void;
   setNodeMetrics: (cid: Cid, m: NodeMetricsMap) => void;

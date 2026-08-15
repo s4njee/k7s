@@ -104,12 +104,16 @@ export function useVirtualRows(
     };
   }, [scrollRef]);
 
+  // Key the memo on the *row* the scroll position lands on, not the raw pixel
+  // value: a 1px scroll jitter within a row must not re-render the whole table
+  // with a fresh window object (B78).
+  const scrollRow = Math.floor(scrollTop / ROW_HEIGHT);
   const window = useMemo(
     () =>
       virtual
-        ? rowWindow(total, scrollTop, viewportH, ROW_HEIGHT, OVERSCAN)
+        ? rowWindow(total, scrollRow * ROW_HEIGHT, viewportH, ROW_HEIGHT, OVERSCAN)
         : { start: 0, end: total, padTop: 0, padBottom: 0 },
-    [virtual, total, scrollTop, viewportH],
+    [virtual, total, scrollRow, viewportH],
   );
 
   return { virtual, window };

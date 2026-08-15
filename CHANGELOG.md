@@ -61,6 +61,17 @@ and CI refuses a tag whose three versions disagree.
   Settings has a per-cluster default namespace, and demo mode now produces
   per-cluster data (a same-named `default/web` pod with distinct status per
   cluster — the no-leakage fixture).
+- Scale for the 10k-object cluster (B78): the row path is now **delta-driven** —
+  watchers accumulate the changed uids from watch events and emit `upserts`/
+  `deletes` keyed by uid instead of re-serialising a full snapshot every
+  debounce tick, with a periodic full-snapshot resync as the escape hatch
+  (watcher start, the Events kind, and re-switch still send snapshots). The
+  store applies deltas by uid; `deriveProblems` is memoised by kind. The table
+  only renders the virtual window (`React.memo` on rows, the scroll window
+  memoised to row granularity), and high-churn channels (`resource-update`,
+  per-node stats) are subscribed for the **active cluster only** — an unviewed
+  background cluster costs no IPC while its low-churn rail channels stay live.
+  Property tests pin delta ≡ snapshot on both sides.
 
 ## [0.5.0] - 2026-08-14
 

@@ -27,7 +27,7 @@ use kube::ResourceExt;
 // ---------------------------------------------------------------------------
 
 /// Stable uid: the k8s uid, or "namespace/name" when uid is absent.
-fn uid_of<K: ResourceExt>(obj: &K) -> String {
+pub(crate) fn uid_of<K: ResourceExt>(obj: &K) -> String {
     obj.uid().unwrap_or_else(|| {
         format!("{}/{}", obj.namespace().unwrap_or_default(), obj.name_any())
     })

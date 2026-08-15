@@ -2,6 +2,7 @@
  * Table row and cell rendering with tone coloring, status dots, and selection highlights.
  */
 
+import { memo } from "react";
 import styles from "./ResourceTable.module.css";
 import { formatAge } from "../../lib/format";
 import { toneColor } from "../../lib/tone";
@@ -27,7 +28,7 @@ export function renderCell(cell: Cell, now: number): string {
   return cell.dot ? `● ${text}` : text;
 }
 
-export function TableRow({
+export const TableRow = memo(function TableRow({
   row,
   index,
   virtual,
@@ -61,4 +62,4 @@ export function TableRow({
       ))}
     </tr>
   );
-}
+});

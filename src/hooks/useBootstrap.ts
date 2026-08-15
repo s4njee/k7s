@@ -19,6 +19,7 @@ export function useBootstrap(): void {
     const provider = getProvider();
     const {
       setRows,
+      setRowsDelta,
       setPodMetrics,
       setNodeMetrics,
       setClusterStatus,
@@ -58,7 +59,11 @@ export function useBootstrap(): void {
     const unsubs = [
       // The native File > Settings… item opens the dialog.
       provider.onOpenSettings(() => useStore.getState().setSettingsOpen(true)),
-      provider.onResourceUpdate(setRows),
+      provider.onResourceUpdate((cid, kind, update) => {
+        // B78: a full snapshot or a delta of upserts/deletes keyed by uid.
+        if ("rows" in update) setRows(cid, kind, update.rows);
+        else setRowsDelta(cid, kind, update.upserts, update.deletes);
+      }),
       provider.onPodMetrics(setPodMetrics),
       provider.onNodeMetrics(setNodeMetrics),
       provider.onClusterStatus(onClusterStatus),

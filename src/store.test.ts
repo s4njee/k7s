@@ -471,3 +471,63 @@ describe("bookmarks (B56)", () => {
     expect(useStore.getState().bookmarksByContext["other-cluster"].length).toBe(1);
   });
 });
+
+describe("row deltas (B78)", () => {
+  beforeEach(() => {
+    useStore.setState({ activeCid: "test", rowsByCid: {} });
+  });
+
+  function row(uid: string, seed: number): Row {
+    return { uid, name: `p-${uid}`, namespace: "default", cells: [{ text: String(seed), tone: "primary" }] };
+  }
+
+  /** A tiny deterministic PRNG (mulberry32) so the property test is reproducible. */
+  function mulberry32(seed: number) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  it("delta sequences reach the same rows as full snapshots", () => {
+    // Reference: a uid → row map driven by the same ops, compared to the store.
+    const seedRows = Array.from({ length: 20 }, (_, i) => row(`u${i}`, i));
+    useStore.getState().setRows("test", "pods", seedRows);
+    const ref = new Map(seedRows.map((r) => [r.uid, r]));
+    const rng = mulberry32(42);
+
+    for (let i = 0; i < 500; i++) {
+      const uid = `u${Math.floor(rng() * 40)}`; // 20 beyond the seed → adds
+      const roll = rng();
+      if (roll < 0.4) {
+        // upsert (add or replace)
+        ref.set(uid, row(uid, i));
+        useStore.getState().setRowsDelta("test", "pods", [row(uid, i)], []);
+      } else if (roll < 0.7) {
+        // delete
+        ref.delete(uid);
+        useStore.getState().setRowsDelta("test", "pods", [], [uid]);
+      } else {
+        // full-snapshot resync of the reference — the escape hatch
+        const snap = [...ref.values()];
+        useStore.getState().setRows("test", "pods", snap);
+      }
+    }
+
+    const got = useStore.getState().rowsByCid["test"]?.pods.map((r) => r.uid).sort() ?? [];
+    expect(got).toEqual([...ref.keys()].sort());
+  });
+
+  it("applies a delta to the active slice too", () => {
+    useStore.setState({ rowsByCid: {}, rows: {} as Row[] as never });
+    useStore.getState().setRows("test", "pods", [row("a", 1), row("b", 2)]);
+    useStore.getState().setRowsDelta("test", "pods", [row("b", 99)], ["a"]);
+    const active = useStore.getState().rows.pods ?? [];
+    expect(active.map((r) => r.uid).sort()).toEqual(["b"]);
+    expect(active[0].cells[0].text).toBe("99");
+  });
+});
