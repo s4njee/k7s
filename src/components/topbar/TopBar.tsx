@@ -48,31 +48,39 @@ export function TopBar() {
       {/* B36: create an object from pasted YAML. Only while connected — a
           disconnected top bar has nothing to create against. */}
       {connection.phase === "connected" && (
-        <div className={styles.createBtn} onClick={() => setCreateOpen(true)} title="create from YAML">
+        <button type="button" className={styles.createBtn} onClick={() => setCreateOpen(true)} title="create from YAML">
           + Create
-        </div>
+        </button>
       )}
 
       <div className={styles.nsWrap} ref={ref}>
-        <div className={styles.nsButton} onClick={() => toggleMenu("ns")}>
+        <button
+          type="button"
+          className={styles.nsButton}
+          onClick={() => toggleMenu("ns")}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+        >
           <span className={styles.nsPrefix}>ns:</span>
           <span className={styles.nsValue}>{namespace}</span>
-          <span className={styles.nsChevron}>▼</span>
-        </div>
+          <span className={styles.nsChevron} aria-hidden="true">▼</span>
+        </button>
 
         {open && (
-          <div className={styles.nsMenu}>
+          <div className={styles.nsMenu} role="listbox" aria-label="namespace">
             {namespaces.map((ns) => {
               const selected = ns === namespace;
               return (
-                <div
+                <button
+                  type="button"
                   key={ns}
                   className={`${styles.nsRow} ${selected ? styles.nsRowSelected : ""}`}
                   onClick={() => setNamespace(ns)}
+                  aria-current={selected ? "true" : undefined}
                 >
-                  <span className={styles.nsCheck}>{selected ? "✓" : ""}</span>
+                  <span className={styles.nsCheck} aria-hidden="true">{selected ? "✓" : ""}</span>
                   {ns}
-                </div>
+                </button>
               );
             })}
           </div>

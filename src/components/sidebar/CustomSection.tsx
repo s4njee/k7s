@@ -77,25 +77,35 @@ export function CustomSection({ kinds, nav, setNav }: CustomSectionProps) {
         const open = filtering || expanded.has(group);
         return (
           <div key={group}>
-            <div className={styles.navGroup} onClick={() => toggle(group)} title={group}>
-              <span className={styles.navGroupChevron}>{open ? "⌄" : "›"}</span>
+            <button
+              type="button"
+              className={styles.navGroup}
+              onClick={() => toggle(group)}
+              title={group}
+              aria-expanded={open}
+            >
+              <span className={styles.navGroupChevron} aria-hidden="true">
+                {open ? "⌄" : "›"}
+              </span>
               <span className={styles.navGroupLabel}>{group}</span>
               <span className={styles.navCount}>{groupKinds.length}</span>
-            </div>
+            </button>
             {open &&
               groupKinds.map((ck) => {
                 const active = nav === ck.id;
                 return (
-                  <div
+                  <button
                     key={ck.id}
+                    type="button"
                     className={`${styles.navItem} ${styles.navItemNested} ${
                       active ? styles.navItemActive : ""
                     }`}
                     onClick={() => setNav(ck.id)}
                     title={`${ck.kind} · ${ck.group}/${ck.version}`}
+                    aria-current={active ? "page" : undefined}
                   >
                     <span className={styles.navLabel}>{ck.kind}</span>
-                  </div>
+                  </button>
                 );
               })}
           </div>

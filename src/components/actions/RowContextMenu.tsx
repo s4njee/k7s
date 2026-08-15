@@ -65,6 +65,14 @@ export function RowContextMenu({
   // depends on how many actions the kind has, so it can't be guessed up front.
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: at.x, top: at.y });
 
+  // B84: move focus into the first menu item and return it to the invoking row
+  // when the menu closes (Escape, mousedown-outside, or a chosen action).
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    return () => opener?.focus?.();
+  }, []);
+
   useEffect(() => {
     const el = ref.current;
     if (!el) return;

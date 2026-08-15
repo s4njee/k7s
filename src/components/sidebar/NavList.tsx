@@ -41,10 +41,12 @@ export function NavList() {
             {kindsInGroup(group).map((kind) => {
               const active = nav === kind;
               return (
-                <div
+                <button
                   key={kind}
+                  type="button"
                   className={`${styles.navItem} ${active ? styles.navItemActive : ""}`}
                   onClick={() => setNav(kind)}
+                  aria-current={active ? "page" : undefined}
                 >
                   <span className={styles.navIcon}>{KIND_META[kind].icon}</span>
                   <span className={styles.navLabel}>{KIND_META[kind].label}</span>
@@ -72,7 +74,7 @@ export function NavList() {
                         }
                       />
                     )}
-                </div>
+                </button>
               );
             })}
           </div>

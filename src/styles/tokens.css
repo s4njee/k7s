@@ -52,6 +52,8 @@
   /* ---- Accent (blue): active indicators + primary actions ONLY ---- */
   --accent: #4d9fff;
   --accent-hover: #7db8ff;
+  /* Keyboard focus ring (B84): the accent, at 2px — visible on every surface. */
+  --focus-ring: #4d9fff;
 
   /* ---- Semantic status colors ---- */
   --status-ok: #9ece6a; /* Running / Ready / Active / Normal event */
@@ -148,6 +150,8 @@
   /* ---- Accent ---- */
   --accent: #0b62c4;
   --accent-hover: #0a4e9c;
+  /* Keyboard focus ring (B84): the light-palette accent, which reads on white. */
+  --focus-ring: #0b62c4;
 
   /* ---- Semantic status colors ---- */
   --status-ok: #2e7d32;
@@ -223,6 +227,8 @@
 
   --accent: #4d9fff;
   --accent-hover: #7db8ff;
+  /* Keyboard focus ring (B84): the dark accent — panels stay dark in light mode. */
+  --focus-ring: #4d9fff;
 
   --status-ok: #9ece6a;
   --status-warn: #e0af68;
@@ -306,4 +312,20 @@
 :root[data-accent="orange"] [data-surface="panel"] {
   --accent: #ff9d4d;
   --accent-hover: #ffb87a;
+}
+
+/*
+ * B84: the keyboard focus ring always tracks the active accent. Base palettes
+ * above set --focus-ring to the default blue; a chosen accent re-derives it so
+ * the ring reads as the product's accent on every surface (including the always-
+ * dark panels in light mode, whose --accent is already the dark preset).
+ */
+:root[data-accent="green"],
+[data-theme="light"][data-accent="green"],
+:root[data-accent="purple"],
+[data-theme="light"][data-accent="purple"],
+:root[data-accent="orange"],
+[data-theme="light"][data-accent="orange"],
+:root[data-accent] [data-surface="panel"] {
+  --focus-ring: var(--accent);
 }

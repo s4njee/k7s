@@ -34,11 +34,11 @@ export function HelmHistoryTable({
         <thead>
           <tr>
             {columns.map((h) => (
-              <th key={h} className={styles.th}>
+              <th scope="col" key={h} className={styles.th}>
                 {h}
               </th>
             ))}
-            <th className={`${styles.th} ${styles.thAction}`}>ACTION</th>
+            <th scope="col" className={`${styles.th} ${styles.thAction}`}>ACTION</th>
           </tr>
         </thead>
         <tbody>

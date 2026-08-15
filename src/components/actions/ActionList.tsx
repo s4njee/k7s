@@ -213,23 +213,35 @@ export function ActionList({ kind, rows, onError, onClose, onGone }: ActionListP
   const dangerous = actions.filter((a) => a.danger);
 
   return (
-    <div className={styles.menu}>
+    <div className={styles.menu} role="menu" aria-label="actions for selection">
       {rows.length > 1 && (
         <div className={styles.scope}>
           {rows.length} {plural(kind, rows.length)} selected
         </div>
       )}
       {safe.map((a) => (
-        <div key={a.id} className={styles.row} onClick={() => pick(a)}>
+        <button
+          key={a.id}
+          type="button"
+          role="menuitem"
+          className={styles.row}
+          onClick={() => pick(a)}
+        >
           {/* The bookmark action's label follows the row's state. */}
           {a.id === "bookmark" && single ? (bookmarked(single) ? "Unbookmark" : "Bookmark") : a.label}
-        </div>
+        </button>
       ))}
       {safe.length > 0 && dangerous.length > 0 && <div className={styles.separator} />}
       {dangerous.map((a) => (
-        <div key={a.id} className={`${styles.row} ${styles.danger}`} onClick={() => pick(a)}>
+        <button
+          key={a.id}
+          type="button"
+          role="menuitem"
+          className={`${styles.row} ${styles.danger}`}
+          onClick={() => pick(a)}
+        >
           {a.label}
-        </div>
+        </button>
       ))}
     </div>
   );

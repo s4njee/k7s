@@ -77,6 +77,15 @@
 .th:hover {
   color: var(--text-secondary);
 }
+/* B84: the sort control is a real button inside the th, filling it and reading
+   as the th itself (the th keeps sticky + padding; the button inherits its
+   font/colour from the global button reset + inheritance). */
+.thButton {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
 /* Active-sort direction indicator. */
 .sortArrow {
   color: var(--accent);

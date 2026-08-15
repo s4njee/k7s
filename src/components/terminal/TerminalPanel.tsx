@@ -26,30 +26,53 @@ export function TerminalPanel() {
 
   return (
     <div className={styles.panel}>
-      <div className={styles.tabs}>
+      {/* A terminal tab carries its own close button, which a strict
+          role="tablist"/"tab" pattern forbids (axe aria-required-children +
+          nested-interactive). So this strip is a button group: each tab is a
+          real button marked current, with a sibling close. */}
+      <div
+        className={styles.tabs}
+        role="group"
+        aria-label="kubectl terminals"
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+          e.preventDefault();
+          const idx = terminals.findIndex((t) => t.id === activeTerminalId);
+          const dir = e.key === "ArrowRight" ? 1 : terminals.length - 1;
+          setActiveTerminal(terminals[(idx + dir) % terminals.length].id);
+        }}
+      >
         {terminals.map((t) => {
           const label = connections[t.cid]?.clusterName ?? t.cid;
           const active = t.id === activeTerminalId;
           return (
             <div
               key={t.id}
-              className={`${styles.tab} ${active ? styles.tabActive : ""}`}
-              onClick={() => setActiveTerminal(t.id)}
-              title={`kubectl terminal · ${label}`}
+              className={`${styles.tabRow} ${active ? styles.tabRowActive : ""}`}
             >
-              <span className={styles.dot} style={{ background: railColor(t.cid, clusterColors) }} />
-              <span className={styles.tabLabel}>{label}</span>
-              <span
+              {/* The label is the tab button; the close is a sibling button. */}
+              <button
+                type="button"
+                className={styles.tab}
+                onClick={() => setActiveTerminal(t.id)}
+                aria-current={active ? "true" : undefined}
+                title={`kubectl terminal · ${label}`}
+              >
+                <span
+                  className={styles.dot}
+                  style={{ background: railColor(t.cid, clusterColors) }}
+                  aria-hidden="true"
+                />
+                <span className={styles.tabLabel}>{label}</span>
+              </button>
+              <button
+                type="button"
                 className={styles.close}
-                role="button"
                 aria-label={`close terminal ${label}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTerminal(t.id);
-                }}
+                onClick={() => closeTerminal(t.id)}
               >
                 ✕
-              </span>
+              </button>
             </div>
           );
         })}

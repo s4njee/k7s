@@ -160,6 +160,17 @@
 .menuRowActive {
   background: var(--bg-hover);
 }
+/* The connect action fills the row; the QR action sits at the right edge. The
+   row wrapper keeps the flex layout + hover; the two buttons are the actual
+   interactive elements (a button cannot nest a button, B84). */
+.menuRowMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
 .menuName {
   flex: 1;
   min-width: 0;

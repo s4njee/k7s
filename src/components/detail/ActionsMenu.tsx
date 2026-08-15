@@ -13,7 +13,7 @@
  * about its own header.
  */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import styles from "./DetailPanel.module.css";
 import { useClickOutside } from "../../hooks/useClickOutside";
 import { ActionList } from "../actions/ActionList";
@@ -34,6 +34,17 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, () => setOpen(false), open);
 
+  // Escape closes this menu only — without this it falls through to the app's
+  // global cascade and would close the *detail panel* instead (B84).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
   // Nothing actionable for this kind — render no button rather than one that
   // opens an empty menu. Asked of the same function the menu renders from, so
   // the button's existence and the menu's contents can't disagree.
@@ -41,9 +52,17 @@ export function ActionsMenu({ kind, row, onError, onDeleted }: ActionsMenuProps)
 
   return (
     <div className={styles.actionsWrap} ref={ref}>
-      <div className={styles.actionsButton} onClick={() => setOpen((o) => !o)} title="actions">
+      <button
+        type="button"
+        className={styles.actionsButton}
+        onClick={() => setOpen((o) => !o)}
+        title="actions"
+        aria-label="actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
         ⋯
-      </div>
+      </button>
       {open && (
         <div className={styles.actionsAnchor}>
           <ActionList

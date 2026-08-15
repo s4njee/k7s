@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./CommandPalette.module.css";
 import { useStore } from "../../store";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { getProvider } from "../../providers";
 import { buildPalette, type ActionId, type PaletteItem } from "../../lib/palette";
 import { bookmarkKey, EMPTY_BOOKMARKS } from "../../lib/bookmarks";
@@ -70,6 +71,12 @@ export function CommandPalette() {
     listRef.current?.querySelector(`[data-i="${cursor}"]`)?.scrollIntoView({ block: "nearest" });
   }, [cursor]);
 
+  // B84: trap Tab in the palette, keep focus on its own input, and return focus
+  // to whatever ⌘K / ":" was pressed from on close. Declared before the `open`
+  // early return so the hook order is stable.
+  const paletteRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(paletteRef, open, inputRef);
+
   if (!open) return null;
 
   const run = (item: PaletteItem) => {
@@ -115,13 +122,26 @@ export function CommandPalette() {
   };
 
   return (
-    <div className={styles.backdrop} onClick={() => setOpen(false)}>
+    <div
+      className={styles.backdrop}
+      onClick={() => setOpen(false)}
+      role="dialog"
+      aria-modal="true"
+      aria-label="command palette"
+    >
       <div className={styles.palette} onClick={(e) => e.stopPropagation()}>
         <div className={styles.inputRow}>
-          <span className={styles.prompt}>⌕</span>
+          <span className={styles.prompt} aria-hidden="true">⌕</span>
           <input
             ref={inputRef}
+            id="palette-input"
             className={styles.input}
+            role="combobox"
+            aria-expanded="true"
+            aria-autocomplete="list"
+            aria-controls="palette-listbox"
+            aria-label="command palette search"
+            aria-activedescendant={items.length > 0 ? `palette-option-${cursor}` : undefined}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -134,23 +154,35 @@ export function CommandPalette() {
           />
         </div>
 
+        {/* B84: announce the result set as the query changes (polite live region). */}
+        <span className="visuallyHidden" role="status">
+          {items.length === 0
+            ? query
+              ? "nothing matches"
+              : "type to search"
+            : `${items.length} result${items.length === 1 ? "" : "s"}`}
+        </span>
+
         {items.length === 0 ? (
           <div className={styles.empty}>
             {query ? "nothing matches" : "type to search"}
           </div>
         ) : (
-          <div className={styles.list} ref={listRef}>
+          <div className={styles.list} ref={listRef} role="listbox" id="palette-listbox" aria-label="results">
             {items.map((item, i) => (
               <div
                 key={itemKey(item)}
                 data-i={i}
+                role="option"
+                id={`palette-option-${i}`}
+                aria-selected={i === cursor}
                 className={`${styles.item} ${i === cursor ? styles.itemActive : ""}`}
                 // Mouse and keyboard drive the same cursor, so hovering then
                 // pressing Enter does what the highlight says it will.
                 onMouseMove={() => setCursor(i)}
                 onClick={() => run(item)}
               >
-                <span className={styles.icon}>{iconFor(item)}</span>
+                <span className={styles.icon} aria-hidden="true">{iconFor(item)}</span>
                 <span className={styles.label}>
                   <Highlight text={item.label} indices={item.indices} />
                 </span>

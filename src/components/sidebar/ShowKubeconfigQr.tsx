@@ -6,10 +6,11 @@
  * dialog drops the frames — a partial scan on the phone imports nothing.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import styles from "./ShowKubeconfigQr.module.css";
 import { getProvider } from "../../providers";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { encodeHandoff } from "../../lib/handoff";
 import { errDisplay } from "../../lib/errors";
 
@@ -27,6 +28,17 @@ export function ShowKubeconfigQr({ context, onClose }: ShowKubeconfigQrProps) {
   const [idx, setIdx] = useState(0);
   const [paused, setPaused] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, true);
+
+  // Escape closes the dialog (B84) — it previously only closed on a scrim click.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,8 +76,14 @@ export function ShowKubeconfigQr({ context, onClose }: ShowKubeconfigQrProps) {
   }, [images.length, paused]);
 
   return (
-    <div className={styles.scrim} onClick={onClose}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+    <div
+      className={styles.scrim}
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="show kubeconfig QR"
+    >
+      <div className={styles.dialog} onClick={(e) => e.stopPropagation()} ref={dialogRef}>
         <div className={styles.title}>Show kubeconfig QR</div>
         <p className={styles.hint}>
           In mk7s on a phone, open the cluster switcher and tap Scan kubeconfig….

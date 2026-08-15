@@ -33,11 +33,16 @@ export function Bookmarks() {
 
   return (
     <div className={styles.bookmarks}>
-      <div className={styles.bookmarksHeader} onClick={() => setExpanded((e) => !e)}>
-        <span className={styles.navGroupChevron}>{expanded ? "⌄" : "›"}</span>
+      <button
+        type="button"
+        className={styles.bookmarksHeader}
+        onClick={() => setExpanded((e) => !e)}
+        aria-expanded={expanded}
+      >
+        <span className={styles.navGroupChevron} aria-hidden="true">{expanded ? "⌄" : "›"}</span>
         <span className={styles.bookmarksTitle}>Bookmarks</span>
         <span className={styles.navCount}>{bookmarks.length}</span>
-      </div>
+      </button>
       {expanded && (
         <div>
           {bookmarks.map((b) => (
@@ -74,19 +79,21 @@ function BookmarkRow({
   const stale = !live;
 
   return (
-    <div
+    <button
+      type="button"
       className={`${styles.navItem} ${styles.navItemNested}`}
       title={bookmark.namespace ? `${bookmark.kind} · ${bookmark.namespace}/${bookmark.name}` : bookmark.kind}
       onClick={() => onNavigate({ kind: bookmark.kind, namespace: bookmark.namespace, name: bookmark.name })}
     >
-      <span className={styles.navIcon}>{icon ?? "◈"}</span>
+      <span className={styles.navIcon} aria-hidden="true">{icon ?? "◈"}</span>
       <span className={styles.navLabel}>{bookmark.name}</span>
       <span
         className={styles.bookmarkStatus}
         style={{ color: stale ? "var(--text-faint)" : tone ? toneColor(tone) : "var(--text-faint)" }}
+        aria-hidden="true"
       >
         {stale ? "✕" : "●"}
       </span>
-    </div>
+    </button>
   );
 }

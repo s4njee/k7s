@@ -30,25 +30,36 @@ export function ScaleForm({ row, busy, onCancel, onApply }: ScaleFormProps) {
       <div className={styles.confirm}>
         <div className={styles.confirmText}>Replicas for {row.name}</div>
         <div className={styles.confirmRow} style={{ justifyContent: "center", gap: 10 }}>
-          <div className={styles.cancelBtn} onClick={() => setReplicas((n) => Math.max(0, n - 1))}>
+          <button
+            type="button"
+            className={styles.cancelBtn}
+            onClick={() => setReplicas((n) => Math.max(0, n - 1))}
+            aria-label="decrease replicas"
+          >
             −
-          </div>
+          </button>
           <span style={{ fontSize: 13, minWidth: 24, textAlign: "center" }}>{replicas}</span>
-          <div className={styles.cancelBtn} onClick={() => setReplicas((n) => n + 1)}>
+          <button
+            type="button"
+            className={styles.cancelBtn}
+            onClick={() => setReplicas((n) => n + 1)}
+            aria-label="increase replicas"
+          >
             +
-          </div>
+          </button>
         </div>
         <div className={styles.confirmRow}>
-          <div className={styles.cancelBtn} onClick={onCancel}>
+          <button type="button" className={styles.cancelBtn} onClick={onCancel}>
             Cancel
-          </div>
-          <div
+          </button>
+          <button
+            type="button"
             className={styles.applyBtn}
-            aria-disabled={busy}
+            disabled={busy}
             onClick={() => onApply(replicas)}
           >
             Apply
-          </div>
+          </button>
         </div>
       </div>
     </div>

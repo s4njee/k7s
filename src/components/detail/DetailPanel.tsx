@@ -83,23 +83,31 @@ export function DetailPanel() {
             {row.name}
           </div>
           {/* B56: bookmark this resource for the sidebar's quick access. */}
-          <div
+          <button
+            type="button"
             className={`${styles.bookmark} ${isBookmarked ? styles.bookmarkOn : ""}`}
             title={isBookmarked ? "remove bookmark" : "bookmark for quick access"}
+            aria-pressed={isBookmarked}
             onClick={() =>
               toggleBookmark({ kind: nav, namespace: row.namespace, name: row.name })
             }
           >
             {isBookmarked ? "★" : "☆"}
-          </div>
+          </button>
           <ActionsMenu kind={nav} row={row} onError={setActionError} onDeleted={closeDetail} />
-          <div className={styles.close} onClick={closeDetail} title="close">
+          <button
+            type="button"
+            className={styles.close}
+            onClick={closeDetail}
+            title="close"
+            aria-label="close detail"
+          >
             ×
-          </div>
+          </button>
         </div>
 
         {actionError && (
-          <div className={styles.actionError} onClick={() => setActionError(null)}>
+          <div role="alert" className={styles.actionError} onClick={() => setActionError(null)}>
             {actionError}
           </div>
         )}
@@ -150,19 +158,37 @@ export function DetailPanel() {
           />
         )}
 
-        <div className={styles.tabs}>
+        <div
+          className={styles.tabs}
+          role="tablist"
+          aria-label="detail sections"
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+            e.preventDefault();
+            const idx = tabs.findIndex((t) => t.id === activeTab);
+            const dir = e.key === "ArrowRight" ? 1 : tabs.length - 1;
+            const next = tabs[(idx + dir) % tabs.length];
+            setActiveTab(next.id);
+          }}
+        >
           {tabs.map((t) => (
-            <div
+            <button
               key={t.id}
+              type="button"
+              role="tab"
+              id={`detail-tab-${t.id}`}
               className={`${styles.tab} ${activeTab === t.id ? styles.tabActive : ""}`}
               onClick={() => setActiveTab(t.id)}
+              aria-selected={activeTab === t.id}
+              aria-controls="detail-tabpanel"
             >
               {t.label}
-            </div>
+            </button>
           ))}
         </div>
       </div>
 
+      <div id="detail-tabpanel" role="tabpanel" className={styles.tabPanel}>
       {activeTab === "logs" && logs && <LogsTab />}
       {/* Mirrors the tab list above: Properties is no longer pod-only (B18). */}
       {activeTab === "properties" && KINDS_WITH_PROPERTIES.has(nav) && <PropertiesTab />}
@@ -178,6 +204,7 @@ export function DetailPanel() {
       {activeTab === "diff" && <DiffTab />}
       {activeTab === "topology" && <TopologyTab />}
       {activeTab === "events" && <EventsTab />}
+      </div>
     </div>
   );
 }

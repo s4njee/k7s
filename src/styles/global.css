@@ -54,10 +54,50 @@ a:hover {
 }
 
 /* Inputs/textareas drop the native focus ring — the design uses border color
-   changes for focus affordance instead. */
+   changes for focus affordance instead. Keyboard focus still gets the visible
+   accent ring below (WCAG 2.4.7), which outranks this bare rule. */
 input,
 textarea {
   outline: none;
+}
+
+/* Visible, tokenized keyboard focus ring (B84): any element focused *by
+   keyboard* gets a 2px ring in the accent token. Pointer focus keeps the
+   design's quieter border-color affordances — no ring when the mouse is the
+   input. Specificity (0,1,0) beats the bare `outline: none` resets above; a
+   component that needs a bespoke indicator overrides :focus-visible directly. */
+*:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* B84 button reset: the app's click targets were divs; converting them to real
+   <button>s must not import the browser's default button chrome. A module's own
+   class (background, border, padding, …) outranks these bare rules, so a styled
+   button keeps its exact look while an unstyled one inherits the app chrome. */
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+/* B84: present for assistive tech, invisible to sight (the sr-only pattern).
+   Used for table captions, live regions, and canvas-view text equivalents. */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* Custom scrollbars matching the prototype: thin, track-transparent, thumb the

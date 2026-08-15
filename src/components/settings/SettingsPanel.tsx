@@ -12,9 +12,10 @@
  * happen while you're here are first.
  */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import styles from "./SettingsPanel.module.css";
 import { useStore } from "../../store";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { LIMITS, DEFAULT_SETTINGS, sanitizeSettings, type Settings } from "../../lib/settings";
 import { ACCENTS, UI_FONTS, type Accent } from "../../lib/appearance";
 import { asTheme } from "../../lib/theme";
@@ -56,6 +57,11 @@ export function SettingsPanel() {
     return () => document.removeEventListener("keydown", onKey);
   }, [open, setOpen]);
 
+  // B84: trap Tab in the dialog and return focus to the opener on close.
+  // Declared before the `open` early return so the hook order is stable.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
+
   if (!open) return null;
 
   /** Apply one field, sanitised against the rest of the current settings. */
@@ -63,13 +69,27 @@ export function SettingsPanel() {
 
   return (
     // Clicking the backdrop closes; clicking the panel must not bubble up to it.
-    <div className={styles.backdrop} onClick={() => setOpen(false)}>
-      <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
+    <div
+      className={styles.backdrop}
+      onClick={() => setOpen(false)}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
+    >
+      <div className={styles.panel} onClick={(e) => e.stopPropagation()} ref={dialogRef}>
         <div className={styles.header}>
-          <span className={styles.title}>Settings</span>
-          <span className={styles.close} title="close" onClick={() => setOpen(false)}>
-            ×
+          <span className={styles.title} id="settings-title">
+            Settings
           </span>
+          <button
+            type="button"
+            className={styles.close}
+            title="close"
+            aria-label="close settings"
+            onClick={() => setOpen(false)}
+          >
+            ×
+          </button>
         </div>
 
         <div className={styles.body}>
@@ -118,14 +138,15 @@ export function SettingsPanel() {
             </Row>
 
             <Row label="Reduce motion" hint="stops the pulsing “live” dot and other motion">
-              <div
+              <button
+                type="button"
                 className={`${styles.toggle} ${settings.reduceMotion ? styles.toggleOn : ""}`}
                 onClick={() => update({ reduceMotion: !settings.reduceMotion })}
                 role="switch"
                 aria-checked={settings.reduceMotion}
               >
                 {settings.reduceMotion ? "on" : "off"}
-              </div>
+              </button>
             </Row>
           </Section>
 
@@ -198,14 +219,15 @@ export function SettingsPanel() {
             )}
 
             <Row label="Notifications" hint="native notification when something goes wrong; never while the window is focused">
-              <div
+              <button
+                type="button"
                 className={`${styles.toggle} ${settings.notifications ? styles.toggleOn : ""}`}
                 onClick={() => update({ notifications: !settings.notifications })}
                 role="switch"
                 aria-checked={settings.notifications}
               >
                 {settings.notifications ? "on" : "off"}
-              </div>
+              </button>
             </Row>
           </Section>
 
@@ -312,14 +334,15 @@ export function SettingsPanel() {
               label="Crash reporting"
               hint="panics and render errors only, scrubbed; no analytics, no usage telemetry, ever. Off by default."
             >
-              <div
+              <button
+                type="button"
                 className={`${styles.toggle} ${settings.crashReporting ? styles.toggleOn : ""}`}
                 onClick={() => update({ crashReporting: !settings.crashReporting })}
                 role="switch"
                 aria-checked={settings.crashReporting}
               >
                 {settings.crashReporting ? "on" : "off"}
-              </div>
+              </button>
             </Row>
 
             {settings.crashReporting && (
@@ -350,9 +373,13 @@ export function SettingsPanel() {
 
         <div className={styles.footer}>
           <span className={styles.note}>changes save automatically</span>
-          <span className={styles.reset} onClick={() => setSettings(DEFAULT_SETTINGS)}>
+          <button
+            type="button"
+            className={styles.reset}
+            onClick={() => setSettings(DEFAULT_SETTINGS)}
+          >
             reset to defaults
-          </span>
+          </button>
         </div>
       </div>
     </div>

@@ -153,6 +153,15 @@
   border-bottom-color: var(--accent);
 }
 
+/* The tabpanel wrapper (B84) — fills the panel under the header so each tab's
+   content (logs/yaml/…) sizes as it did as a direct child. */
+.tabPanel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /* ---------- Drain progress banner (B20) ---------- */
 
 /* Left-bordered in the tone of the drain's worst outcome (see DrainBanner). */

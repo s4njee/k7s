@@ -65,7 +65,7 @@ export function SectionView({
               <thead>
                 <tr>
                   {body.columns.map((h) => (
-                    <th key={h} className={styles.th}>
+                    <th scope="col" key={h} className={styles.th}>
                       {h}
                     </th>
                   ))}

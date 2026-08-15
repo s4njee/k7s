@@ -122,9 +122,9 @@ export function ShellTab() {
       {ended !== null && (
         <div className={styles.endedBar}>
           <span className={styles.endedReason}>{ended}</span>
-          <span className={styles.reconnect} onClick={reconnect} title="start a new session">
+          <button type="button" className={styles.reconnect} onClick={reconnect} title="start a new session">
             ↻ reconnect
-          </span>
+          </button>
         </div>
       )}
     </div>

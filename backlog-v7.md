@@ -280,6 +280,36 @@ tokenized focus ring and verify both themes at WCAG AA.
       left in an interactive path.
 - [ ] VoiceOver on macOS and NVDA on Windows complete the scripted core flow.
 
+**Implementation report (2026-08-15):**
+
+Shipped the v6 scope against the B83 test net. **Semantics:** the ~50 div/span
+click targets became real `<button>`s — sidebar nav (NavList, CustomSection,
+Bookmarks), cluster-switcher button + context rows + import row, namespace
+dropdown, detail close/bookmark/tabs, actions ⋯ (now Escape-closes instead of
+letting Escape cascade into `closeDetail`), YAML edit/preview/apply/back, the
+action confirmations and scale/port-forward forms, log toolbar controls,
+forwards stop/copy, shell-session controls, and the settings toggles (now
+`<button role="switch">`). A global button reset (module classes still win) keeps
+the pixel look. Tables got `scope="col"`, `aria-sort`, and a caption/name;
+sortable headers are a real button inside the th. The command palette is a
+combobox/listbox with `aria-activedescendant` + a result-count live region. The
+sidebar is a `role="navigation"` landmark with `aria-current`; the detail tab
+strip is a tablist with arrow-key cycling; icon-only controls are labelled and
+decorative glyphs `aria-hidden`. **Focus:** a tokenized `--focus-ring` (accent,
+both palettes + accent presets) applies on `:focus-visible`; a new
+`useFocusTrap` gives the four overlays (Settings, Create YAML, palette, kubeconfig
+QR — which also gained Escape) and the action confirmations trap+restore, and the
+row context menu moves focus in and back to the row. **Announcements:** live
+regions for table row counts, log status/save notes, and `role="alert"` on health
+and action-error banners. **Canvas fallbacks:** the event timeline and topology
+graph render visually-hidden DOM equivalents from the same data. **Axe:** 410
+frontend tests green; `src/axe-views.test.tsx` asserts zero serious/critical on
+every main view in both themes (contrast excluded in jsdom — see
+`docs/verification.md`); `src/a11y-behavior.test.tsx` pins focus-return and the
+keyboard flows. **Deferred to the hardware lane (like B70–73):** the VoiceOver /
+NVDA scripted run and the real-browser WCAG AA contrast audit — the scripted
+core-flow checklist is in `docs/verification.md`.
+
 ### Release-acceptance lane (B70–B73)
 
 Run in parallel with P0 and never mislabel implementation as acceptance.

@@ -115,9 +115,9 @@ export function NodeShellTab() {
           </li>
           <li>Anything you change on the node is real and is not tracked by Kubernetes.</li>
         </ul>
-        <div className={nodeStyles.gateAction} onClick={() => void start()}>
+        <button type="button" className={nodeStyles.gateAction} onClick={() => void start()}>
           Start debug session
-        </div>
+        </button>
       </div>
     );
   }
@@ -133,9 +133,14 @@ export function NodeShellTab() {
             and the user should be able to see and delete it themselves. */}
         {phase.state === "running" && <span className={nodeStyles.podName}>{phase.pod}</span>}
         {phase.state === "running" && (
-          <span className={nodeStyles.close} onClick={stop} title="end the session and delete the pod">
+          <button
+            type="button"
+            className={nodeStyles.close}
+            onClick={stop}
+            title="end the session and delete the pod"
+          >
             ✕ end session
-          </span>
+          </button>
         )}
       </div>
 
@@ -144,13 +149,14 @@ export function NodeShellTab() {
       {phase.state === "ended" && (
         <div className={styles.endedBar}>
           <span className={styles.endedReason}>{phase.reason}</span>
-          <span
+          <button
+            type="button"
             className={styles.reconnect}
             onClick={() => setPhase({ state: "idle" })}
             title="back to the start screen"
           >
             ↻ start again
-          </span>
+          </button>
         </div>
       )}
     </div>

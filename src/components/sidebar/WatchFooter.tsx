@@ -15,14 +15,15 @@ export function WatchFooter() {
     <div className={styles.footer}>
       <span className={styles.footerDot} />
       <span className={styles.footerText}>watch: {watchCount} streams active</span>
-      <span
+      <button
+        type="button"
         className={styles.gear}
         title="settings"
-        role="button"
+        aria-label="settings"
         onClick={() => setSettingsOpen(true)}
       >
         ⚙
-      </span>
+      </button>
     </div>
   );
 }

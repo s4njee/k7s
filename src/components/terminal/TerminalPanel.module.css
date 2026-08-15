@@ -25,28 +25,36 @@
   overflow-x: auto;
 }
 
-.tab {
+/* B84: the tab label and its close button are siblings in a row — a role="tab"
+   element can't contain a focusable close button (axe nested-interactive). The
+   row carries the chrome; the label is the role="tab". */
+.tabRow {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   padding: 3px 6px 3px 8px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
-  cursor: pointer;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-secondary);
   white-space: nowrap;
 }
 
-.tab:hover {
+.tabRow:hover {
   background: var(--bg-hover);
 }
 
-.tabActive {
+.tabRowActive {
   background: var(--bg-control);
   border-color: var(--border-default);
   color: var(--text-primary);
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* The cluster badge dot — the same per-cluster colour as the rail. */

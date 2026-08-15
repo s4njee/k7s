@@ -51,16 +51,17 @@ export function PortForwardForm({ kind, row, busy, onCancel, onForward }: PortFo
           }}
         />
         <div className={styles.confirmRow}>
-          <div className={styles.cancelBtn} onClick={onCancel}>
+          <button type="button" className={styles.cancelBtn} onClick={onCancel}>
             Cancel
-          </div>
-          <div
+          </button>
+          <button
+            type="button"
             className={styles.applyBtn}
-            aria-disabled={busy}
+            disabled={busy}
             onClick={() => onForward(port)}
           >
             Forward
-          </div>
+          </button>
         </div>
       </div>
     </div>

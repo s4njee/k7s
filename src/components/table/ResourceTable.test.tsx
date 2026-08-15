@@ -48,14 +48,15 @@ describe("ResourceTable filter/sort (B83)", () => {
     // Unsorted: freya's prototype order starts with valkyrie-api.
     expect(firstRow()).toContain("valkyrie-api-7d9f8b64d-x2k4n");
 
-    const nameHeader = screen.getByRole("columnheader", { name: /^NAME(?: ▲| ▼)?$/ });
+    // The sort control is a button inside the th (B84), so click that.
+    const nameHeader = screen.getByRole("button", { name: /^NAME(?: ▲| ▼)?$/ });
     await user.click(nameHeader); // asc
     expect(firstRow()).toContain("bifrost-gateway-5c7dd4f6b-jl2mn");
-    expect(screen.getByRole("columnheader", { name: /^NAME(?: ▲| ▼)?$/ })).toHaveTextContent("▲");
+    expect(screen.getByRole("button", { name: /^NAME(?: ▲| ▼)?$/ })).toHaveTextContent("▲");
 
     await user.click(nameHeader); // desc
     expect(firstRow()).toContain("yggdrasil-db-1");
-    expect(screen.getByRole("columnheader", { name: /^NAME(?: ▲| ▼)?$/ })).toHaveTextContent("▼");
+    expect(screen.getByRole("button", { name: /^NAME(?: ▲| ▼)?$/ })).toHaveTextContent("▼");
   });
 
   it("a filter matching nothing shows the empty state", async () => {

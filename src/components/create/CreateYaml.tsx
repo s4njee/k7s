@@ -6,9 +6,10 @@
  * navigates to the new object.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import styles from "./CreateYaml.module.css";
 import { useStore } from "../../store";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { getProvider } from "../../providers";
 import { CodeEditor } from "../detail/CodeEditor";
 import { errDisplay } from "../../lib/errors";
@@ -46,6 +47,11 @@ export function CreateYaml() {
     return () => document.removeEventListener("keydown", onKey);
   }, [open, setOpen]);
 
+  // B84: trap Tab in the dialog and return focus to the opener on close.
+  // Declared before the `open` early return so the hook order is stable.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
+
   if (!open) return null;
 
   // The current filter is the default namespace; "all" means the manifest's own
@@ -80,30 +86,54 @@ export function CreateYaml() {
   };
 
   return (
-    <div className={styles.backdrop} onClick={() => setOpen(false)}>
-      <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
+    <div
+      className={styles.backdrop}
+      onClick={() => setOpen(false)}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="create-yaml-title"
+    >
+      <div className={styles.panel} onClick={(e) => e.stopPropagation()} ref={dialogRef}>
         <div className={styles.header}>
-          <span className={styles.title}>Create from YAML</span>
-          <span className={styles.close} title="close" onClick={() => setOpen(false)}>
-            ×
+          <span className={styles.title} id="create-yaml-title">
+            Create from YAML
           </span>
+          <button
+            type="button"
+            className={styles.close}
+            title="close"
+            aria-label="close create dialog"
+            onClick={() => setOpen(false)}
+          >
+            ×
+          </button>
         </div>
 
         <div className={styles.toolbar}>
           <span className={styles.ns}>namespace: {namespace}</span>
           <span className={styles.spacer} />
           {proposed ? (
-            <div className={styles.previewBtn} onClick={() => setProposed(null)}>
+            <button type="button" className={styles.previewBtn} onClick={() => setProposed(null)}>
               Back to editing
-            </div>
+            </button>
           ) : (
-            <div className={styles.previewBtn} aria-disabled={busy} onClick={() => void preview()}>
+            <button
+              type="button"
+              className={styles.previewBtn}
+              disabled={busy}
+              onClick={() => void preview()}
+            >
               {busy ? "Checking…" : "Preview ⏎"}
-            </div>
+            </button>
           )}
-          <div className={styles.createBtn} aria-disabled={busy} onClick={() => void create()}>
+          <button
+            type="button"
+            className={styles.createBtn}
+            disabled={busy}
+            onClick={() => void create()}
+          >
             {busy ? "…" : "Create"}
-          </div>
+          </button>
         </div>
 
         {error && <div className={styles.error}>{error}</div>}

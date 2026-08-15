@@ -80,6 +80,26 @@ export function TopologyTab() {
           }
         }}
       />
+      {/* B84: the graph is canvas; give assistive tech the same data as text —
+          every node, then every edge as an "owns"/"references" sentence. */}
+      <ul className="visuallyHidden" aria-label="topology graph">
+        {topo.nodes.map((n) => (
+          <li key={n.id}>
+            {`${n.kind} ${n.namespace ? `${n.namespace}/` : ""}${n.name}`}
+          </li>
+        ))}
+        {topo.edges.map((e, i) => {
+          const from = topo.nodes.find((n) => n.id === e.from);
+          const to = topo.nodes.find((n) => n.id === e.to);
+          return (
+            <li key={i}>
+              {`${from?.kind ?? e.from} ${from?.name ?? ""} ${
+                e.rel === "ownership" ? "owns" : "references"
+              } ${to?.kind ?? e.to} ${to?.name ?? ""}`}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

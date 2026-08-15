@@ -66,7 +66,7 @@ describe("ActionConfirmDialog (B83)", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("a busy dialog shows the pending verb and is marked non-interactive", () => {
+  it("a busy dialog shows the pending verb and is non-interactive", () => {
     render(
       <ActionConfirmDialog
         id="restart"
@@ -79,6 +79,8 @@ describe("ActionConfirmDialog (B83)", () => {
       />,
     );
     expect(screen.getByText("…")).toBeInTheDocument();
-    expect(screen.getByText("…")).toHaveAttribute("aria-disabled", "true");
+    // A real disabled button (B84): the browser refuses activation while busy,
+    // not just an advisory aria-disabled on a div.
+    expect(screen.getByText("…")).toBeDisabled();
   });
 });

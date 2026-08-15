@@ -312,6 +312,14 @@ export function EventTimeline({ events }: EventTimelineProps) {
           </div>
         )}
       </div>
+      {/* B84: the timeline is canvas; give assistive tech the same data as text. */}
+      <ul className="visuallyHidden">
+        {events.map((e, i) => (
+          <li key={i}>
+            {`${e.type} ${e.reason} · ${e.age} ×${e.count} — ${e.message}`}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

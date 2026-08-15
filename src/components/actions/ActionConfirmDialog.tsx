@@ -6,10 +6,11 @@
  * stall is visible *before* committing rather than surfacing as a 429 mid-drain.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import styles from "./ActionList.module.css";
 import { confirmText, type ActionDef, type ActionId } from "../../lib/actions";
 import { getProvider } from "../../providers";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import type { DrainPreview, KindId, Row } from "../../providers/types";
 
 interface ActionConfirmDialogProps {
@@ -32,6 +33,9 @@ export function ActionConfirmDialog({
   onConfirm,
 }: ActionConfirmDialogProps) {
   const danger = actions.find((a) => a.id === id)?.danger;
+  // B84: trap Tab in the confirm and return focus to the menu trigger on close.
+  const confirmRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(confirmRef, true);
   const [preview, setPreview] = useState<DrainPreview | null>(null);
   const [previewError, setPreviewError] = useState(false);
   const [uninstallObjects, setUninstallObjects] = useState<{ kind: string; name: string }[] | null>(null);
@@ -93,7 +97,7 @@ export function ActionConfirmDialog({
 
   return (
     <div className={styles.menu}>
-      <div className={styles.confirm}>
+      <div className={styles.confirm} role="dialog" aria-label="confirm action" ref={confirmRef}>
         <div className={styles.confirmText}>{confirmText(id, kind, rows)}</div>
         {id === "drain" && !preview && !previewError && (
           <div className={styles.drainPreviewLoading}>checking PodDisruptionBudgets…</div>
@@ -106,10 +110,10 @@ export function ActionConfirmDialog({
             <table>
               <thead>
                 <tr>
-                  <th>PDB</th>
-                  <th>MIN AVAILABLE</th>
-                  <th>CURRENT HEALTHY</th>
-                  <th>DISRUPTIONS ALLOWED</th>
+                  <th scope="col">PDB</th>
+                  <th scope="col">MIN AVAILABLE</th>
+                  <th scope="col">CURRENT HEALTHY</th>
+                  <th scope="col">DISRUPTIONS ALLOWED</th>
                 </tr>
               </thead>
               <tbody>
@@ -150,8 +154,8 @@ export function ActionConfirmDialog({
             <table>
               <thead>
                 <tr>
-                  <th>KIND</th>
-                  <th>NAME</th>
+                  <th scope="col">KIND</th>
+                  <th scope="col">NAME</th>
                 </tr>
               </thead>
               <tbody>
@@ -169,16 +173,17 @@ export function ActionConfirmDialog({
           <div className={styles.drainPreviewError}>couldn't list the objects it installed</div>
         )}
         <div className={styles.confirmRow}>
-          <div className={styles.cancelBtn} onClick={onCancel}>
+          <button type="button" className={styles.cancelBtn} onClick={onCancel}>
             Cancel
-          </div>
-          <div
+          </button>
+          <button
+            type="button"
             className={danger ? styles.dangerBtn : styles.applyBtn}
-            aria-disabled={busy}
+            disabled={busy}
             onClick={() => onConfirm(id)}
           >
             {busy ? "…" : label(id)}
-          </div>
+          </button>
         </div>
       </div>
     </div>

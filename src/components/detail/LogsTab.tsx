@@ -130,7 +130,7 @@ export function LogsTab() {
     <>
       <div className={styles.toolbar}>
         <div className={styles.search}>
-          <span className={styles.searchIcon}>⌕</span>
+          <span className={styles.searchIcon} aria-hidden="true">⌕</span>
           <input
             className={styles.searchInput}
             value={logSearch}
@@ -142,27 +142,35 @@ export function LogsTab() {
         {/* Container cycler (cycles through the pod's containers, plus "all").
             A workload bundle has no container to pick — it's every pod already. */}
         {!workload && (
-          <div className={styles.button} onClick={cycleContainer} title="container">
-            <span className={styles.buttonGlyph}>▣</span>
+          <button
+            type="button"
+            className={styles.button}
+            onClick={cycleContainer}
+            title="container"
+            aria-label="container"
+          >
+            <span className={styles.buttonGlyph} aria-hidden="true">▣</span>
             {containerLabel}
-            {options.length > 1 && <span className={styles.buttonChevron}>▼</span>}
-          </div>
+            {options.length > 1 && <span className={styles.buttonChevron} aria-hidden="true">▼</span>}
+          </button>
         )}
 
         {/* Timestamp toggle. */}
-        <div
+        <button
+          type="button"
           className={`${styles.toggle} ${showTimestamps ? styles.toggleActive : ""}`}
           onClick={toggleTimestamps}
+          aria-pressed={showTimestamps}
         >
           ts
-        </div>
+        </button>
 
         {/* How far back to read. */}
         <select
           className={styles.select}
           value={since}
           onChange={(e) => setLogSince(e.target.value as (typeof SINCE_OPTIONS)[number])}
-          title="how far back to read"
+          aria-label="how far back to read"
         >
           {SINCE_OPTIONS.map((o) => (
             <option key={o} value={o}>
@@ -175,29 +183,38 @@ export function LogsTab() {
             A pod that has never restarted has no previous generation, and asking
             for one is a 400. A workload bundle has no single container either. */}
         {!workload && showPrevious && (
-          <div
+          <button
+            type="button"
             className={`${styles.toggle} ${previous ? styles.toggleActive : ""}`}
             onClick={() => setLogPrevious(!previous)}
             title="read the previous container — what it printed before it died"
+            aria-pressed={previous}
           >
             ↺ previous
-          </div>
+          </button>
         )}
 
-        <div className={styles.button} onClick={() => void save()} title="save the full log to a file">
-          <span className={styles.buttonGlyph}>⇩</span>
+        <button
+          type="button"
+          className={styles.button}
+          onClick={() => void save()}
+          title="save the full log to a file"
+        >
+          <span className={styles.buttonGlyph} aria-hidden="true">⇩</span>
           save
-        </div>
+        </button>
 
         {/* Follow / pause. Meaningless for a previous read: that container is
             dead, so there is nothing to follow. */}
         {!previous && (
-          <div
+          <button
+            type="button"
             className={`${styles.follow} ${following ? styles.following : styles.paused}`}
             onClick={toggleFollow}
+            aria-pressed={following}
           >
             {following ? "⏸ pause" : "▶ follow"}
-          </div>
+          </button>
         )}
       </div>
 
@@ -214,9 +231,9 @@ export function LogsTab() {
       </div>
 
       <div className={styles.footer}>
-        <span>{filtered.length} lines</span>
+        <span role="status">{filtered.length} lines</span>
         <span>{workload ? "pods: all" : `container: ${containerLabel}`}</span>
-        {saveNote && <span className={styles.saveNote}>{saveNote}</span>}
+        {saveNote && <span className={styles.saveNote} role="status">{saveNote}</span>}
         {previous ? (
           <span style={{ color: "var(--status-warn)" }}>↺ previous container</span>
         ) : (

@@ -48,6 +48,7 @@ function HealthBanner({
   const now = Date.now();
   return (
     <div
+      role="alert"
       className={`${styles.healthBanner} ${
         state === "forbidden" ? styles.healthBannerForbidden : styles.healthBannerWarn
       }`}
@@ -282,6 +283,7 @@ export function ResourceTable() {
       {banner}
       <div className={styles.wrap} ref={scrollRef}>
         <table className={`${styles.table} ${virtual ? styles.tableFixed : ""}`}>
+          <caption className="visuallyHidden">{meta?.label ?? nav}</caption>
           <TableHeader
             columns={columns}
             virtual={virtual}
@@ -319,6 +321,11 @@ export function ResourceTable() {
             {nav === "problems" ? "nothing wrong — cluster looks healthy" : "no resources match filter"}
           </div>
         )}
+        {/* B84: announce the visible row count as it changes with the
+            filter/sort — a polite live region, hidden visually. */}
+        <span className="visuallyHidden" role="status">
+          {`${rows.length} rows`}
+        </span>
       </div>
 
       {menuError && (

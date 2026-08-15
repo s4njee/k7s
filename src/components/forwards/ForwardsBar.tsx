@@ -37,21 +37,29 @@ export function ForwardsBar() {
           <span className={styles.clusterChip} title="cluster">
             {f.cid}
           </span>
-          <span
+          <button
+            type="button"
             className={styles.local}
             title="copy address"
+            aria-label={`copy localhost:${f.localPort}`}
             onClick={() => void copy(`localhost:${f.localPort}`)}
           >
             localhost:{f.localPort}
-          </span>
-          <span className={styles.arrow}>→</span>
+          </button>
+          <span className={styles.arrow} aria-hidden="true">→</span>
           <span className={styles.target}>
             {f.service ?? f.pod}:{f.servicePort ?? f.remotePort}
           </span>
-          {f.error && <span className={styles.errorMark}>!</span>}
-          <span className={styles.stop} title="stop forward" onClick={() => void stop(f.id)}>
+          {f.error && <span className={styles.errorMark} aria-hidden="true">!</span>}
+          <button
+            type="button"
+            className={styles.stop}
+            title="stop forward"
+            aria-label="stop forward"
+            onClick={() => void stop(f.id)}
+          >
             ✕
-          </span>
+          </button>
         </span>
       ))}
     </div>

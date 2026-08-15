@@ -16,6 +16,38 @@ the few places where the two design sources disagreed and a call was made.
 | Packaged e2e (B83) | `xvfb-run -a node dev/e2e.mjs` (Linux, needs `tauri-driver`) | golden path via WebDriver; run nightly in CI until the 7-day flake rate is <5% |
 | Release bundle | `pnpm run tauri:build` | `k7s.app` built (arm64, `io.k7s.app`); `.dmg` styling step needs a GUI session — see note below |
 
+## Accessibility (B84)
+
+- **axe in the component tests**: every main view (ClusterOverview, ResourceTable
+  for pods/problems, ClusterSwitcher, DetailPanel, TerminalPanel) is rendered in
+  both themes and asserted free of serious/critical violations
+  (`src/axe-views.test.tsx`, `pnpm test`). jsdom can't compute styles, so contrast
+  rules are excluded there — the structural/ARIA rules axe is good at in jsdom are
+  exactly where the audit found the gaps.
+- **Semantics**: div/span click targets converted to real `<button>`s (nav,
+  menus, actions, tabs, toolbar glyphs, close/bookmark); a tokenized focus ring
+  (`--focus-ring`) applies on `:focus-visible` in both themes; tables got
+  `scope="col"` + captions/aria-labels + `aria-sort`; the command palette is a
+  combobox/listbox with `aria-activedescendant`; the sidebar is a
+  `role="navigation"` landmark with `aria-current`; detail tabs are a tablist with
+  arrow-key cycling; the canvas timeline/topology have visually-hidden text
+  equivalents; live regions announce row counts, log status, and action errors.
+- **Focus management**: the four overlays (Settings, Create YAML, command palette,
+  kubeconfig QR) and the action confirmations trap Tab and return focus to the
+  invoking control on close (`src/hooks/useFocusTrap.ts`, verified in
+  `src/a11y-behavior.test.tsx`); Escape closes the QR dialog and the actions menu.
+- **Not runnable here** (hardware lane, like B70–73): the WCAG AA contrast audit
+  and the screen-reader pass. The scripted core flow to complete with **VoiceOver
+  on macOS** and **NVDA on Windows**:
+  1. connect to the fixture cluster;
+  2. choose a namespace;
+  3. filter for and open a pod;
+  4. read logs;
+  5. invoke an action (e.g. restart) and confirm;
+  6. open a kubectl terminal and close it;
+  7. close every surface (detail, menus, modals) and confirm focus returns to the
+     invoking control at each step.
+
 ## Manual verification (demo mode, 1440×900)
 
 Verified against the design spec (`design/README.md`) with the prototype's mock data:

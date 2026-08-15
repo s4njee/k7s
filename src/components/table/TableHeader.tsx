@@ -32,11 +32,20 @@ export function TableHeader({
       <thead>
         <tr>
           {columns.map((col, i) => (
-            <th key={col} className={styles.th} onClick={() => toggleSort(i)}>
-              {col}
-              {sortCol === i && (
-                <span className={styles.sortArrow}>{sortDir === "asc" ? " ▲" : " ▼"}</span>
-              )}
+            <th
+              key={col}
+              scope="col"
+              className={styles.th}
+              aria-sort={sortCol === i ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
+            >
+              <button type="button" className={styles.thButton} onClick={() => toggleSort(i)}>
+                {col}
+                {sortCol === i && (
+                  <span className={styles.sortArrow} aria-hidden="true">
+                    {sortDir === "asc" ? " ▲" : " ▼"}
+                  </span>
+                )}
+              </button>
             </th>
           ))}
         </tr>

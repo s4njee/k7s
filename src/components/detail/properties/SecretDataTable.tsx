@@ -56,11 +56,11 @@ export function SecretDataTable({
         <thead>
           <tr>
             {columns.map((h) => (
-              <th key={h} className={styles.th}>
+              <th scope="col" key={h} className={styles.th}>
                 {h}
               </th>
             ))}
-            <th className={`${styles.th} ${styles.thAction}`}>VALUE</th>
+            <th scope="col" className={`${styles.th} ${styles.thAction}`}>VALUE</th>
           </tr>
         </thead>
         <tbody>

@@ -133,49 +133,65 @@ export function ClusterSwitcher() {
         </div>
       )}
 
-      <div className={styles.switcherButton} onClick={() => toggleMenu("cluster")}>
+      <button
+        type="button"
+        className={styles.switcherButton}
+        onClick={() => toggleMenu("cluster")}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
         <div className={styles.badge}>{initials(name)}</div>
         <div className={styles.switcherText}>
           <div className={styles.clusterName}>{name}</div>
           <div className={styles.statusLine}>
-            <span className={styles.dot} style={{ background: dotColor }} />
+            <span className={styles.dot} style={{ background: dotColor }} aria-hidden="true" />
             {statusText}
           </div>
         </div>
-        <span className={styles.chevron}>▼</span>
-      </div>
+        <span className={styles.chevron} aria-hidden="true">▼</span>
+      </button>
 
       {open && (
-        <div className={styles.menu}>
+        <div className={styles.menu} role="listbox" aria-label="kubeconfig contexts">
           {contexts.map((ctx) => {
             const isCurrent = ctx.name === connection.context;
             return (
               <div
                 key={ctx.name}
                 className={`${styles.menuRow} ${isCurrent ? styles.menuRowActive : ""}`}
-                onClick={() => {
-                  closeMenus();
-                  // No-op if re-selecting the already-connected context.
-                  if (!isCurrent) void connectTo(ctx.name);
-                }}
               >
-                <span
-                  className={styles.dot}
-                  style={{ background: isCurrent ? "var(--status-ok)" : "var(--dot-inactive)" }}
-                />
-                <span className={styles.menuName}>{ctx.name}</span>
-                <span className={styles.menuEnv}>{ctx.cluster}</span>
-                <span
+                {/* A button cannot nest a button, so the connect action and the QR
+                    action are sibling buttons in a shared flex row (B84). */}
+                <button
+                  type="button"
+                  className={styles.menuRowMain}
+                  onClick={() => {
+                    closeMenus();
+                    // No-op if re-selecting the already-connected context.
+                    if (!isCurrent) void connectTo(ctx.name);
+                  }}
+                  aria-current={isCurrent ? "true" : undefined}
+                >
+                  <span
+                    className={styles.dot}
+                    style={{ background: isCurrent ? "var(--status-ok)" : "var(--dot-inactive)" }}
+                    aria-hidden="true"
+                  />
+                  <span className={styles.menuName}>{ctx.name}</span>
+                  <span className={styles.menuEnv}>{ctx.cluster}</span>
+                </button>
+                <button
+                  type="button"
                   className={styles.qrBtn}
                   title="Show as QR for mk7s on a phone"
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  aria-label={`show ${ctx.name} as a QR code`}
+                  onClick={() => {
                     closeMenus();
                     setQrContext(ctx.name);
                   }}
                 >
                   ▣
-                </span>
+                </button>
               </div>
             );
           })}
@@ -189,10 +205,10 @@ export function ClusterSwitcher() {
 
           {/* Import action, separated from the context list. */}
           <div className={styles.menuDivider} />
-          <div className={styles.menuRow} onClick={() => void onImport()}>
-            <span className={styles.importIcon}>＋</span>
+          <button type="button" className={styles.menuRow} onClick={() => void onImport()}>
+            <span className={styles.importIcon} aria-hidden="true">＋</span>
             <span className={styles.menuName}>Import kubeconfig…</span>
-          </div>
+          </button>
         </div>
       )}
 
