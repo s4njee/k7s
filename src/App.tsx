@@ -6,6 +6,7 @@
  * placeholder so the shell (sidebar, top bar, status bar) can be verified.
  */
 
+import { useStore } from "./store";
 import styles from "./App.module.css";
 import { useBootstrap } from "./hooks/useBootstrap";
 import { useCustomKindWatch } from "./hooks/useCustomKindWatch";
