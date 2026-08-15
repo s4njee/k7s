@@ -43,3 +43,23 @@
 .updateBadge:hover {
   background: var(--bg-selected-row);
 }
+
+/* The "open a kubectl terminal" affordance (B82) — the same quiet pill shape,
+   in the neutral control colour rather than the accent. */
+.terminalPill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-control);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.terminalPill:hover {
+  background: var(--bg-selected-row);
+  color: var(--text-primary);
+}

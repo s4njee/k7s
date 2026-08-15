@@ -24,8 +24,9 @@ function initials(name: string): string {
 /** Rail palette (the app's accent hues), for the per-cluster colour default. */
 const RAIL_COLORS = ["#4d9fff", "#34b37c", "#b18cff", "#ff9d4d", "#f7768e", "#e0af68"];
 
-/** Deterministic default colour for a cid that has no user-set one. */
-function railColor(cid: string, colors: Record<string, string>): string {
+/** Deterministic default colour for a cid that has no user-set one (shared with
+ *  the terminal tabs, so a cluster reads the same everywhere, B82). */
+export function railColor(cid: string, colors: Record<string, string>): string {
   if (colors[cid]) return colors[cid];
   let h = 0;
   for (const ch of cid) h = (h * 31 + ch.charCodeAt(0)) >>> 0;

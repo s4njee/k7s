@@ -16,6 +16,17 @@ and CI refuses a tag whose three versions disagree.
 
 ### Added
 
+- Integrated kubectl terminal (B82): ⌘T (or the statusbar "❯ terminal" pill)
+  opens a per-cluster terminal that spawns your shell on a real pty
+  (portable-pty — the VS Code/Lens-style crate) with `KUBECONFIG` pointed at a
+  temp single-context file, so `kubectl` targets the viewed cluster with zero
+  setup. The login-shell PATH is resolved at spawn (so a Finder-launched app
+  finds kubectl and its exec plugins), a missing kubectl is called out with
+  per-OS install hints, and the temp kubeconfig is 0600, deleted on close and
+  swept at boot (the nodeshell discipline). Closing a tab or disconnecting the
+  cluster terminates the shell itself (a pty child wouldn't die on its own),
+  and an opening terminal grabs the keyboard. Multiple terminals with
+  cluster-badged tabs, reusing the existing xterm/shell plumbing end to end.
 - Helm write path, phase 1 (B81): **rollback** and **uninstall**. A release's
   History panel now has a per-revision "roll back" button (like a Deployment's
   ReplicaSets), which applies that revision's stored manifest via server-side

@@ -95,6 +95,12 @@ http = "1"
 base64 = "0.22"
 flate2 = "1"
 
+# --- Local terminal pty (B82) ---
+# Spawns the user's shell with a real pseudo-terminal (WezTerm's portable-pty —
+# the same crate VS Code and Lens-style terminals use) so the kubectl terminal
+# gets a proper TTY with resize support, on all three OSes.
+portable-pty = "0.9"
+
 [dev-dependencies]
 # Generates test certificates for the TLS parsing tests (B48); never in prod.
 rcgen = { version = "0.13", features = ["x509-parser"] }

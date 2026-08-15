@@ -276,6 +276,42 @@ KUBECONFIG=$HOME/.kube/config cargo run --example helm_write_check   # rollback�
 - Phase-1 scope: hooks aren't run, and objects the target manifest no longer
   lists aren't pruned (a rollback applies the target, it doesn't diff-and-prune).
 
+## Integrated kubectl terminal (B82)
+
+⌘T / the statusbar "❯ terminal" pill opens a per-cluster terminal: the user's
+shell on a real pty (portable-pty) with `KUBECONFIG` set to a temp
+single-context file for the viewed cluster, so `kubectl` targets it with zero
+setup — even when the machine's default context is a different cluster.
+
+```bash
+./dev/cluster/up.sh
+KUBECONFIG=$HOME/.kube/config cargo run --example terminal_check
+```
+
+- The harness spawns a real shell on a pty via the production spawn path
+  (`spawn_shell_pty`), writes the temp kubeconfig the way `start_kubectl_terminal`
+  does, types `kubectl config current-context` and `kubectl get pods -A`, and
+  asserts the output contains the same pod the app's own table lists (e.g.
+  `bifrost-gateway`). It proves the default-vs-viewed split directly: a control
+  shell whose ambient default is a *different, unreachable* cluster B does not
+  list A's pods — the terminal's success comes from its own KUBECONFIG, not the
+  machine's default context (`K7S_TERMINAL_CONTEXT` overrides the cluster A it
+  binds to).
+- The temp kubeconfig is 0600, is swept at boot and on every open (the nodeshell
+  discipline), and is deleted when the tab closes or the cluster disconnects —
+  verified by `terminal_check` and by the manager's disconnect cleanup. The shell
+  process itself is killed on tab close / disconnect (a pty child does not die
+  when its pump task is aborted, so a `PtyChild` guard kills it on drop).
+- Login-shell PATH resolution (the B74 trick built here): a shell spawned from a
+  Finder-launched app inherits a bare `/usr/bin:/bin:…`, which is exactly where
+  Homebrew's `/opt/homebrew/bin/kubectl` is *not*. `terminal_check` proves the
+  resolved PATH finds kubectl on this machine.
+- A missing kubectl shows a banner with per-OS install hints (the shell still
+  works — only kubectl is absent).
+- Multiple terminals with cluster-badged tabs; each stays mounted so its
+  session keeps running while you look at another. Windows defaults to
+  PowerShell (code path — on the B71 QA checklist thereafter).
+
 ## Known follow-ups (out of v1 scope, per plan.md)
 
 - Detail panel (YAML/Events) for non-pod kinds — pods-only in v1 by design.

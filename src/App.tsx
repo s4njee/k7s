@@ -21,6 +21,7 @@ import { ResourceTable } from "./components/table/ResourceTable";
 import { DetailPanel } from "./components/detail/DetailPanel";
 import { ClusterOverview } from "./components/overview/ClusterOverview";
 import { ForwardsBar } from "./components/forwards/ForwardsBar";
+import { TerminalPanel } from "./components/terminal/TerminalPanel";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { CreateYaml } from "./components/create/CreateYaml";
 import { CommandPalette } from "./components/palette/CommandPalette";
@@ -50,6 +51,7 @@ export default function App() {
           <DetailPanel />
         </div>
         <ForwardsBar />
+        <TerminalPanel />
         <StatusBar />
       </div>
       {/* Modals, outside the layout flow. The palette is last so it layers over

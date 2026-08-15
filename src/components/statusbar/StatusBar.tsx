@@ -15,6 +15,9 @@ export function StatusBar() {
   const updateStatus = useStore((s) => s.status);
   const updateVersion = useStore((s) => s.version);
   const setSettingsOpen = useStore((s) => s.setSettingsOpen);
+  // Local kubectl terminal (B82): open one for the viewed cluster.
+  const activeCid = useStore((s) => s.activeCid);
+  const openTerminal = useStore((s) => s.openTerminal);
 
   const connected = connection.phase === "connected";
   const cluster = connection.clusterName ?? connection.context ?? "k7s";
@@ -46,6 +49,15 @@ export function StatusBar() {
           title={`Version ${updateVersion} is available — open Settings to install`}
         >
           update v{updateVersion}
+        </button>
+      )}
+      {connected && activeCid && (
+        <button
+          className={styles.terminalPill}
+          onClick={() => openTerminal(activeCid)}
+          title="Open a kubectl terminal for this cluster (⌘T)"
+        >
+          ❯ terminal
         </button>
       )}
       <span>kubectl ctx: {ctx}</span>

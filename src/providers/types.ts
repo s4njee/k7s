@@ -914,6 +914,18 @@ export interface DataProvider {
     onClosed: (reason: string) => void,
   ): Promise<ShellHandle>;
 
+  // ---- local kubectl terminal (B82) ----
+  /**
+   * Start a local kubectl terminal for `cid`: the user's shell on a pty with
+   * KUBECONFIG pointed at a temp single-context file, so `kubectl` targets that
+   * cluster. Same callback + handle contract as {@link startShell}.
+   */
+  startKubectlTerminal(
+    cid: string,
+    onOutput: (data: string) => void,
+    onClosed: (reason: string) => void,
+  ): Promise<ShellHandle>;
+
   // ---- port-forwarding (B6, B16) ----
   /**
    * Forward a port. `ref.kind` selects the strategy: a pod forwards directly; a

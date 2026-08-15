@@ -100,6 +100,36 @@ describe(": (the k9s idiom)", () => {
   });
 });
 
+describe("⌘T (kubectl terminal, B82)", () => {
+  beforeEach(() => {
+    useStore.setState({
+      terminals: [],
+      activeTerminalId: null,
+      activeCid: "prod",
+      connections: { prod: { phase: "connected", context: "prod", clusterName: "prod" } },
+    });
+  });
+
+  it("opens a terminal for the active cluster", () => {
+    press("t", { metaKey: true });
+    const s = useStore.getState();
+    expect(s.terminals).toHaveLength(1);
+    expect(s.terminals[0].cid).toBe("prod");
+    expect(s.activeTerminalId).toBe(s.terminals[0].id);
+  });
+
+  it("works with ctrl too, for non-Mac habits", () => {
+    press("t", { ctrlKey: true });
+    expect(useStore.getState().terminals).toHaveLength(1);
+  });
+
+  it("does nothing without a connected cluster", () => {
+    useStore.setState({ activeCid: null, connections: {} });
+    press("t", { metaKey: true });
+    expect(useStore.getState().terminals).toHaveLength(0);
+  });
+});
+
 describe("Escape cascade", () => {
   it("closes the palette first, leaving everything under it alone", () => {
     // The whole point: closing the palette must not also clear the filter and

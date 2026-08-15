@@ -233,6 +233,32 @@ export interface UpdateActions {
   setUpdate: (patch: Partial<UpdateState>) => void;
 }
 
+/** One open local kubectl terminal (B82). Terminals are global, not per-active
+ *  cluster: a terminal opened on cluster A keeps running while viewing cluster B,
+ *  and the tab carries its cluster's badge. */
+export interface TerminalInfo {
+  /** Frontend tab identity (also the xterm's key). */
+  id: string;
+  /** The cluster the terminal's KUBECONFIG names. */
+  cid: Cid;
+}
+
+export interface TerminalSliceState {
+  /** Open terminals, in open order. */
+  terminals: TerminalInfo[];
+  /** Which terminal's xterm is visible (the rest stay mounted, hidden). */
+  activeTerminalId: string | null;
+}
+
+export interface TerminalActions {
+  /** Open a terminal for a connected cluster; no-op when none is connected. */
+  openTerminal: (cid: Cid) => void;
+  /** Close a terminal's tab (the component stops its session first). */
+  closeTerminal: (id: string) => void;
+  /** Focus a terminal's xterm. */
+  setActiveTerminal: (id: string) => void;
+}
+
 export type AppState = NavigationState &
   NavigationActions &
   ConnectionSliceState &
@@ -241,5 +267,7 @@ export type AppState = NavigationState &
   DataActions &
   DetailSliceState &
   DetailActions &
+  TerminalSliceState &
+  TerminalActions &
   UpdateState &
   UpdateActions;

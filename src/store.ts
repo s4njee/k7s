@@ -12,6 +12,7 @@ import { createNavigationSlice } from "./store/navigationSlice";
 import { createConnectionSlice } from "./store/connectionSlice";
 import { createDataSlice, NODE_SAMPLE_CAP, POD_SAMPLE_CAP } from "./store/dataSlice";
 import { createDetailSlice } from "./store/detailSlice";
+import { createTerminalSlice } from "./store/terminalSlice";
 import { createUpdateSlice } from "./store/updateSlice";
 
 // Re-export all types and constants for backwards compatibility
@@ -37,5 +38,6 @@ export const useStore = create<AppState>()((...a) => ({
   ...createConnectionSlice(...a),
   ...createDataSlice(...a),
   ...createDetailSlice(...a),
+  ...createTerminalSlice(...a),
   ...createUpdateSlice(...a),
 }));

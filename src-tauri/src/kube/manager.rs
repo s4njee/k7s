@@ -18,6 +18,7 @@ use super::{dto::Row, events, ResourceDelta, ResourceUpdate, Cid};
 use kube::Client;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
@@ -124,6 +125,11 @@ pub struct ClientManager<R: Runtime = tauri::Wry> {
     logs: RwLock<HashMap<String, (Cid, JoinHandle<()>)>>,
     /// Live shell sessions keyed by stream id, tagged with their cluster.
     shells: RwLock<HashMap<String, (Cid, ShellSession)>>,
+    /// Local kubectl terminals (B82): the temp kubeconfig path per terminal,
+    /// tagged with their cluster. The shell task is in `shells`; this map exists
+    /// so stop/disconnect can delete the temp file even though aborting a task
+    /// can't run its async cleanup.
+    terminals: RwLock<HashMap<String, (Cid, PathBuf)>>,
     /// Live port-forwards keyed by id, tagged with their cluster.
     forwards: RwLock<HashMap<String, ForwardEntry>>,
     /// Contexts imported from extra kubeconfig files, keyed by context name.
@@ -139,6 +145,7 @@ impl<R: Runtime> ClientManager<R> {
             clusters: RwLock::new(HashMap::new()),
             logs: RwLock::new(HashMap::new()),
             shells: RwLock::new(HashMap::new()),
+            terminals: RwLock::new(HashMap::new()),
             forwards: RwLock::new(HashMap::new()),
             imports: RwLock::new(HashMap::new()),
         }
@@ -237,6 +244,20 @@ impl<R: Runtime> ClientManager<R> {
                 if let Some((_, s)) = shells.remove(&id) {
                     s.task.abort();
                 }
+            }
+        }
+        // A terminal's shell task is aborted above (it's a shell); its temp
+        // kubeconfig is deleted here — an aborted task can't run its own cleanup.
+        {
+            let mut terminals = self.terminals.write().await;
+            let dead: Vec<(String, PathBuf)> = terminals
+                .iter()
+                .filter(|(_, (c, _))| c == cid)
+                .map(|(id, (_, path))| (id.clone(), path.clone()))
+                .collect();
+            for (id, path) in dead {
+                terminals.remove(&id);
+                let _ = std::fs::remove_file(path);
             }
         }
         let dead: Vec<String> = self
@@ -421,6 +442,21 @@ impl<R: Runtime> ClientManager<R> {
         if let Some(cid) = cid {
             self.emit_watch(&cid).await;
         }
+    }
+
+    // ---- local kubectl terminals (B82) ----
+
+    /// Record a terminal's temp kubeconfig path, keyed by stream id (the shell
+    /// task itself lives in `shells`). Exists so stop/disconnect can delete the
+    /// file even though aborting the task skips its async cleanup.
+    pub async fn add_terminal(&self, cid: Cid, id: String, kubeconfig_path: PathBuf) {
+        self.terminals.write().await.insert(id, (cid, kubeconfig_path));
+    }
+
+    /// Remove a terminal's entry and hand back its temp kubeconfig path (or None
+    /// if it wasn't a terminal), so the caller can delete the file.
+    pub async fn take_terminal_path(&self, id: &str) -> Option<PathBuf> {
+        self.terminals.write().await.remove(id).map(|(_, path)| path)
     }
 
     // ---- port-forwards (B6) ----
@@ -748,5 +784,63 @@ mod tests {
         let cached = clusters.get("a").unwrap();
         assert!(cached.last_rows.contains_key("pods"));
         assert!(cached.last_rows.contains_key("nodes"));
+    }
+
+    /// A terminal registers a temp kubeconfig path alongside its shell task;
+    /// `take_terminal_path` hands it back exactly once (the stop command deletes
+    /// the file itself).
+    #[tokio::test]
+    async fn take_terminal_path_returns_and_removes_the_entry() {
+        let mgr = manager();
+        let path = std::env::temp_dir().join(format!("k7s-test-term-{}-1.yaml", std::process::id()));
+        std::fs::write(&path, "kind: Config").unwrap();
+        mgr.add_terminal("a".into(), "term-1".into(), path.clone()).await;
+
+        let got = mgr.take_terminal_path("term-1").await;
+        assert_eq!(got, Some(path.clone()), "the path is handed back for deletion");
+        assert!(mgr.take_terminal_path("term-1").await.is_none(), "the entry is consumed");
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// Disconnecting a cluster ends a terminal two ways: its shell task is
+    /// aborted (the PTY dies — see terminal.rs's PtyChild guard) and its temp
+    /// kubeconfig is deleted by the manager, because an aborted task can't run
+    /// its own cleanup (B82 criterion: disconnect removes the 0600 temp file).
+    #[tokio::test]
+    async fn disconnect_ends_a_terminals_shell_and_deletes_its_kubeconfig() {
+        let mgr = manager();
+        mgr.push_task("a".into(), tokio::spawn(async {})).await;
+        let path = std::env::temp_dir().join(format!("k7s-test-term-{}-2.yaml", std::process::id()));
+        std::fs::write(&path, "kind: Config").unwrap();
+
+        let (input_tx, _) = mpsc::channel::<Vec<u8>>(4);
+        let (resize_tx, _) = mpsc::channel::<(u16, u16)>(4);
+        mgr.add_shell(
+            "a".into(),
+            "term-1".into(),
+            ShellSession {
+                task: tokio::spawn(async {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    }
+                }),
+                input_tx,
+                resize_tx,
+            },
+        )
+        .await;
+        mgr.add_terminal("a".into(), "term-1".into(), path.clone()).await;
+
+        mgr.disconnect(&"a".to_string()).await;
+
+        assert!(
+            mgr.shells.read().await.get("term-1").is_none(),
+            "the terminal's shell task died with the cluster"
+        );
+        assert!(
+            mgr.terminals.read().await.get("term-1").is_none(),
+            "the terminal's registry entry died with the cluster"
+        );
+        assert!(!path.exists(), "disconnect deleted the temp kubeconfig");
     }
 }

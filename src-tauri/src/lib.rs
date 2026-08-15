@@ -81,6 +81,9 @@ pub fn run() {
             // setup runs — so it's constructed here and put into managed state.
             let manager = Arc::new(ClientManager::new(app.handle().clone()));
             app.manage(manager);
+            // B82: a crashed session can strand a temp kubeconfig; sweep the
+            // leftovers at every boot.
+            kube::terminal::sweep_orphan_kubeconfigs();
             save_window_state_on_sigterm(app.handle().clone());
             // File > Settings… / Export Diagnostics…, which open their flows via
             // events the frontend listens for.
@@ -145,6 +148,8 @@ pub fn run() {
             commands::shell_input,
             commands::shell_resize,
             commands::stop_shell,
+            commands::start_kubectl_terminal,
+            commands::stop_kubectl_terminal,
             commands::start_node_shell,
             commands::stop_node_shell,
             commands::start_port_forward,

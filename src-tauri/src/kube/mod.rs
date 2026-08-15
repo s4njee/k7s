@@ -24,6 +24,7 @@ pub mod portforward;
 pub mod promql;
 pub mod properties;
 pub mod restart;
+pub mod terminal;
 pub mod tls;
 pub mod topology;
 pub mod watchers;

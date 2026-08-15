@@ -659,6 +659,32 @@ export class TauriProvider implements DataProvider {
     };
   }
 
+  async startKubectlTerminal(
+    cid: string,
+    onOutput: (data: string) => void,
+    onClosed: (reason: string) => void,
+  ): Promise<ShellHandle> {
+    // The cid is the cluster the terminal's KUBECONFIG names — pass it explicitly
+    // (it overrides the injected active cid) and subscribe its cid-scoped streams.
+    const streamId = await this.invokeCmd<string>("start_kubectl_terminal", { cid });
+    const offOut = subscribe<{ data: string }>(`shell-out:${cid}:${streamId}`, (p) => onOutput(p.data));
+    const offClosed = subscribe<string>(`shell-closed:${cid}:${streamId}`, onClosed);
+
+    let stopped = false;
+    return {
+      input: (data: string) => void this.invokeCmd("shell_input", { streamId, data }),
+      resize: (cols: number, rows: number) =>
+        void this.invokeCmd("shell_resize", { streamId, cols, rows }),
+      stop: () => {
+        if (stopped) return;
+        stopped = true;
+        offOut();
+        offClosed();
+        void this.invokeCmd("stop_kubectl_terminal", { streamId });
+      },
+    };
+  }
+
   async startNodeShell(
     node: string,
     onOutput: (data: string) => void,

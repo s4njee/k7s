@@ -1,0 +1,87 @@
+/* Kubectl terminal panel (B82): a cluster-badged tab strip and the active
+   terminal's xterm, docked above the statusbar. Every terminal stays mounted so
+   its session keeps running; hidden ones are display:none (a new terminal always
+   mounts visible, and the ResizeObserver refits one that's re-activated). */
+
+.panel {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  height: 260px;
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-terminal);
+}
+
+/* ---------- tab strip ---------- */
+
+.tabs {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-panel);
+  overflow-x: auto;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.tab:hover {
+  background: var(--bg-hover);
+}
+
+.tabActive {
+  background: var(--bg-control);
+  border-color: var(--border-default);
+  color: var(--text-primary);
+}
+
+/* The cluster badge dot — the same per-cluster colour as the rail. */
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.close {
+  padding: 0 2px;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.close:hover {
+  color: var(--text-primary);
+}
+
+/* ---------- xterm body ---------- */
+
+.body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.terminal {
+  position: absolute;
+  inset: 0;
+}
+
+.terminalHidden {
+  display: none;
+}

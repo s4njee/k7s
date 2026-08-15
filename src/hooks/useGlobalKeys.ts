@@ -28,6 +28,15 @@ export function useGlobalKeys(): void {
         return;
       }
 
+      // ⌘T opens a kubectl terminal for the viewed cluster (B82). Safe while
+      // typing, like ⌘K: the modifier is unambiguous. The store no-ops when no
+      // cluster is connected.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        s.openTerminal(s.activeCid ?? "");
+        return;
+      }
+
       // ⌘1–9 switch to the Nth connected cluster (B77). Safe while typing: the
       // meta modifier is unambiguous, and digits alone are a legal filter char.
       if (e.metaKey || e.ctrlKey) {

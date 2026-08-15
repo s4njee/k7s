@@ -728,6 +728,23 @@ export class MockProvider implements DataProvider {
     };
   }
 
+  async startKubectlTerminal(
+    cid: string,
+    onOutput: (data: string) => void,
+    _onClosed: (reason: string) => void,
+  ): Promise<ShellHandle> {
+    const prompt = `\x1b[32m${cid}\x1b[0m % `;
+    onOutput(`demo kubectl terminal — echoes input (no real shell)\r\n${prompt}`);
+    return {
+      input: (data: string) => {
+        // Enter → newline + prompt; otherwise echo the keystroke.
+        onOutput(data === "\r" ? `\r\n${prompt}` : data);
+      },
+      resize: () => {},
+      stop: () => {},
+    };
+  }
+
   /**
    * Simulate a node debug shell (B53).
    *

@@ -11,8 +11,8 @@ use crate::logging;
 use crate::kube::manager::{ForwardDto, ImportedContext, ShellSession};
 use crate::kube::{
     batch, discovery, drain, exec, exporter, helm, logs, mappers, metrics, nodeshell, nodestats,
-    overview, portforward, promql, properties, restart, topology, watchers, Cid, ClientManager,
-    ResourceKind,
+    overview, portforward, promql, properties, restart, terminal, topology, watchers, Cid,
+    ClientManager, ResourceKind,
 };
 use tokio::sync::{mpsc, oneshot};
 use k8s_openapi::api::apps::v1::Deployment;
@@ -242,7 +242,13 @@ pub async fn export_context_kubeconfig(
     context: String,
     mgr: State<'_, Arc<ClientManager>>,
 ) -> AppResult<String> {
-    let manager: Arc<ClientManager> = (*mgr).clone();
+    single_context_yaml(&context, &mgr).await
+}
+
+/// A single-context kubeconfig (only the named context's cluster/user) as YAML —
+/// the QR feature's payload (M9) and the body of a terminal's temp KUBECONFIG
+/// (B82). Shared so both write paths resolve the source file the same way.
+async fn single_context_yaml(context: &str, mgr: &ClientManager) -> AppResult<String> {
     let in_default = client::list_contexts()
         .ok()
         .is_some_and(|cs| cs.iter().any(|c| c.name == context));
@@ -253,12 +259,12 @@ pub async fn export_context_kubeconfig(
         }
         std::fs::read_to_string(&path).map_err(|e| AppError::Kubeconfig(e.to_string()))?
     } else {
-        let path = manager.import_path(&context).await.ok_or_else(|| {
+        let path = mgr.import_path(context).await.ok_or_else(|| {
             AppError::Kubeconfig(format!("context \"{context}\" is not imported"))
         })?;
         std::fs::read_to_string(&path).map_err(|e| AppError::Kubeconfig(e.to_string()))?
     };
-    client::extract_context_yaml(&yaml, &context)
+    client::extract_context_yaml(&yaml, context)
 }
 
 /// Build the switcher list: default kubeconfig contexts plus every imported
@@ -1660,6 +1666,65 @@ pub async fn shell_resize(
 #[tauri::command]
 pub async fn stop_shell(stream_id: String, mgr: State<'_, Arc<ClientManager>>) -> AppResult<()> {
     mgr.remove_shell(&stream_id).await;
+    Ok(())
+}
+
+// --------------------------------------------------------------------------
+// Local kubectl terminal (B82)
+// --------------------------------------------------------------------------
+
+/// Start a local kubectl terminal: spawn the user's shell on a pty with
+/// `KUBECONFIG` pointed at a temp single-context file for the viewed cluster, so
+/// `kubectl` targets it with zero setup (and a machine whose default context
+/// differs doesn't matter — the temp file names the viewed cluster). Returns the
+/// stream id; input/resize ride the same `shell_input`/`shell_resize` commands
+/// as every other shell.
+#[tauri::command]
+pub async fn start_kubectl_terminal(
+    mgr: State<'_, Arc<ClientManager>>,
+    cid: String,
+) -> AppResult<String> {
+    let manager: Arc<ClientManager> = (*mgr).clone();
+
+    // Sweep first, then write: a crashed earlier session left a kubeconfig that
+    // must not outlive this one (the nodeshell discipline).
+    terminal::sweep_orphan_kubeconfigs();
+    let yaml = single_context_yaml(&cid, &manager).await?;
+    let kubeconfig_path = terminal::write_temp_kubeconfig(&yaml)?;
+    let login_path = terminal::login_shell_path();
+
+    let id = format!("term-{}", STREAM_SEQ.fetch_add(1, Ordering::Relaxed));
+    let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>(64);
+    let (resize_tx, resize_rx) = mpsc::channel::<(u16, u16)>(8);
+    let app = manager.app();
+    let shell = terminal::default_shell_command(read_prefs(&app).shell_command.as_deref().unwrap_or(""));
+    let id_for_task = id.clone();
+    let cid_task = cid.clone();
+    let path_for_task = kubeconfig_path.clone();
+    let task = tokio::spawn(async move {
+        terminal::run_terminal(app, cid_task, id_for_task, shell, path_for_task, login_path, input_rx, resize_rx).await;
+    });
+
+    manager
+        .add_shell(cid.clone(), id.clone(), ShellSession { task, input_tx, resize_tx })
+        .await;
+    manager.add_terminal(cid, id.clone(), kubeconfig_path).await;
+    Ok(id)
+}
+
+/// Stop a local kubectl terminal: abort the pty task and delete its temp
+/// kubeconfig. Deliberately separate from `stop_shell` — an aborted task can't
+/// run async cleanup, so the file delete happens here, outside the task (the
+/// same reason `stop_node_shell` deletes its pod outside the task).
+#[tauri::command]
+pub async fn stop_kubectl_terminal(
+    stream_id: String,
+    mgr: State<'_, Arc<ClientManager>>,
+) -> AppResult<()> {
+    mgr.remove_shell(&stream_id).await;
+    if let Some(path) = mgr.take_terminal_path(&stream_id).await {
+        let _ = std::fs::remove_file(path);
+    }
     Ok(())
 }
 
