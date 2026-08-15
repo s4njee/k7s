@@ -206,6 +206,9 @@ export interface Row {
   pod?: PodMeta;
   /** Labels, for label-selector filtering (B33). Present on pods. */
   labels?: Record<string, string>;
+  /** Annotations (B87) — carried so local label/annotation custom columns can
+   *  evaluate against the store row without a backend query. */
+  annotations?: Record<string, string>;
   /** A workload's pod selector (matchLabels), for the "view pods" jump (B33). */
   selector?: Record<string, string>;
   /** Present only on Event rows: the object the event is about (B33). */
@@ -463,6 +466,8 @@ export interface Prefs {
   bookmarks?: Record<string, Bookmark[]> | null;
   /** Saved views (B60) keyed by cluster context, persisted like bookmarks. */
   savedViews?: Record<string, SavedView[]> | null;
+  /** Per-{cluster, kind} column config (B87), persisted like bookmarks. */
+  columnPrefs?: Record<string, Record<string, ColumnPrefs>> | null;
   /** Per-cluster rail colour + default namespace (B77). */
   clusterColors?: Record<string, string> | null;
   clusterNamespaces?: Record<string, string> | null;
@@ -530,6 +535,40 @@ export interface SavedView {
   problemsScope?: "active" | "all";
   /** B87 forward-compat: the kind's visible columns at save time (static today). */
   columns?: string[];
+}
+
+/**
+ * A local custom column (B87): label, annotation, or restricted JSONPath, added
+ * to a table's columns by the user and evaluated on the frontend against the
+ * store row (no backend queries). Shared with B85's declarative column schema.
+ */
+export type CustomColumn =
+  | { id: string; type: "label"; name: string; key: string }
+  | { id: string; type: "annotation"; name: string; key: string }
+  | { id: string; type: "jsonpath"; name: string; path: string };
+
+/**
+ * Per-{cid, kind} column configuration (B87): which base columns are hidden,
+ * their display order, per-column widths, and the local custom columns. Columns
+ * are keyed by NAME (not index) — indices shift when the all-clusters problems
+ * scope prepends CLUSTER and when columns are reordered.
+ */
+export interface ColumnPrefs {
+  /** Base column NAMES to hide. */
+  hidden: string[];
+  /** Base names in display order (null = the kind's default order). */
+  order: string[] | null;
+  /** Percent widths by column name. */
+  widths: Record<string, number>;
+  /** Custom columns, appended after the base columns in definition order. */
+  custom: CustomColumn[];
+}
+
+/** One rendered column: a base cell, or a custom column (baseIndex null). */
+export interface ColumnRef {
+  name: string;
+  baseIndex: number | null;
+  custom?: CustomColumn;
 }
 
 /** Options for starting a log stream. */
@@ -984,6 +1023,12 @@ export interface DataProvider {
     ref: ResourceRef,
     opts: { sinceSeconds?: number },
   ): Promise<SavedLog | null>;
+
+  /**
+   * Save a CSV document (the current table result, B87) to a file the user
+   * picks. Returns null if the user cancelled the save dialog.
+   */
+  saveCsv(filename: string, content: string): Promise<SavedLog | null>;
 
   // ---- shell / exec (B4) ----
   startShell(

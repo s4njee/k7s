@@ -158,6 +158,7 @@ pub fn run() {
             commands::stop_log_stream,
             commands::start_workload_logs,
             commands::export_workload_logs,
+            commands::export_csv,
             commands::start_shell,
             commands::shell_input,
             commands::shell_resize,

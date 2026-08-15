@@ -80,6 +80,9 @@ pub struct Prefs {
     /// Saved views (B60), keyed by context. Frontend-owned, carried as an opaque
     /// JSON value so it round-trips through saves exactly like bookmarks.
     pub saved_views: Option<serde_json::Value>,
+    /// Per-{cluster, kind} column config (B87). Frontend-owned, carried as an
+    /// opaque JSON value so it round-trips through saves.
+    pub column_prefs: Option<serde_json::Value>,
     /// Container image for the node debug shell; None/empty uses the default (B53).
     pub node_shell_image: Option<String>,
     // ---- diagnostics (B73) ----
@@ -1439,6 +1442,16 @@ pub async fn export_logs(cid: String,
 
     let lines = out.lines().count();
     std::fs::write(&path, out).map_err(|e| AppError::Other(format!("could not write {path}: {e}")))?;
+    Ok(lines)
+}
+
+/// Write a frontend-built CSV document (B87) to a path the user picked in the
+/// native save dialog. The content originates in the webview (the filtered table
+/// result), so the backend only does the disk write and reports the line count.
+#[tauri::command]
+pub fn export_csv(path: String, content: String) -> AppResult<usize> {
+    let lines = content.lines().count();
+    std::fs::write(&path, content).map_err(|e| AppError::Other(format!("could not write {path}: {e}")))?;
     Ok(lines)
 }
 

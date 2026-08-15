@@ -880,6 +880,7 @@ mod tests {
             cells: vec![],
             pod: None,
             labels: None,
+            annotations: None,
             selector: None,
             involved: None,
             job: None,

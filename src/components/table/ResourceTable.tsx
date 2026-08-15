@@ -24,6 +24,14 @@ import { overlayMetrics } from "./overlayMetrics";
 import { TableToolbar } from "./TableToolbar";
 import { TableHeader } from "./TableHeader";
 import { TableRow } from "./TableRow";
+import {
+  EMPTY_COLUMN_PREFS,
+  renderedCells,
+  reorderColumnPrefs,
+  resolveColumns,
+  withColumnWidth,
+  type DisplayRow,
+} from "../../lib/columns";
 import type { NavTarget, Row } from "../../providers/types";
 
 /**
@@ -152,6 +160,23 @@ export function ResourceTable() {
       ? ["CLUSTER", ...(meta?.columns ?? [])]
       : (meta?.columns ?? []);
 
+  // B87: the per-{cid, kind} column config → the rendered column descriptor. The
+  // filter below keeps the FULL base `columns` (status=… still works when STATUS
+  // is hidden); only the display subset/order is derived here.
+  const columnPrefs = useStore((s) =>
+    s.activeCid ? s.columnPrefsByCid[s.activeCid]?.[nav] : undefined,
+  );
+  const refs = useMemo(() => resolveColumns(columns, columnPrefs), [columns, columnPrefs]);
+  const renderedColumns = useMemo(() => refs.map((r) => r.name), [refs]);
+  const hasWidths = columnPrefs ? Object.keys(columnPrefs.widths).length > 0 : false;
+
+  // Write a transformed config back for this {cid, kind} (B87).
+  const applyPrefs = (patch: (p: NonNullable<typeof columnPrefs>) => NonNullable<typeof columnPrefs>) => {
+    const s = useStore.getState();
+    if (!s.activeCid) return;
+    s.setColumnPrefs(s.activeCid, nav, patch(columnPrefs ?? EMPTY_COLUMN_PREFS));
+  };
+
   const eventTarget = useCallback(
     (row: Row): NavTarget | null => {
       const inv = row.involved;
@@ -190,16 +215,19 @@ export function ResourceTable() {
   );
 
   const parsed = useMemo(() => parseFilter(tableFilter), [tableFilter]);
-  const rows = useMemo(() => {
+  const rows: DisplayRow[] = useMemo(() => {
     const filtered = allRows.filter((r) => {
       if (!isClusterScoped(nav, customKinds) && namespace !== "all" && r.namespace !== namespace) {
         return false;
       }
-      // `columns` lets the filter match by column name (B60), e.g. status=…
+      // `columns` (the full base set) lets the filter match by column name (B60).
       return matchesFilter(r, parsed, nav, columns);
     });
     const overlaid = overlayMetrics(nav, filtered, podMetrics, nodeMetrics, podRows);
-    return sortCol === null ? overlaid : sortRows(overlaid, sortCol, sortDir, now);
+    // Build the rendered cells (B87), then sort by the rendered index — the base
+    // `row.cells` is untouched so overlay/sort/filter keep their indices.
+    const display: DisplayRow[] = overlaid.map((row) => ({ row, cells: renderedCells(row, refs) }));
+    return sortCol === null ? display : sortRows(display, sortCol, sortDir, now);
   }, [
     nav,
     allRows,
@@ -212,10 +240,13 @@ export function ResourceTable() {
     sortDir,
     now,
     customKinds,
+    refs,
   ]);
 
+  // The base rows behind the display rows, for selection/menu/keyboard plumbing.
+  const baseRows = useMemo(() => rows.map((d) => d.row), [rows]);
   const selectionSet = useMemo(() => new Set(selection.selected), [selection]);
-  const orderedUids = useMemo(() => rows.map((r) => r.uid), [rows]);
+  const orderedUids = useMemo(() => baseRows.map((r) => r.uid), [baseRows]);
   orderedUidsRef.current = orderedUids;
 
   useEffect(() => {
@@ -228,8 +259,8 @@ export function ResourceTable() {
   const [menuError, setMenuError] = useState<string | null>(null);
 
   const menuRows = useMemo(
-    () => selectedInOrder(selection, rows),
-    [selection, rows],
+    () => selectedInOrder(selection, baseRows),
+    [selection, baseRows],
   );
 
   const onRowContextMenu = useCallback(
@@ -244,7 +275,7 @@ export function ResourceTable() {
   );
 
   const filterRef = useRef<HTMLInputElement>(null);
-  const highlight = useTableKeys(rows, onSelect, () => filterRef.current?.focus(), nav);
+  const highlight = useTableKeys(baseRows, onSelect, () => filterRef.current?.focus(), nav);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const { virtual, window: win } = useVirtualRows(scrollRef, rows.length);
@@ -270,7 +301,7 @@ export function ResourceTable() {
 
   useEffect(() => {
     if (!selectedUid) return;
-    revealRow(rows.findIndex((r) => r.uid === selectedUid));
+    revealRow(rows.findIndex((d) => d.row.uid === selectedUid));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedUid, nav]);
 
@@ -280,21 +311,26 @@ export function ResourceTable() {
         filterRef={filterRef}
         tableFilter={tableFilter}
         setTableFilter={setTableFilter}
+        rows={rows}
+        columns={renderedColumns}
       />
       {banner}
       <div className={styles.wrap} ref={scrollRef}>
-        <table className={`${styles.table} ${virtual ? styles.tableFixed : ""}`}>
+        <table className={`${styles.table} ${virtual || hasWidths ? styles.tableFixed : ""}`}>
           <caption className="visuallyHidden">{meta?.label ?? nav}</caption>
           <TableHeader
-            columns={columns}
-            virtual={virtual}
+            refs={refs}
             sortCol={sortCol}
             sortDir={sortDir}
             toggleSort={toggleSort}
+            widths={columnPrefs?.widths}
+            onResize={(name, w) => applyPrefs((p) => withColumnWidth(p, name, w))}
+            onReorder={(from, to) => applyPrefs((p) => reorderColumnPrefs(p, columns, from, to))}
           />
           <tbody>
             {win.padTop > 0 && <tr style={{ height: win.padTop }} />}
-            {visible.map((row, i) => {
+            {visible.map((d, i) => {
+              const row = d.row;
               const index = virtual ? win.start + i : i;
               const selected = row.uid === selectedUid;
               const inSelection = selectionSet.has(row.uid);
@@ -302,6 +338,7 @@ export function ResourceTable() {
                 <TableRow
                   key={row.uid}
                   row={row}
+                  cells={d.cells}
                   index={index}
                   virtual={virtual}
                   clickable={rowClickable(row)}

@@ -37,15 +37,15 @@ describe("viewSortIndex", () => {
     expect(viewSortIndex(view({ sortColName: "STATUS" }), POD_COLUMNS)).toBe(7);
   });
 
-  it("prepends CLUSTER for the all-clusters problems scope, shifting the index", () => {
+  it("resolves against the RENDERED columns (the caller already pins CLUSTER)", () => {
     const failures = view({
       kind: "problems",
       problemsScope: "all",
       sortColName: "REASON",
     });
-    // Base problems columns are [SEVERITY, KIND, OBJECT, REASON, AGE]; in
-    // all-clusters scope the rendered columns are [CLUSTER, …], so REASON is 4.
-    expect(viewSortIndex(failures, KIND_META.problems.columns)).toBe(4);
+    // Base problems columns are [SEVERITY, KIND, OBJECT, REASON, AGE]; the
+    // rendered list (via B87's resolveColumns) is [CLUSTER, …], so REASON is 4.
+    expect(viewSortIndex(failures, ["CLUSTER", ...KIND_META.problems.columns])).toBe(4);
   });
 
   it("is case-insensitive and returns null for an unknown or absent column", () => {

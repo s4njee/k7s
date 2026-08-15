@@ -11,6 +11,7 @@
 import type { Cell, CustomKind, Row, PodMeta, PodResources, Tone } from "../types";
 import { KIND_META, type ResourceKind } from "../../lib/kinds";
 import { parseCpuMillis, parseMemBytes } from "../../lib/format";
+import { evalJsonPath } from "../../lib/jsonpath";
 
 /** Raw pod record, matching the prototype's pod objects. */
 export interface MockPod {
@@ -256,6 +257,8 @@ export function buildPodRows(cid?: string): Row[] {
       // A conventional app label so the "view pods" selector jump (B33) resolves
       // in demo mode: derived from the pod name the way the workload's would be.
       labels: { app: deriveApp(p.name) },
+      // Annotations for the label/annotation custom columns (B87).
+      annotations: { "k7s.demo/owner": "platform", "k7s.demo/team": p.ns },
     };
   });
 }
@@ -448,63 +451,6 @@ function evalPrinterColumn(
     return { text: String(v), tone: "secondary" };
   }
   return { text: "—", tone: "secondary" };
-}
-
-/**
- * The backend's JSONPath subset (src-tauri/src/kube/jsonpath.rs), mirrored for
- * demo data: dotted field access plus `[n]` array indexing. Returns undefined
- * for an unresolvable path, a subtree, or null — the same "—" contract.
- */
-function evalJsonPath(path: string, obj: unknown): unknown {
-  const segs = parseJsonPath(path);
-  if (!segs) return undefined;
-  let cur: unknown = obj;
-  for (const seg of segs) {
-    if (typeof seg === "number") {
-      cur = Array.isArray(cur) ? cur[seg] : undefined;
-    } else {
-      cur = (cur as Record<string, unknown> | undefined)?.[seg];
-    }
-    if (cur === undefined || cur === null) return undefined;
-  }
-  return typeof cur === "object" ? undefined : cur;
-}
-
-/** Tokenize a kubectl-style path (`.a.b[0].c`, `{.a.b}`, `$.a.b`) into
- * field/index segments, or null for syntax the subset doesn't cover. */
-function parseJsonPath(path: string): (string | number)[] | null {
-  let s = path.trim();
-  if (s.startsWith("{") && s.endsWith("}")) s = s.slice(1, -1);
-  if (s.startsWith("$")) s = s.slice(1);
-  const segs: (string | number)[] = [];
-  let field = "";
-  let i = 0;
-  while (i < s.length) {
-    const ch = s[i];
-    if (ch === ".") {
-      if (field) {
-        segs.push(field);
-        field = "";
-      }
-      i++;
-    } else if (ch === "[") {
-      if (field) {
-        segs.push(field);
-        field = "";
-      }
-      i++;
-      const start = i;
-      while (i < s.length && /\d/.test(s[i])) i++;
-      if (i === start || i >= s.length || s[i] !== "]") return null;
-      segs.push(Number(s.slice(start, i)));
-      i++;
-    } else {
-      field += ch;
-      i++;
-    }
-  }
-  if (field) segs.push(field);
-  return segs;
 }
 
 /**
@@ -928,8 +874,11 @@ export function buildKindRows(kind: ResourceKind, cid?: string): Row[] {
       name: r.name,
       namespace: r.ns === "" ? undefined : r.ns,
       cells,
-      // Workloads select their pods by the conventional app label (B33).
-      ...(isWorkload ? { selector: { app: r.name } } : {}),
+      // Workloads select their pods by the conventional app label (B33); labels
+      // + annotations also feed the custom columns (B87).
+      ...(isWorkload
+        ? { selector: { app: r.name }, labels: { app: r.name }, annotations: { "k7s.demo/owner": "platform" } }
+        : {}),
     };
   });
 }

@@ -6,6 +6,7 @@ import type { StateCreator } from "zustand";
 import type { AppState, NavigationActions, NavigationState } from "./types";
 import type { KindId, Row } from "../providers/types";
 import { hasLogs, kindMeta } from "../lib/kinds";
+import { resolveColumns } from "../lib/columns";
 import { viewSortIndex, type SavedView } from "../lib/views";
 import { EMPTY_SELECTION, type SelectionState } from "../lib/selection";
 import type { DetailTab } from "./types";
@@ -124,22 +125,45 @@ export const createNavigationSlice: StateCreator<
     })),
 
   // B60: apply a saved view in one update — the kind, namespace, filter, sort
-  // (column NAME resolved against the kind's columns, so it survives the
-  // CLUSTER-prepend of the all-clusters problems scope), and the problems scope.
-  // Deliberately not jumpTo: that clears the filter and sort.
+  // (column NAME resolved against the RENDERED columns, i.e. through the B87
+  // config which pins CLUSTER for the all-clusters problems scope), and the
+  // problems scope. Deliberately not jumpTo: that clears the filter and sort.
   applyView: (view: SavedView) =>
-    set((s) => ({
-      nav: view.kind,
-      namespace: view.namespace || s.namespace,
-      tableFilter: view.filter ?? "",
-      sortCol: viewSortIndex(view, kindMeta(view.kind, s.customKinds)?.columns ?? []),
-      sortDir: view.sortDir ?? "asc",
-      openMenu: null,
-      paletteOpen: false,
-      selectedRow: null,
-      selection: EMPTY_SELECTION,
-      ...(view.kind === "problems" && view.problemsScope
-        ? { problemsScope: view.problemsScope }
-        : {}),
-    })),
+    set((s) => {
+      const base = kindMeta(view.kind, s.customKinds)?.columns ?? [];
+      const cols =
+        view.kind === "problems" && view.problemsScope === "all"
+          ? ["CLUSTER", ...base]
+          : base;
+      const rendered = resolveColumns(cols, s.columnPrefsByCid[s.activeCid ?? ""]?.[view.kind]).map(
+        (r) => r.name,
+      );
+      return {
+        nav: view.kind,
+        namespace: view.namespace || s.namespace,
+        tableFilter: view.filter ?? "",
+        sortCol: viewSortIndex(view, rendered),
+        sortDir: view.sortDir ?? "asc",
+        openMenu: null,
+        paletteOpen: false,
+        selectedRow: null,
+        selection: EMPTY_SELECTION,
+        ...(view.kind === "problems" && view.problemsScope
+          ? { problemsScope: view.problemsScope }
+          : {}),
+        // B60→B87 forward-compat: a saved view captured the visible columns at
+        // save time — applying it restores that column set as the display order.
+        ...(view.columns
+          ? {
+              columnPrefsByCid: {
+                ...s.columnPrefsByCid,
+                [s.activeCid ?? ""]: {
+                  ...(s.columnPrefsByCid[s.activeCid ?? ""] ?? {}),
+                  [view.kind]: { hidden: [], order: view.columns, widths: {}, custom: [] },
+                },
+              },
+            }
+          : {}),
+      };
+    }),
 });

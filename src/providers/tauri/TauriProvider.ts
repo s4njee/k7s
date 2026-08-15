@@ -643,6 +643,19 @@ export class TauriProvider implements DataProvider {
     return { path, lines };
   }
 
+  async saveCsv(filename: string, content: string): Promise<SavedLog | null> {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const path = await save({
+      title: "Export CSV",
+      defaultPath: filename,
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (!path) return null; // cancelled
+
+    const lines = await this.invokeCmd<number>("export_csv", { path, content });
+    return { path, lines };
+  }
+
   // ---- shell / exec ----
 
   async startShell(

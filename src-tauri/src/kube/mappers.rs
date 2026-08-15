@@ -317,6 +317,8 @@ pub fn map_pod(pod: &Pod) -> Row {
         }),
         // Labels drive the "view pods" label-selector filter (B33).
         labels: pod.metadata.labels.clone(),
+        // Annotations for the label/annotation custom columns (B87).
+        annotations: pod.metadata.annotations.clone(),
         ..Default::default()
     }
 }
@@ -747,6 +749,8 @@ pub fn map_ingressclass(ic: &IngressClass) -> Row {
         name: ic.name_any(),
         namespace: None,
         cells,
+        labels: ic.metadata.labels.clone(),
+        annotations: ic.metadata.annotations.clone(),
         ..Default::default()
     }
 }
@@ -1097,6 +1101,8 @@ pub fn map_pv(pv: &PersistentVolume) -> Row {
         name: pv.name_any(),
         namespace: None,
         cells,
+        labels: pv.metadata.labels.clone(),
+        annotations: pv.metadata.annotations.clone(),
         ..Default::default()
     }
 }
@@ -1146,6 +1152,8 @@ pub fn map_storageclass(sc: &StorageClass) -> Row {
         name: sc.name_any(),
         namespace: None,
         cells,
+        labels: sc.metadata.labels.clone(),
+        annotations: sc.metadata.annotations.clone(),
         ..Default::default()
     }
 }
@@ -1201,6 +1209,8 @@ pub fn map_node(node: &Node) -> Row {
         name: node.name_any(),
         namespace: None,
         cells,
+        labels: node.metadata.labels.clone(),
+        annotations: node.metadata.annotations.clone(),
         ..Default::default()
     }
 }
@@ -1226,6 +1236,8 @@ pub fn map_namespace(ns: &Namespace) -> Row {
         name: ns.name_any(),
         namespace: None,
         cells,
+        labels: ns.metadata.labels.clone(),
+        annotations: ns.metadata.annotations.clone(),
         ..Default::default()
     }
 }
@@ -1244,6 +1256,7 @@ pub fn map_validatingwebhookconfiguration(w: &ValidatingWebhookConfiguration) ->
 
 /// Shared row for the two admission-webhook kinds (cluster-scoped: no namespace).
 fn webhook_config_row<K: ResourceExt>(obj: &K, webhooks: usize) -> Row {
+    let (labels, annotations) = row_metadata(obj);
     Row {
         uid: uid_of(obj),
         name: obj.name_any(),
@@ -1253,6 +1266,8 @@ fn webhook_config_row<K: ResourceExt>(obj: &K, webhooks: usize) -> Row {
             Cell::new(webhooks.to_string(), Tone::Secondary),
             age_cell(obj),
         ],
+        labels,
+        annotations,
         ..Default::default()
     }
 }
@@ -1293,6 +1308,9 @@ pub fn map_event(e: &k8s_openapi::api::core::v1::Event) -> Row {
         name: e.name_any(),
         namespace: e.namespace(),
         cells,
+        // Labels/annotations for the custom columns (B87).
+        labels: e.metadata.labels.clone(),
+        annotations: e.metadata.annotations.clone(),
         // The object this event is about, for click-through (B33). The involved
         // object's own namespace is preferred; it usually equals the event's but
         // can differ (and cluster-scoped targets have none).
@@ -1360,6 +1378,9 @@ pub fn map_dynamic(o: &kube::core::DynamicObject, namespaced: bool, columns: &[P
         name: o.name_any(),
         namespace: o.namespace(),
         cells,
+        // Labels/annotations for the custom columns (B87), from the raw object.
+        labels: dynamic_metadata_map(&o.data, "labels"),
+        annotations: dynamic_metadata_map(&o.data, "annotations"),
         ..Default::default()
     }
 }
@@ -1399,13 +1420,41 @@ fn warn_once_unevaluable(path: &str) {
     }
 }
 
+/// The object's labels and annotations (B87), for local label/annotation custom
+/// columns — emitted on every kind so the frontend can evaluate them. ResourceExt
+/// exposes both as empty maps when absent, so absent → None (and the field is
+/// skipped in the serialized row).
+type MetadataPair = (Option<BTreeMap<String, String>>, Option<BTreeMap<String, String>>);
+
+fn row_metadata<K: ResourceExt>(obj: &K) -> MetadataPair {
+    (non_empty(obj.labels()), non_empty(obj.annotations()))
+}
+
+fn non_empty(m: &BTreeMap<String, String>) -> Option<BTreeMap<String, String>> {
+    if m.is_empty() { None } else { Some(m.clone()) }
+}
+
+/// Extract a metadata map (labels/annotations) from a DynamicObject's raw data.
+fn dynamic_metadata_map(data: &serde_json::Value, field: &str) -> Option<BTreeMap<String, String>> {
+    data.pointer(&format!("/metadata/{field}"))?
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
+                .collect()
+        })
+}
+
 /// Build a namespaced Row from prebuilt cells (shared by the simple kinds).
 fn simple_row<K: ResourceExt>(obj: &K, cells: Vec<Cell>) -> Row {
+    let (labels, annotations) = row_metadata(obj);
     Row {
         uid: uid_of(obj),
         name: obj.name_any(),
         namespace: obj.namespace(),
         cells,
+        labels,
+        annotations,
         ..Default::default()
     }
 }

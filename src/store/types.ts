@@ -19,6 +19,7 @@ import type {
   Row,
 } from "../providers/types";
 import type { Bookmark } from "../lib/bookmarks";
+import type { ColumnPrefs } from "../lib/columns";
 import type { Settings } from "../lib/settings";
 import type { SavedView } from "../lib/views";
 import type { SelectionState } from "../lib/selection";
@@ -116,6 +117,8 @@ export interface ConnectionSliceState {
   clusterNamespaces: Record<string, string>;
   /** Saved views per cluster (B60), persisted like bookmarks. */
   savedViewsByCid: Record<Cid, SavedView[]>;
+  /** Per-{cid, kind} column config (B87): visibility, order, widths, custom columns. */
+  columnPrefsByCid: Record<Cid, Record<KindId, ColumnPrefs>>;
 }
 
 export interface ConnectionActions {
@@ -133,6 +136,10 @@ export interface ConnectionActions {
   addSavedView: (cid: Cid, view: SavedView) => void;
   /** Delete a saved view by id (built-ins are never stored, so never deleted). */
   removeSavedView: (cid: Cid, id: string) => void;
+  /** Set a kind's column config for a cluster (B87); pass the pure helper output. */
+  setColumnPrefs: (cid: Cid, kind: KindId, prefs: ColumnPrefs) => void;
+  /** Drop a kind's column config, restoring the default columns. */
+  resetColumnPrefs: (cid: Cid, kind: KindId) => void;
   setClusterStatus: (cid: Cid, s: ClusterStatus) => void;
   setWatchCount: (cid: Cid, n: number) => void;
   setWatcherHealth: (cid: Cid, health: Record<string, WatcherHealth>) => void;

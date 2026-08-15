@@ -239,9 +239,12 @@ pub struct Row {
     pub cells: Vec<Cell>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pod: Option<PodMeta>,
-    /// Labels, for label-selector filtering (B33). Emitted for pods.
+    /// Labels, for label-selector filtering (B33) and label custom columns (B87).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub labels: Option<BTreeMap<String, String>>,
+    /// Annotations, for annotation custom columns (B87). Emitted for every kind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<BTreeMap<String, String>>,
     /// A workload's pod selector (`matchLabels`), for the "view pods" jump (B33).
     /// Emitted for Deployments/StatefulSets/DaemonSets.
     #[serde(skip_serializing_if = "Option::is_none")]

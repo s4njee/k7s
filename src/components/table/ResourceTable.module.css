@@ -86,6 +86,36 @@
   gap: 4px;
   width: 100%;
 }
+/* B87: drag grip (base columns) and the right-edge resize handle. The th is
+   already position: sticky; the grip/handle sit above the button's hit area. */
+.thGrip {
+  flex: none;
+  cursor: grab;
+  color: var(--text-faint);
+  font-size: 9px;
+  line-height: 1;
+  padding: 0 1px;
+  user-select: none;
+}
+.thGrip:hover {
+  color: var(--text-secondary);
+}
+.thResize {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  right: -2px;
+  width: 5px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.thResize:hover {
+  background: var(--accent);
+  opacity: 0.5;
+}
+.thDragging {
+  opacity: 0.5;
+}
 /* Active-sort direction indicator. */
 .sortArrow {
   color: var(--accent);
@@ -346,4 +376,59 @@
 }
 .saveBtn:hover {
   border-color: var(--border-hover);
+}
+
+/* ---- Column-config menu (B87) ---- */
+.colRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: var(--radius-sm);
+}
+.colRow:hover {
+  background: var(--bg-hover);
+}
+.colToggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-body);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.colName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.colButtons {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+.colMove {
+  flex: none;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+}
+.colMove:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.colForm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px;
+}
+.saveNote {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
 }

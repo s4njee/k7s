@@ -23,8 +23,18 @@ afterAll(() => off?.());
 
 const filterRef = createRef<HTMLInputElement>();
 
+const POD_COLUMNS = ["NAME", "NAMESPACE", "READY", "RESTARTS", "CPU", "MEM", "AGE", "STATUS"];
+
 const renderToolbar = (filter = "") =>
-  render(<TableToolbar filterRef={filterRef} tableFilter={filter} setTableFilter={() => {}} />);
+  render(
+    <TableToolbar
+      filterRef={filterRef}
+      tableFilter={filter}
+      setTableFilter={() => {}}
+      rows={[]}
+      columns={POD_COLUMNS}
+    />,
+  );
 
 describe("TableToolbar saved views (B60)", () => {
   it("saving captures nav, namespace, filter, and sort", async () => {

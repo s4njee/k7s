@@ -13,7 +13,7 @@
  * Missing values ("—" / empty) always sort last, regardless of direction.
  */
 
-import type { Cell, Row } from "../providers/types";
+import type { Cell } from "../providers/types";
 
 export type SortDir = "asc" | "desc";
 
@@ -76,9 +76,11 @@ function sortKey(cell: Cell | undefined, mode: Mode, now: number): number | stri
 
 /**
  * Return a new array of rows sorted by column `col`. Rows without a value for the
- * column sink to the bottom in both directions.
+ * column sink to the bottom in both directions. Generic over the row shape so it
+ * can sort either base rows or B87's display rows (`{ row, cells }`) — both carry
+ * the `cells` array it indexes.
  */
-export function sortRows(rows: Row[], col: number, dir: SortDir, now: number): Row[] {
+export function sortRows<T extends { cells: Cell[] }>(rows: T[], col: number, dir: SortDir, now: number): T[] {
   const mode = detectMode(rows.map((r) => r.cells[col]));
   const sign = dir === "asc" ? 1 : -1;
 

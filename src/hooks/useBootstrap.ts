@@ -134,6 +134,8 @@ export function useBootstrap(): void {
           if (prefs.bookmarks) restore.bookmarksByContext = prefs.bookmarks;
           // Saved views are per-cluster too (B60).
           if (prefs.savedViews) restore.savedViewsByCid = prefs.savedViews;
+          // Column config is per-{cluster, kind} (B87).
+          if (prefs.columnPrefs) restore.columnPrefsByCid = prefs.columnPrefs;
           // Per-cluster rail colour + default namespace (B77).
           if (prefs.clusterColors) restore.clusterColors = prefs.clusterColors;
           if (prefs.clusterNamespaces) restore.clusterNamespaces = prefs.clusterNamespaces;
@@ -172,6 +174,8 @@ export function useBootstrap(): void {
             bookmarks: s.bookmarksByContext,
             // Saved views keyed by context (B60).
             savedViews: s.savedViewsByCid,
+            // Column config keyed by {cluster, kind} (B87).
+            columnPrefs: s.columnPrefsByCid,
             // Per-cluster rail colour + default namespace (B77).
             clusterColors: s.clusterColors,
             clusterNamespaces: s.clusterNamespaces,

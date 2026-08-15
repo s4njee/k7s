@@ -741,6 +741,11 @@ export class MockProvider implements DataProvider {
     return null;
   }
 
+  async saveCsv(): Promise<SavedLog | null> {
+    // Demo mode has no filesystem; the save button stays silent (cancelled).
+    return null;
+  }
+
   // ---- shell / exec (demo: a local echo shell) ----
 
   async startShell(

@@ -94,6 +94,19 @@ describe("saved views (B60)", () => {
     expect(useStore.getState().savedViewsByCid["freya"]).toHaveLength(1);
   });
 
+  it("a view carrying its saved columns restores that column set (B60→B87)", async () => {
+    await connectAll(["freya"]);
+    useStore.getState().setColumnPrefs("freya", "pods", { hidden: ["NAMESPACE"], order: null, widths: {}, custom: [] });
+    useStore.getState().applyView(v({
+      name: "wide",
+      kind: "pods",
+      columns: ["NAME", "STATUS", "CPU"],
+    }));
+    const prefs = useStore.getState().columnPrefsByCid["freya"]?.pods;
+    expect(prefs?.order).toEqual(["NAME", "STATUS", "CPU"]);
+    expect(prefs?.hidden).toEqual([]);
+  });
+
   it("a problems view applies its scope; a non-problems view leaves scope alone", async () => {
     await connectAll(["freya"]);
     useStore.getState().setProblemsScope("all");

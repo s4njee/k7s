@@ -386,6 +386,37 @@ visible columns. CRD printer columns participate like built-ins.
       current order, with correct quoting and no hidden columns.
 - [ ] Keyboard users can configure columns without drag-and-drop.
 
+**Implementation report (2026-08-15):**
+
+Implemented (absorbs v5 B67). **Column config** — `ColumnPrefs` (hidden names,
+display order, percent widths, custom columns), keyed by column *name* (indices
+drift under the CLUSTER-prepend and reordering) and persisted per-`{cid, kind}`
+through the savedViews chain (TS `Prefs` + the Rust `Prefs` struct + useBootstrap
+restore/save). **Table rendering** — the table renders through a descriptor
+(`resolveColumns` → `ColumnRef[]`) mapping each rendered position to a base cell
+index or a custom column; the derived `{ row, cells }` display rows are what sort
+and render, so the base `row.cells` is never mutated (overlayMetrics/sortRows/
+the B60 filter keep their indices; the filter still sees the full base columns).
+Sort stays index-based but the B60 saved-view sort name now resolves against the
+rendered columns; applying a saved view that captured columns also restores that
+column set. **Header** — sortable th buttons (aria-sort), HTML5 drag-reorder
+(v5 B67) for base columns, and a right-edge resize handle writing percentage
+widths; a "☰ columns" toolbar menu offers show/hide checkboxes, ↑/↓ move buttons
+(the no-drag keyboard path), custom-column creation, and reset. **Custom
+columns** — label, annotation, and restricted JSONPath, evaluated on the frontend
+against the row (the JSONPath evaluator extracted from the mock to
+`src/lib/jsonpath.ts`, mirroring the backend subset, shared with B85); the `Row`
+DTO gained `annotations` and every kind now emits labels+annotations (Rust
+dto.rs + mappers sweep, `map_dynamic` reads them from the raw object). Missing
+values render `—`. **CSV export** — `lib/csv.ts` RFC 4180 quoting; a toolbar
+"⇩ CSV" button exports the full filtered/sorted logical result (not the mounted
+virtual slice) through a new `saveCsv` provider method + native save dialog +
+the `export_csv` Rust command. **Verification:** 465 frontend tests (+31),
+clippy + 234 cargo tests green. Acceptance is covered by tests: per-{cid,kind}
+persistence + the JSON round-trip, label/JSONPath cells with `—`, the 10k-row
+buildCsv with quoting, and the keyboard menu path — the boxes are left unchecked
+until a real-app pass (resize/reorder feel, a native CSV save, restart).
+
 ### B88 — Metadata editor and transparent mutations *(absorbs B62 + B64)*
 
 Add focused JSON Patch editing for labels and annotations, with value expansion

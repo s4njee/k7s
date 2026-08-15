@@ -25,17 +25,13 @@ export function viewId(name: string): string {
 
 /**
  * Resolve a saved sort column name to the index the table expects, against the
- * kind's base columns — prepending CLUSTER for the all-clusters problems scope
- * (the same transform ResourceTable applies), so the index lines up with what
- * TableHeader/TableRow use. Null when the name isn't present.
+ * RENDERED columns (the kind's base columns through B87's column config — which
+ * already pins CLUSTER for the all-clusters problems scope). Null when the name
+ * isn't present.
  */
-export function viewSortIndex(view: SavedView, baseColumns: string[]): number | null {
+export function viewSortIndex(view: SavedView, renderedColumns: string[]): number | null {
   if (!view.sortColName) return null;
-  const rendered =
-    view.kind === "problems" && view.problemsScope === "all"
-      ? ["CLUSTER", ...baseColumns]
-      : baseColumns;
-  const idx = rendered.findIndex((c) => c.toLowerCase() === view.sortColName!.toLowerCase());
+  const idx = renderedColumns.findIndex((c) => c.toLowerCase() === view.sortColName!.toLowerCase());
   return idx === -1 ? null : idx;
 }
 

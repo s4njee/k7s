@@ -11,6 +11,9 @@ import type { Cell, Row } from "../../providers/types";
 
 interface TableRowProps {
   row: Row;
+  /** The cells to render (B87: the configured subset/order + custom columns).
+   *  Defaults to the row's own cells when absent. */
+  cells?: Cell[];
   index: number;
   virtual: boolean;
   clickable: boolean;
@@ -30,6 +33,7 @@ export function renderCell(cell: Cell, now: number): string {
 
 export const TableRow = memo(function TableRow({
   row,
+  cells,
   index,
   virtual,
   clickable,
@@ -55,7 +59,7 @@ export const TableRow = memo(function TableRow({
       onClick={(e) => onSelect(row, e)}
       onContextMenu={(e) => onContextMenu(e, row)}
     >
-      {row.cells.map((cell, j) => (
+      {(cells ?? row.cells).map((cell, j) => (
         <td key={j} className={styles.td} style={{ color: toneColor(cell.tone) }}>
           {renderCell(cell, now)}
         </td>

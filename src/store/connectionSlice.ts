@@ -33,6 +33,7 @@ export const initialConnectionState: ConnectionSliceState = {
   clusterColors: {},
   clusterNamespaces: {},
   savedViewsByCid: {},
+  columnPrefsByCid: {},
 };
 
 export const createConnectionSlice: StateCreator<
@@ -169,6 +170,24 @@ export const createConnectionSlice: StateCreator<
         [cid]: (s.savedViewsByCid[cid] ?? []).filter((v) => v.id !== id),
       },
     })),
+
+  // Column config (B87): per-{cid, kind}, persisted like bookmarks.
+  setColumnPrefs: (cid, kind, prefs) =>
+    set((s) => ({
+      columnPrefsByCid: {
+        ...s.columnPrefsByCid,
+        [cid]: { ...(s.columnPrefsByCid[cid] ?? {}), [kind]: prefs },
+      },
+    })),
+
+  resetColumnPrefs: (cid, kind) =>
+    set((s) => {
+      const byKind = s.columnPrefsByCid[cid];
+      if (!byKind?.[kind]) return s;
+      const next = { ...byKind };
+      delete next[kind];
+      return { columnPrefsByCid: { ...s.columnPrefsByCid, [cid]: next } };
+    }),
 
   setClusterColor: (cid, color) =>
     set((s) => ({ clusterColors: { ...s.clusterColors, [cid]: color } })),
