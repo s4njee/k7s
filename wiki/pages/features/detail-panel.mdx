@@ -1,0 +1,110 @@
+import { Callout, Tabs, Tab } from 'nextra/components'
+
+# Deep Inspection & Detail Panel
+
+Clicking any row or pressing <kbd>Enter</kbd> opens the side Detail Panel, providing deep inspection tabs tailored to the selected resource kind.
+
+---
+
+## 1. Logs Tab
+
+![Detail Panel Logs View](/screenshots/02-logs.png)
+<div className="screenshot-caption">
+  Real-time streaming logs with container switching, level toning, search filtering, and since-time windows.
+</div>
+
+- **Live Streaming & Pause:** Real-time log streaming with auto-scroll lock. Clicking **Pause** stops stream consumption and locks the scroll position for inspection.
+- **Multi-Container Switching:** Instantly switch between containers or view interleaved logs across multi-container pods and sidecars.
+- **Previous Container Logs:** Read logs from the previous container instance (`previous: true`) to diagnose `CrashLoopBackOff` crashes and exit codes.
+- **Since Windows & Timestamps:** Filter logs by time windows (e.g. `5m`, `15m`, `1h`) and toggle RFC3339 timestamp prefixes.
+- **Smart Level Toning:** Log lines are parsed into semantic levels (`INFO` in blue, `WARN` in amber, `ERROR` in red, `DEBUG` in gray).
+- **Save to File:** Export the current log buffer directly to a local text file.
+
+---
+
+## 2. Properties Tab
+
+![Properties Reference Inspector](/screenshots/03-properties.png)
+<div className="screenshot-caption">
+  The Properties inspector resolves live references (e.g. Pod -> ReplicaSet -> Deployment, Secrets, ConfigMaps).
+</div>
+
+The **Properties** tab answers *"What is this object actually wired to?"*:
+- **Resolved Hyperlinks:** References are resolved live against the cluster. A Pod's owner link resolves *through* its ReplicaSet to the parent Deployment; a Service link resolves to backing Endpoints and Pods; an Ingress links to TLS Secrets and Services.
+- **Missing References Called Out:** Unresolved links are explicitly flagged as `(not found)` rather than failing silently or 404ing.
+- **Live Metadata Editor:** Directly add, edit, or delete Labels and Annotations without writing raw YAML.
+- **Safe Secrets Inspection:** Secret keys are listed with encoded sizes; values are redacted server-side by default with explicit click-to-reveal controls.
+
+---
+
+## 3. YAML Tab & Server-Side Dry Run
+
+![YAML Editor with Server-Side Dry Run](/screenshots/04-yaml.png)
+<div className="screenshot-caption">
+  CodeMirror 6 YAML editor with token-matched syntax highlighting and dry-run validation.
+</div>
+
+- **CodeMirror 6 Editor:** Fast, responsive YAML editing with full syntax highlighting, indentation guides, and line numbers.
+- **Server-Side Dry Run:** Before applying changes, k7s executes a server-side dry run (`dryRun=All`) to validate mutations against cluster admission controllers and webhooks.
+- **Diff Preview:** Displays an exact visual diff of mutating webhook changes and defaultings before committing.
+- **Inline API Error Reporting:** Validation errors (e.g. immutable field violations) are highlighted directly in the editor with API error messages verbatim.
+
+---
+
+## 4. Diff Tab
+
+![Diff Tab](/screenshots/16-diff-tab.png)
+<div className="screenshot-caption">
+  Diff inspector comparing live runtime object against last-applied-configuration or managed-fields baseline.
+</div>
+
+- Side-by-side and inline diff visualizer.
+- Identifies cluster mutations introduced by controllers, webhooks, or manual edits.
+
+---
+
+## 5. Events Tab & Canvas Timeline
+
+![Events Tab](/screenshots/14-events-tab.png)
+<div className="screenshot-caption">
+  Events tab with color-coded Normal and Warning event cards and timestamps.
+</div>
+
+- **Event Cards:** Categorized by `Normal` (green) and `Warning` (red), displaying reason, message, count, and last seen timestamp.
+- **Canvas Event Timeline:** An interactive visual timeline plotting cluster events over time with zoom and pan capabilities.
+
+---
+
+## 6. Metrics & Pod Sparklines
+
+![Node and Pod Metrics](/screenshots/06-metrics.png)
+<div className="screenshot-caption">
+  Plotly metrics charts with Prometheus PromQL backfilling and node filesystem utilization.
+</div>
+
+- **Pod Sparklines:** Real-time CPU and Memory sparkline charts overlaid with declared `requests` and `limits`.
+- **Node Exporter Integration:** Detailed node metrics (CPU cores, memory distribution, network I/O, and disk filesystem utilization sorted fullest-first).
+- **Prometheus Backfilling:** When Prometheus is detected, queries historical PromQL data to backfill time-series charts across historical hours.
+
+---
+
+## 7. Topology DAG Tab
+
+![Topology Graph](/screenshots/15-topology-tab.png)
+<div className="screenshot-caption">
+  Resource Topology DAG visualizing relationship hierarchies across workloads, services, and endpoints.
+</div>
+
+- Visual Directed Acyclic Graph (DAG) charting relationships from Ingresses → Services → Endpoints → Pods → PVCs → Nodes.
+
+---
+
+## 8. Interactive Shell & Node Root Debug Shell
+
+![Interactive Pod Shell](/screenshots/05-shell.png)
+<div className="screenshot-caption">
+  Interactive container exec shell powered by xterm.js.
+</div>
+
+- **Container Exec Shell:** Full interactive TTY shell into any running container powered by xterm.js and Tauri PTY streams.
+- **Node Root Debug Shell:** Launch a root debug shell into any Kubernetes worker node. Spawns a privileged pod pinned to the target node running `nsenter` into host namespaces, protected by an explicit security consent screen and an auto-terminating server deadline.

@@ -1,0 +1,39 @@
+import { Callout } from 'nextra/components'
+
+# Development Workflow
+
+This page outlines the development lifecycle, scripts, and workflows for contributing to k7s.
+
+---
+
+## Developer Scripts
+
+| Command | Script | Purpose |
+|---|---|---|
+| `dev/run.sh` | Shell launcher | Cleans stale vite instances on port 1420, removes old `dist/`, and runs Tauri safely. |
+| `dev/verify.sh` | CI verification | Runs `cargo clippy`, `cargo test`, `pnpm run typecheck`, and `pnpm test`. |
+| `dev/bump.sh <ver>` | Version synchronization | Atomically bumps version in `package.json`, `src-tauri/Cargo.toml`, and `tauri.conf.json`. |
+| `dev/shots.mjs` | Screenshot automation | Uses Puppeteer/Playwright to capture pristine documentation screenshots in demo mode. |
+| `dev/run-harnesses.mjs` | Live harness runner | Executes all discovery-based live cluster verification harnesses in `src-tauri/examples/`. |
+
+---
+
+## Day-to-Day Development Loop
+
+### 1. Fast Frontend / UI Iteration
+For working on React components, styles, or state logic:
+```bash
+VITE_DEMO=1 pnpm dev
+```
+Open [`http://localhost:1420`](http://localhost:1420) in Chrome/Firefox. Vite HMR provides instant hot reloading.
+
+### 2. Full-Stack Development (Rust + React)
+```bash
+dev/run.sh
+```
+
+### 3. Pre-Commit Verification
+Always ensure CI gates pass locally:
+```bash
+./dev/verify.sh
+```

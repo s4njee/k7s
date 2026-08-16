@@ -17,18 +17,27 @@ use crate::error::{AppError, ErrorCode, ErrorEnvelope};
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use k8s_openapi::api::admissionregistration::v1::{
-    MutatingWebhookConfiguration, ValidatingWebhookConfiguration,
+    MutatingWebhookConfiguration, ValidatingAdmissionPolicy, ValidatingAdmissionPolicyBinding,
+    ValidatingWebhookConfiguration,
+};
+use k8s_openapi::api::admissionregistration::v1alpha1::{
+    MutatingAdmissionPolicy, MutatingAdmissionPolicyBinding,
 };
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::autoscaling::v2::HorizontalPodAutoscaler;
 use k8s_openapi::api::batch::v1::{CronJob, Job};
+use k8s_openapi::api::coordination::v1::Lease;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Event, LimitRange, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod,
-    ResourceQuota, Secret, Service, ServiceAccount,
+    ConfigMap, Endpoints, Event, LimitRange, Namespace, Node, PersistentVolume,
+    PersistentVolumeClaim, Pod, ReplicationController, ResourceQuota, Secret, Service,
+    ServiceAccount,
 };
+use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::networking::v1::{Ingress, IngressClass, NetworkPolicy};
+use k8s_openapi::api::node::v1::RuntimeClass;
 use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::api::rbac::v1::{ClusterRole, ClusterRoleBinding, Role, RoleBinding};
+use k8s_openapi::api::scheduling::v1::PriorityClass;
 use k8s_openapi::api::storage::v1::StorageClass;
 use kube::core::{ApiResource, DynamicObject};
 use kube::runtime::reflector::Lookup;
@@ -99,6 +108,19 @@ pub async fn spawn_all<R: Runtime>(mgr: Arc<ClientManager<R>>, cid: Cid, client:
     // Admission webhook configurations (B80), cluster-scoped.
     spawn::<_, MutatingWebhookConfiguration>(&mgr, &cid, &client, ResourceKind::Mutatingwebhookconfigurations, mappers::map_mutatingwebhookconfiguration, identity).await;
     spawn::<_, ValidatingWebhookConfiguration>(&mgr, &cid, &client, ResourceKind::Validatingwebhookconfigurations, mappers::map_validatingwebhookconfiguration, identity).await;
+    // B90: scheduling/coordination/network-discovery/legacy-workload + admission
+    // policies. A kind whose API the cluster doesn't serve 404s on its initial
+    // list and is marked Unsupported (hidden, not retried forever).
+    spawn::<_, PriorityClass>(&mgr, &cid, &client, ResourceKind::Priorityclasses, mappers::map_priorityclass, identity).await;
+    spawn::<_, RuntimeClass>(&mgr, &cid, &client, ResourceKind::Runtimeclasses, mappers::map_runtimeclass, identity).await;
+    spawn::<_, Lease>(&mgr, &cid, &client, ResourceKind::Leases, mappers::map_lease, identity).await;
+    spawn::<_, ReplicationController>(&mgr, &cid, &client, ResourceKind::Replicationcontrollers, mappers::map_replicationcontroller, identity).await;
+    spawn::<_, Endpoints>(&mgr, &cid, &client, ResourceKind::Endpoints, mappers::map_endpoints, identity).await;
+    spawn::<_, EndpointSlice>(&mgr, &cid, &client, ResourceKind::Endpointslices, mappers::map_endpointslice, identity).await;
+    spawn::<_, ValidatingAdmissionPolicy>(&mgr, &cid, &client, ResourceKind::Validatingadmissionpolicies, mappers::map_validatingadmissionpolicy, identity).await;
+    spawn::<_, ValidatingAdmissionPolicyBinding>(&mgr, &cid, &client, ResourceKind::Validatingadmissionpolicybindings, mappers::map_validatingadmissionpolicybinding, identity).await;
+    spawn::<_, MutatingAdmissionPolicy>(&mgr, &cid, &client, ResourceKind::Mutatingadmissionpolicies, mappers::map_mutatingadmissionpolicy, identity).await;
+    spawn::<_, MutatingAdmissionPolicyBinding>(&mgr, &cid, &client, ResourceKind::Mutatingadmissionpolicybindings, mappers::map_mutatingadmissionpolicybinding, identity).await;
     // Cluster-wide events feed: ordered Warnings-first/newest and capped (B14).
     spawn::<_, Event>(&mgr, &cid, &client, ResourceKind::Events, mappers::map_event, events_order).await;
     // Helm releases, decoded from their Secrets (B26).
@@ -110,7 +132,7 @@ pub async fn spawn_all<R: Runtime>(mgr: Arc<ClientManager<R>>, cid: Cid, client:
     });
     mgr.push_task(cid, handle).await;
     // Spawned kinds + 1 for the overview pseudo-kind (the sidebar footer counts streams).
-    32
+    42
 }
 
 /// Spawn one watcher task and register it with the manager.
@@ -371,10 +393,12 @@ fn classify_watch_error(e: &watcher::Error, kind: &str) -> (WatcherState, ErrorE
         // NoResourceVersion and anything else: transient.
         _ => ErrorCode::Unreachable,
     };
-    let state = if code == ErrorCode::Forbidden {
-        WatcherState::Forbidden
-    } else {
-        WatcherState::Backoff
+    let state = match (code, e) {
+        (ErrorCode::Forbidden, _) => WatcherState::Forbidden,
+        // A 404 on the *initial* list means the API group isn't served on this
+        // cluster (B90) — the kind is unsupported, not temporarily broken.
+        (ErrorCode::NotFound, watcher::Error::InitialListFailed(_)) => WatcherState::Unsupported,
+        _ => WatcherState::Backoff,
     };
     let env = AppError::envelope_for_code(code, e.to_string(), Some(kind));
     (state, env)
@@ -421,5 +445,31 @@ mod tests {
         let (state, env) = classify_watch_error(&transport, "pods");
         assert_eq!(state, WatcherState::Backoff);
         assert_eq!(env.code, ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn initial_list_404_is_unsupported_not_backoff() {
+        // B90: a 404 on the watcher's *initial* list means the API isn't served
+        // on this cluster — the kind is unsupported, and retrying is pointless.
+        let missing = watcher::Error::InitialListFailed(kube::Error::Api(ErrorResponse {
+            status: "Failure".into(),
+            message: "the server doesn't have a resource type".into(),
+            reason: "NotFound".into(),
+            code: 404,
+        }));
+        let (state, env) = classify_watch_error(&missing, "mutatingadmissionpolicies");
+        assert_eq!(state, WatcherState::Unsupported);
+        assert_eq!(env.code, ErrorCode::NotFound);
+
+        // A 404 on a later watch stays a transient Backoff (the resource may
+        // exist; the watch just failed).
+        let watch_404 = watcher::Error::WatchError(ErrorResponse {
+            status: "Failure".into(),
+            message: "not found".into(),
+            reason: "NotFound".into(),
+            code: 404,
+        });
+        let (state, _) = classify_watch_error(&watch_404, "pods");
+        assert_eq!(state, WatcherState::Backoff);
     }
 }

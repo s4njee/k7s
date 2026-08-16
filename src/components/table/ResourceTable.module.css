@@ -77,6 +77,12 @@
 .th:hover {
   color: var(--text-secondary);
 }
+.thInner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
 /* B84: the sort control is a real button inside the th, filling it and reading
    as the th itself (the th keeps sticky + padding; the button inherits its
    font/colour from the global button reset + inheritance). */
@@ -84,7 +90,14 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  user-select: none;
 }
 /* B87: drag grip (base columns) and the right-edge resize handle. The th is
    already position: sticky; the grip/handle sit above the button's hit area. */

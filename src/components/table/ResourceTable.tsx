@@ -119,6 +119,11 @@ export function ResourceTable() {
   // The banner to show (if any): the kind's own failure outranks cluster
   // staleness, and a live kind on a stale cluster shows the stale banner.
   const banner = useMemo(() => {
+    // B90: the cluster doesn't serve this kind's API — a neutral notice, never
+    // an error banner or a fake zero count.
+    if (health?.state === "unsupported") {
+      return <div className={styles.empty}>unsupported on this cluster</div>;
+    }
     if (health?.state === "forbidden") {
       return (
         <HealthBanner

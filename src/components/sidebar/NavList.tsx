@@ -38,7 +38,11 @@ export function NavList() {
         ) : (
           <div key={group}>
             <div className={styles.sectionHeader}>{GROUP_LABELS[group]}</div>
-            {kindsInGroup(group).map((kind) => {
+            {/* B90: a kind whose API the cluster doesn't serve is hidden, not
+                shown as a broken table. */}
+            {kindsInGroup(group)
+              .filter((kind) => watcherHealth[kind]?.state !== "unsupported")
+              .map((kind) => {
               const active = nav === kind;
               return (
                 <button

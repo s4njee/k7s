@@ -1,0 +1,23 @@
+# A legacy ReplicationController (B90) — the pre-Deployment workload kind, so
+# the DESIRED/CURRENT/READY columns read against a real object.
+
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: legacy-worker
+  namespace: prod
+  labels: { app: legacy-worker }
+spec:
+  replicas: 2
+  selector:
+    app: legacy-worker
+  template:
+    metadata:
+      labels: { app: legacy-worker }
+    spec:
+      containers:
+        - name: worker
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do echo 'INFO processing batch'; sleep 5; done"]
+          resources:
+            requests: { cpu: 10m, memory: 24Mi }

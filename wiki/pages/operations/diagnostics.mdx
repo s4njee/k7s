@@ -1,0 +1,43 @@
+import { Callout } from 'nextra/components'
+
+# Logging & Diagnostics
+
+k7s provides a robust diagnostic system to ensure troubleshooting is fast, simple, and safe to share without leaking sensitive cluster credentials.
+
+---
+
+## Log Architecture: Two Sinks, One Stream
+
+`src-tauri/src/logging.rs` installs a `tracing` subscriber at startup that feeds two destinations simultaneously:
+
+1. **`stderr`:** For development convenience (`dev/run.sh` / `pnpm tauri:dev`).
+2. **Rotating Log File:** Stored under the platform app log directory (`k7s.YYYY-MM-DD.log`), rotated **daily** with **at most 5 files** retained.
+
+---
+
+## Live Log Levels
+
+Adjust log verbosity live via **Settings → Diagnostics → Log Level** (`error`, `warn`, `info`, `debug`, `trace`). Changes take effect immediately without restarting the application.
+
+---
+
+## Frontend Error Forwarding
+
+Uncaught window errors, unhandled promise rejections, and React Error Boundary exceptions (`src/components/ErrorBoundary.tsx`) are automatically captured and forwarded to the backend logger with full stack traces.
+
+---
+
+## Export Diagnostics (⌘⇧E)
+
+Select **File → Export Diagnostics…** (or press <kbd>⌘⇧E</kbd>) to generate a scrubbed `.zip` archive containing:
+
+- `k7s.log` — The last 2 MB of the active log file.
+- `versions.json` — App version, OS, architecture, and connected context names.
+- `settings.json` — Persisted preferences with context names and local paths redacted.
+- `boundary.txt` — The last React ErrorBoundary stack trace (if any).
+
+### Automated Redaction Engine
+Before writing the zip archive, all data passes through `diagnostics::redact` (`src-tauri/src/diagnostics.rs`):
+- Server URLs and IP endpoints are replaced with `<redacted>`.
+- `Bearer` tokens, API keys, and certificate base64 blobs are stripped.
+- Local user home paths (`/Users/<username>`, `/home/<username>`) are scrubbed.

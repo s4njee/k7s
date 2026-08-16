@@ -89,6 +89,17 @@ pub enum ResourceKind {
     /// Cluster-scoped admission configuration.
     Mutatingwebhookconfigurations,
     Validatingwebhookconfigurations,
+    // B90: built-in resource coverage, wave 2.
+    Priorityclasses,
+    Runtimeclasses,
+    Leases,
+    Replicationcontrollers,
+    Endpoints,
+    Endpointslices,
+    Validatingadmissionpolicies,
+    Validatingadmissionpolicybindings,
+    Mutatingadmissionpolicies,
+    Mutatingadmissionpolicybindings,
 }
 
 impl ResourceKind {
@@ -127,6 +138,16 @@ impl ResourceKind {
             ResourceKind::Limitranges => "limitranges",
             ResourceKind::Mutatingwebhookconfigurations => "mutatingwebhookconfigurations",
             ResourceKind::Validatingwebhookconfigurations => "validatingwebhookconfigurations",
+            ResourceKind::Priorityclasses => "priorityclasses",
+            ResourceKind::Runtimeclasses => "runtimeclasses",
+            ResourceKind::Leases => "leases",
+            ResourceKind::Replicationcontrollers => "replicationcontrollers",
+            ResourceKind::Endpoints => "endpoints",
+            ResourceKind::Endpointslices => "endpointslices",
+            ResourceKind::Validatingadmissionpolicies => "validatingadmissionpolicies",
+            ResourceKind::Validatingadmissionpolicybindings => "validatingadmissionpolicybindings",
+            ResourceKind::Mutatingadmissionpolicies => "mutatingadmissionpolicies",
+            ResourceKind::Mutatingadmissionpolicybindings => "mutatingadmissionpolicybindings",
         }
     }
 }

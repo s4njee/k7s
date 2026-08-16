@@ -1,0 +1,130 @@
+import { Callout, Tabs, Tab } from 'nextra/components'
+
+# Installation Guide
+
+k7s is distributed as standalone desktop application bundles for macOS, Linux, and Windows, and can also be built directly from source.
+
+---
+
+## Pre-Built Binaries
+
+Download official signed packages from the [GitHub Releases](https://github.com/s4njee/k7s/releases) page:
+
+<Tabs items={['macOS', 'Linux', 'Windows']}>
+  <Tab>
+    ### macOS (.dmg / .app)
+    
+    k7s supports Apple Silicon (arm64) and Intel (x86_64) architectures.
+    
+    1. Download `k7s_<version>_aarch64.dmg` or `k7s_<version>_x64.dmg`.
+    2. Open the `.dmg` and drag `k7s.app` into your `/Applications` folder.
+    3. Launch `k7s` from Spotlight or Launchpad.
+
+    <Callout type="warning">
+      **Gatekeeper Notice:** On initial release before Developer ID notarization is attached, macOS may prompt with *"k7s can't be opened because it is from an unidentified developer."* Right-click `k7s.app`, select **Open**, and confirm **Open** on the prompt dialog.
+    </Callout>
+  </Tab>
+  <Tab>
+    ### Linux (.AppImage / .deb / .rpm)
+
+    k7s is packaged as a universal AppImage as well as native `.deb` and `.rpm` installers.
+
+    **AppImage:**
+    ```bash
+    chmod +x k7s_<version>_amd64.AppImage
+    ./k7s_<version>_amd64.AppImage
+    ```
+
+    **Debian / Ubuntu (.deb):**
+    ```bash
+    sudo dpkg -i k7s_<version>_amd64.deb
+    ```
+
+    **Fedora / RHEL (.rpm):**
+    ```bash
+    sudo rpm -i k7s_<version>_x86_64.rpm
+    ```
+
+    <Callout type="info">
+      **WebKitGTK Note:** On Linux systems running under headless or virtualized GPU environments, if you encounter webview render glitches, pass `WEBKIT_DISABLE_DMABUF_RENDERER=1 k7s`.
+    </Callout>
+  </Tab>
+  <Tab>
+    ### Windows (.msi / .exe)
+
+    k7s is built for Windows 10 and 11 (64-bit).
+
+    1. Download `k7s_<version>_x64-setup.exe` or `k7s_<version>_x64.msi`.
+    2. Run the installer and follow the setup wizard.
+    3. Launch k7s from your Start Menu.
+
+    <Callout type="info">
+      **WebView2 Requirement:** Windows 11 includes Microsoft Edge WebView2 runtime by default. If running on an older Windows 10 build, ensure the Evergreen WebView2 Runtime is installed.
+    </Callout>
+  </Tab>
+</Tabs>
+
+---
+
+## Building from Source
+
+To compile k7s from source, ensure you have Rust, Node.js, and Tauri dependencies installed.
+
+### 1. Install OS Dependencies
+
+<Tabs items={['macOS', 'Ubuntu / Debian', 'Fedora', 'Windows']}>
+  <Tab>
+    ```bash
+    # Install Xcode Command Line Tools
+    xcode-select --install
+    
+    # Ensure Rust is installed
+    rustup update stable
+    ```
+  </Tab>
+  <Tab>
+    ```bash
+    sudo apt update
+    sudo apt install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+      libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+    
+    rustup update stable
+    ```
+  </Tab>
+  <Tab>
+    ```bash
+    sudo dnf groupinstall "C Development Tools and Libraries"
+    sudo dnf install -y webkit2gtk4.1-devel openssl-devel libappindicator-gtk3-devel librsvg2-devel
+    
+    rustup update stable
+    ```
+  </Tab>
+  <Tab>
+    ```powershell
+    # Install C++ build tools via Visual Studio Installer
+    # Ensure Rust (x86_64-pc-windows-msvc) is installed
+    rustup update stable
+    ```
+  </Tab>
+</Tabs>
+
+### 2. Build the Application
+
+```bash
+# Clone the repository
+git clone https://github.com/s4njee/k7s.git
+cd k7s
+
+# Install frontend dependencies
+pnpm install
+
+# Run typecheck and tests
+pnpm run typecheck
+pnpm test
+cargo test --manifest-path src-tauri/Cargo.toml
+
+# Compile production binary and installer
+pnpm run tauri:build
+```
+
+The output artifacts will be placed in `src-tauri/target/release/bundle/`.

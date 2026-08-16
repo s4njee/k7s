@@ -231,6 +231,17 @@ pub fn builtin_nav_id(kind: &str) -> Option<&'static str> {
         "LimitRange" => "limitranges",
         "MutatingWebhookConfiguration" => "mutatingwebhookconfigurations",
         "ValidatingWebhookConfiguration" => "validatingwebhookconfigurations",
+        // B90 — the wave-2 kinds, for event/owner resolution.
+        "PriorityClass" => "priorityclasses",
+        "RuntimeClass" => "runtimeclasses",
+        "Lease" => "leases",
+        "ReplicationController" => "replicationcontrollers",
+        "Endpoints" => "endpoints",
+        "EndpointSlice" => "endpointslices",
+        "ValidatingAdmissionPolicy" => "validatingadmissionpolicies",
+        "ValidatingAdmissionPolicyBinding" => "validatingadmissionpolicybindings",
+        "MutatingAdmissionPolicy" => "mutatingadmissionpolicies",
+        "MutatingAdmissionPolicyBinding" => "mutatingadmissionpolicybindings",
         _ => return None,
     })
 }
@@ -3451,9 +3462,13 @@ metadata:
         assert_eq!(builtin_nav_id("StorageClass"), Some("storageclasses"));
         assert_eq!(builtin_nav_id("PersistentVolumeClaim"), Some("persistentvolumeclaims"));
         assert_eq!(builtin_nav_id("ServiceAccount"), Some("serviceaccounts"));
+        // B90 kinds are listed too.
+        assert_eq!(builtin_nav_id("Endpoints"), Some("endpoints"));
+        assert_eq!(builtin_nav_id("EndpointSlice"), Some("endpointslices"));
+        assert_eq!(builtin_nav_id("PriorityClass"), Some("priorityclasses"));
+        assert_eq!(builtin_nav_id("ValidatingAdmissionPolicy"), Some("validatingadmissionpolicies"));
         // Still unlisted, so still correctly None.
-        assert_eq!(builtin_nav_id("Endpoints"), None);
-        assert_eq!(builtin_nav_id("PriorityClass"), None);
+        assert_eq!(builtin_nav_id("CustomResourceDefinition"), None);
         assert_eq!(builtin_nav_id("FooBar"), None);
     }
 

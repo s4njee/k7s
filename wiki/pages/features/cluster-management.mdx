@@ -1,0 +1,35 @@
+import { Callout } from 'nextra/components'
+
+# Multi-Cluster Management
+
+k7s provides a powerful, local-first multi-cluster management engine designed to keep multiple Kubernetes contexts connected and updated simultaneously.
+
+---
+
+## The Cluster Rail & Fast Switching (⌘1–9)
+
+The left sidebar features a compact **Cluster Rail** showing every connected cluster with its initials, color avatar, and worst-problem status tint:
+
+- **Instant Switching:** Press <kbd>⌘</kbd> + <kbd>1</kbd> through <kbd>⌘</kbd> + <kbd>9</kbd> (or click the cluster avatar) to switch active views instantly.
+- **Retained State:** Switching active clusters does not tear down background connections. Tables, watch streams, terminal tabs, and active port-forwards are preserved in memory.
+- **Zero-Latency Navigation:** Returning to a previously visited cluster renders immediately without waiting for API re-syncs.
+
+---
+
+## Adding & Importing Kubeconfigs
+
+k7s supports discovering and importing kubeconfigs from multiple sources:
+
+1. **Automatic Discovery:** Automatically detects all contexts in `~/.kube/config` and any files referenced in your `KUBECONFIG` environment variable.
+2. **Native File Picker Import:** Click **+ Add Cluster** or select **File → Import Kubeconfig…** to select external kubeconfig files. Imported contexts are persisted across application restarts.
+3. **Cluster Health & Stale State:** If a cluster becomes temporarily unreachable (e.g. VPN disconnection or network glitch), k7s marks the cluster as **Stale** (amber badge) rather than dropping rows, retaining existing cached data until the network recovers.
+
+---
+
+## QR Code Context Export (mk7s Sync)
+
+To quickly export a cluster context to a mobile device running **mk7s**:
+
+1. Open the Cluster Switcher menu.
+2. Click the QR code icon (**▣**) on the target cluster row.
+3. Scan the cycling QR code with your mobile camera to transfer the sanitized context credentials securely over local air-gap.

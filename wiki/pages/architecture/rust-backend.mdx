@@ -1,0 +1,95 @@
+import { Callout } from 'nextra/components'
+
+# Rust Backend & ClientManager
+
+The k7s backend (`src-tauri/`) is built in Rust using Tokio, the `kube` crate ecosystem, and Tauri v2.
+
+---
+
+## The ClientManager
+
+The central actor in the backend is `ClientManager` (`src-tauri/src/kube/manager.rs`), managed within Tauri's shared state via `tokio::sync::RwLock`.
+
+```rust
+pub struct ClientManager {
+    clusters: HashMap<ClusterId, Arc<ClusterConnection>>,
+    active_cluster: Option<ClusterId>,
+    kubeconfig_cache: Option<Kubeconfig>,
+}
+```
+
+### Key Responsibilities:
+- **Kubeconfig Discovery & Merging:** Reads `~/.kube/config`, custom `KUBECONFIG` env paths, and imported standalone configs.
+- **Connection Isolation:** Each cluster connection (`ClusterConnection`) holds its own `kube::Client`, `tokio` watcher handles, metrics background pollers, active port-forwards, and open log streams.
+- **Non-Destructive Switching:** Switching the active cluster in the UI does not destroy background watchers for other clusters; it simply updates the active stream subscriptions.
+- **Graceful Teardown:** Disconnecting a single cluster aborts only its associated tasks without affecting other connected clusters.
+
+---
+
+## Watcher Pipeline & Delta Engine
+
+For each monitored Kubernetes resource kind, k7s spawns a Tokio task wrapping `kube::runtime::watcher`:
+
+1. **Reflector Store:** Ingests `Applied`, `Deleted`, and `Restarted` watch events.
+2. **Debouncing (~150ms):** Groups bursts of high-frequency events (e.g. during a massive rollout) into single batches.
+3. **Delta vs Snapshot Emission:**
+   - **On Initial Watch / Re-sync:** Emits a complete `snapshot` payload containing all current rows.
+   - **On Steady State:** Emits a minimal `delta` payload with arrays of `upserts: Row[]` and `deletes: string[]` (UIDs).
+4. **IPC Channel Namespacing:** Events are published over namespaced Tauri event topics: `resource-update:{cid}`.
+
+```rust
+#[derive(Debug, Serialize, Clone)]
+#[serde(tag = "type")]
+pub enum ResourceUpdatePayload {
+    Snapshot { kind: String, rows: Vec<RowDto> },
+    Delta { kind: String, upserts: Vec<RowDto>, deletes: Vec<String> },
+}
+```
+
+---
+
+## DTO Mapping & Semantic Tones
+
+The backend parses raw Kubernetes OpenAPI resources into lightweight, frontend-ready Data Transfer Objects (`RowDto` in `src-tauri/src/kube/dto.rs` and `mappers.rs`):
+
+```rust
+#[derive(Debug, Serialize, Clone)]
+pub struct RowDto {
+    pub uid: String,
+    pub name: String,
+    pub namespace: Option<String>,
+    pub creation_ts: Option<i64>,
+    pub cells: Vec<CellDto>,
+    pub pod_meta: Option<PodMetaDto>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct CellDto {
+    pub text: String,
+    pub tone: Tone, // Default | Muted | Ok | Warn | Err
+}
+```
+
+### Tone Rules:
+- **`Ok` (Green):** Pods `Running`, Nodes `Ready`, Deployments with `replicas == available`, DaemonSets `100% scheduled`.
+- **`Warn` (Amber):** Pods `Pending` or `ContainerCreating`, partially ready workloads (e.g. `1/2` ready), Scaling limited.
+- **`Err` (Red):** Pods in `CrashLoopBackOff`, `ImagePullBackOff`, `OOMKilled`, or `Error`; restarts count `> 5`.
+- **`Muted` (Gray):** Namespace column, relative ages, completed jobs.
+
+---
+
+## Typed Error Envelopes (`AppError`)
+
+Rather than passing raw, unformatted error strings across the IPC bridge, k7s serializes failures as a typed `AppError` (`src-tauri/src/error.rs`):
+
+```json
+{
+  "code": "PERMISSION_DENIED",
+  "message": "Permission denied: unable to list resource 'secrets' in namespace 'prod'.",
+  "retryable": true,
+  "action": "Check RBAC ClusterRoleBindings for your user context.",
+  "detail": "HTTP 403 Forbidden: secrets is forbidden: User cannot list resource"
+}
+```
+
+This contract ensures the frontend can display user-friendly remediation messages while reserving raw technical details for expandable debug views.

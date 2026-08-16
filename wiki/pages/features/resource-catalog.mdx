@@ -1,0 +1,89 @@
+import { Callout } from 'nextra/components'
+
+# Resource Catalog & Navigation
+
+k7s provides first-class navigation and monitoring across 31+ Kubernetes resource kinds, plus dynamic discovery for arbitrary Custom Resource Definitions (CRDs).
+
+---
+
+## Built-In Resource Categories
+
+Navigation is organized logically into categorized sections in the sidebar:
+
+```
+Sidebar Navigation
+├── 📊 Overview            (Cluster-wide health, capacity & problem aggregates)
+├── ⚠️ Problems            (Filtered view of failing pods, crash loops & risks)
+├── 📦 Workloads
+│   ├── Pods
+│   ├── Deployments
+│   ├── StatefulSets
+│   ├── DaemonSets
+│   ├── Jobs
+│   ├── CronJobs
+│   └── ReplicaSets
+├── 🌐 Network
+│   ├── Services
+│   ├── Ingresses
+│   ├── NetworkPolicies
+│   └── EndpointSlices
+├── ⚙️ Config
+│   ├── ConfigMaps
+│   ├── Secrets
+│   ├── ResourceQuotas
+│   ├── LimitRanges
+│   ├── HorizontalPodAutoscalers (HPA)
+│   └── PodDisruptionBudgets (PDB)
+├── 💾 Storage
+│   ├── PersistentVolumeClaims (PVC)
+│   ├── PersistentVolumes (PV)
+│   └── StorageClasses
+├── 🛡️ RBAC & Access
+│   ├── ServiceAccounts
+│   ├── Roles & ClusterRoles
+│   └── RoleBindings & ClusterRoleBindings
+├── ☸️ Cluster
+│   ├── Nodes
+│   ├── Namespaces
+│   ├── Events
+│   └── CustomResourceDefinitions (CRDs)
+└── 🧩 Custom Resources   (Dynamically discovered CRDs grouped by API group)
+```
+
+---
+
+## Cluster Overview
+
+![Cluster Overview Dashboard](/screenshots/07-cluster-overview.png)
+<div className="screenshot-caption">
+  The Cluster Overview: Live control plane status, node allocation gauges, cluster-wide CPU/Memory utilization, and workload health breakdown.
+</div>
+
+The **Cluster Overview** provides an instant snapshot of overall cluster vitality:
+- **Control Plane Status:** Control plane version, live API latency measurement, and health condition indicators.
+- **Node Allocation:** Nodes ready vs total, node roles, and cluster-wide allocatable capacity.
+- **Resource Pressure:** Aggregate CPU and Memory usage percentages streamed via `metrics.k8s.io`.
+- **Workload Summary:** Instant counts of running, ready, pending, and degraded workload controllers.
+
+---
+
+## The Problems Aggregator
+
+![Problems View](/screenshots/08-problems.png)
+<div className="screenshot-caption">
+  The Problems view aggregates CrashLoopBackOffs, Pending scheduling blocks, and eviction risks across the cluster in real time.
+</div>
+
+The **Problems** view automatically filters and aggregates anomalous conditions across all monitored namespaces:
+- **CrashLoopBackOff & Error Pods:** Immediate visibility into crashing containers, restart counts, and last exit codes.
+- **Pending / Unschedulable Pods:** Detects pods blocked on CPU/Memory requests, node selectors, or PVC bindings.
+- **Eviction & Disruption Risks:** Highlights pods with failing liveness probes or nodes under memory pressure.
+
+---
+
+## Dynamic CRD Discovery & Printer Columns
+
+When connecting to a cluster, k7s queries the Kubernetes API discovery endpoint for installed CRDs:
+
+- **Lazy Stream Spawning:** CRD watch streams are opened *lazily* only when you navigate to that CRD's view, ensuring clusters with hundreds of CRDs don't consume unnecessary API server connections.
+- **Additional Printer Columns:** Respects the `additionalPrinterColumns` declared in the CRD manifest, rendering dynamic table columns (names, types, JSONPath values) just like `kubectl get`.

@@ -1,0 +1,37 @@
+import { Callout } from 'nextra/components'
+
+# Supported Resource Matrix
+
+k7s provides specialized views, status parsing, column sets, and context actions for 31+ built-in Kubernetes resource kinds, in addition to lazy CRD discovery.
+
+---
+
+## Resource Kinds Matrix
+
+| Kind | Group | Table Columns | Supported Actions |
+|---|---|---|---|
+| **Pods** | Workloads | `NAME`, `NAMESPACE`, `READY`, `RESTARTS`, `CPU`, `MEM`, `AGE`, `STATUS` | Logs, Shell, Port-Forward, Delete, Restart |
+| **Deployments** | Workloads | `NAME`, `NAMESPACE`, `READY`, `UP-TO-DATE`, `AVAILABLE`, `AGE` | Scale, Rollout Restart, Rollout Undo, Delete |
+| **StatefulSets** | Workloads | `NAME`, `NAMESPACE`, `READY`, `AGE` | Scale, Rollout Restart, Rollout Undo, Delete |
+| **DaemonSets** | Workloads | `NAME`, `NAMESPACE`, `DESIRED`, `CURRENT`, `READY`, `UP-TO-DATE`, `AVAILABLE`, `NODE SELECTOR`, `AGE` | Rollout Restart, Rollout Undo, Delete |
+| **Jobs** | Workloads | `NAME`, `NAMESPACE`, `COMPLETIONS`, `DURATION`, `AGE`, `STATUS` | Delete, Re-run |
+| **CronJobs** | Workloads | `NAME`, `NAMESPACE`, `SCHEDULE`, `SUSPEND`, `ACTIVE`, `LAST SCHEDULE`, `AGE` | Trigger Job Now, Suspend/Resume, Delete |
+| **ReplicaSets** | Workloads | `NAME`, `NAMESPACE`, `DESIRED`, `CURRENT`, `READY`, `AGE` | Scale, Delete |
+| **Services** | Network | `NAME`, `NAMESPACE`, `TYPE`, `CLUSTER-IP`, `EXTERNAL-IP`, `PORTS`, `AGE` | Port-Forward, Delete |
+| **Ingresses** | Network | `NAME`, `NAMESPACE`, `CLASS`, `HOSTS`, `ADDRESS`, `PORTS`, `AGE` | Delete |
+| **NetworkPolicies** | Network | `NAME`, `NAMESPACE`, `POD-SELECTOR`, `AGE` | Delete |
+| **EndpointSlices** | Network | `NAME`, `NAMESPACE`, `ADDRESS-TYPE`, `PORTS`, `ENDPOINTS`, `AGE` | Delete |
+| **ConfigMaps** | Config | `NAME`, `NAMESPACE`, `DATA`, `AGE` | Edit, Delete |
+| **Secrets** | Config | `NAME`, `NAMESPACE`, `TYPE`, `DATA`, `AGE` | View (Redacted), Delete |
+| **ResourceQuotas** | Config | `NAME`, `NAMESPACE`, `REQUEST/LIMIT USED / HARD`, `AGE` | Delete |
+| **LimitRanges** | Config | `NAME`, `NAMESPACE`, `RESOURCE`, `MIN/MAX`, `DEFAULT`, `AGE` | Delete |
+| **HorizontalPodAutoscalers** | Config | `NAME`, `NAMESPACE`, `REFERENCE`, `TARGETS`, `MINPODS`, `MAXPODS`, `REPLICAS`, `AGE` | Delete |
+| **PodDisruptionBudgets** | Config | `NAME`, `NAMESPACE`, `MIN AVAILABLE`, `MAX UNAVAILABLE`, `ALLOWED DISRUPTIONS`, `AGE` | Delete |
+| **PersistentVolumeClaims** | Storage | `NAME`, `NAMESPACE`, `STATUS`, `VOLUME`, `CAPACITY`, `ACCESS MODES`, `STORAGECLASS`, `AGE` | Delete |
+| **PersistentVolumes** | Storage | `NAME`, `CAPACITY`, `ACCESS MODES`, `RECLAIM POLICY`, `STATUS`, `CLAIM`, `STORAGECLASS`, `AGE` | Delete |
+| **StorageClasses** | Storage | `NAME`, `PROVISIONER`, `RECLAIMPOLICY`, `VOLUMEBINDINGMODE`, `ALLOWVOLUMEEXPANSION`, `AGE` | Delete |
+| **Nodes** | Cluster | `NAME`, `STATUS`, `ROLES`, `CPU %`, `MEMORY %`, `VERSION`, `AGE` | Cordon, Uncordon, Drain, Node Shell |
+| **Namespaces** | Cluster | `NAME`, `STATUS`, `AGE` | Set Active, Delete |
+| **Events** | Cluster | `LAST SEEN`, `TYPE`, `REASON`, `OBJECT`, `MESSAGE` | Filter |
+| **CRDs** | Cluster | `NAME`, `GROUP`, `VERSION`, `SCOPE`, `AGE` | Open Lazy View |
+| **Helm Releases** | Applications | `NAME`, `NAMESPACE`, `REVISION`, `UPDATED`, `STATUS`, `CHART`, `APP VERSION` | Rollback, Uninstall |

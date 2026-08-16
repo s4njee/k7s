@@ -1,0 +1,53 @@
+import { Callout } from 'nextra/components'
+
+# Actions & Blast-Radius Operations
+
+k7s provides safe, high-leverage administrative actions with clear blast-radius confirmations so you always know what will be affected before changes take place.
+
+---
+
+## Workload & Pod Actions
+
+### 1. Scaling Workloads
+Scale Deployments, StatefulSets, and ReplicaSets with immediate replica count adjustment and target replica preview.
+
+### 2. Rollout Restarts & Undos
+- **Rollout Restart:** Triggers a rolling restart of pods (via annotation mutation) without downtime.
+- **Rollout Undo (Rollback):** Reverts Deployments, StatefulSets, or DaemonSets to a specific previous revision from their controller revision history.
+
+### 3. Pod Delete & Eviction
+- Single-pod delete triggers graceful pod termination.
+- For crashlooping pods, option to delete immediately without grace period.
+
+---
+
+## Node Management & Drain Pre-Flight
+
+Administrative node operations are built with strict safety guards:
+
+- **Cordon / Uncordon:** Mark nodes unschedulable to prevent new pod placements.
+- **Eviction-Based Drain:**
+  - Uses Kubernetes eviction API to ensure **PodDisruptionBudgets (PDBs)** are honored.
+  - **PDB Disruption Pre-Flight Calculation:** Before you confirm a drain, k7s analyzes all running pods against active PDBs to show if any budget would block the drain:
+    ```
+    Node Drain Pre-Flight Analysis:
+    - Evictable Pods: 14
+    - DaemonSet Pods (Skipped): 3
+    - PDB 'api-pdb': 3/3 healthy, 1 disruption allowed [OK]
+    - PDB 'db-cluster-pdb': 1/1 healthy, 0 disruptions allowed [BLOCKED]
+    ```
+
+---
+
+## Resource Creation from YAML
+
+Click **+ Create** (or press <kbd>⌘N</kbd>) to open the Resource Creation Modal:
+- Create arbitrary Kubernetes resources from YAML or JSON.
+- Run a server-side dry-run validation to test permissions and field schemas before committing to the cluster.
+
+---
+
+## Multi-Select & Bulk Confirmations
+
+- Select multiple resources using <kbd>Shift</kbd> + Click or <kbd>⌘</kbd> + Click.
+- Bulk actions (e.g. bulk delete or bulk restart) display an explicit confirmation modal listing every selected resource by name and namespace.

@@ -148,10 +148,10 @@ describe("navIdForKind (B33: event → object)", () => {
   });
 
   it("returns null for a kind we don't list, so the row stays inert", () => {
-    // Endpoints and PriorityClass still have no table. (ReplicaSet and
-    // ServiceAccount used to be the examples here; both since got one.)
-    expect(navIdForKind("Endpoints", "v1", CUSTOM)).toBeNull();
-    expect(navIdForKind("PriorityClass", "scheduling.k8s.io/v1", CUSTOM)).toBeNull();
+    // VolumeAttachment and PodTemplate still have no table. (ReplicaSet,
+    // ServiceAccount, Endpoints, and PriorityClass used to be the examples here; they since got one.)
+    expect(navIdForKind("VolumeAttachment", "storage.k8s.io/v1", CUSTOM)).toBeNull();
+    expect(navIdForKind("PodTemplate", "v1", CUSTOM)).toBeNull();
   });
 
   it("built-ins win even when a CRD isn't loaded", () => {

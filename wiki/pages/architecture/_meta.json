@@ -1,0 +1,7 @@
+{
+  "overview": "System Overview",
+  "rust-backend": "Rust Backend & ClientManager",
+  "frontend-state": "Frontend State & Zustand",
+  "provider-seam": "Provider Seam & Mocking",
+  "design-system": "Design System & Tokens"
+}

@@ -1,0 +1,43 @@
+import { Callout } from 'nextra/components'
+
+# Helm Release Lifecycle
+
+k7s includes native, zero-dependency Helm support decoded directly from Kubernetes storage Secrets without requiring the `helm` CLI to be installed on your machine.
+
+---
+
+## Visual Showcase
+
+![Helm Releases Management](/screenshots/10-helm-releases.png)
+<div className="screenshot-caption">
+  Helm Releases overview: Deployed revisions, chart versions, app versions, and revision detail inspection.
+</div>
+
+---
+
+## Secret-Based Helm Decoding
+
+Helm stores release states inside cluster Secrets named `sh.helm.release.v1.<release-name>.v<revision>`.
+
+k7s's Rust backend (`src-tauri/src/kube/helm.rs`) decodes these Secrets directly:
+- **Base64 & Gzip Decompression:** Reads and parses compressed release manifests in Rust.
+- **Values & Metadata:** Extracts chart version, app version, deployed timestamp, user-supplied values, and computed values.
+- **Credential Redaction:** Automatically detects and redacts sensitive keys (passwords, tokens, private keys) in the Values panel.
+
+---
+
+## Helm Features
+
+### 1. Release Overview & Installed Objects
+Lists all deployed Helm releases, their current status (`deployed`, `superseded`, `failed`, `uninstalled`), and every Kubernetes object created by that release.
+
+### 2. Revision History
+View complete revision history with timestamps, chart versions, and notes.
+
+### 3. Server-Side Rollback
+Roll back a Helm release to any prior revision:
+- Applies the target revision's manifest via Server-Side Apply.
+- Writes a new revision Secret following standard Helm conventions, maintaining bidirectional compatibility with the official `helm` CLI.
+
+### 4. Safe Uninstall
+Uninstalling a release enumerates all objects created by the chart before deleting them and cleaning up the release's revision Secrets.

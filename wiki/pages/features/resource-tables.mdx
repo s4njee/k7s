@@ -1,0 +1,51 @@
+import { Callout } from 'nextra/components'
+
+# Resource Tables & Views
+
+The main workspace in k7s features high-density, virtualized resource tables engineered for speed, flexibility, and precise data filtering.
+
+---
+
+## Visual Table Showcase
+
+![Pods Resource Table](/screenshots/01-pods-table.png)
+<div className="screenshot-caption">
+  Pods table with real-time stream status, namespace filtering, tone-colored health dots, and age formatting.
+</div>
+
+---
+
+## Deployments and Workload Tables
+
+![Deployments Table](/screenshots/09-deployments.png)
+<div className="screenshot-caption">
+  Deployments table showing desired vs ready replicas, up-to-date counts, and age metrics.
+</div>
+
+---
+
+## Interactive Table Capabilities
+
+### 1. Virtualized Infinite Scrolling
+Large production tables with thousands of items (e.g. 10,000 pods) scroll smoothly at 60fps. Only visible rows are rendered into the DOM, minimizing memory usage and CPU rendering cycles.
+
+### 2. Multi-Level Filtering
+- **Namespace Selector:** Filter by a single namespace or view resources across `all` namespaces.
+- **Quick Text Filter (`/`):** Press <kbd>/</kbd> to instantly filter rows by name, namespace, or status substring.
+- **Label Selector Expressions:** Filter tables using standard Kubernetes label expressions:
+  ```
+  app=web, tier in (api, backend), !canary
+  ```
+
+### 3. Column Customization & Sorting
+- **Sorting:** Click any column header to toggle ascending/descending sort with numeric and semantic age awareness.
+- **Column Resizing & Reordering:** Drag column dividers to adjust widths, or reorder columns via the table settings menu.
+- **Custom JSONPath Columns:** Add ad-hoc custom columns extracted via JSONPath directly from the resource definition (e.g. `$.spec.serviceAccountName`).
+
+### 4. Selection & Bulk Actions
+- **Keyboard Navigation:** Navigate rows using <kbd>j</kbd> / <kbd>k</kbd> or arrow keys. Press <kbd>Enter</kbd> to open the detail panel.
+- **Multi-Selection:** <kbd>Shift</kbd> + Click to select contiguous ranges, or <kbd>⌘</kbd> + Click (<kbd>Ctrl</kbd> + Click) to toggle individual rows.
+- **Bulk Operations:** Right-click a multi-row selection to execute bulk deletions, restart rollouts, or cordon nodes.
+
+### 5. CSV Export
+Click the export icon on any table toolbar to export the currently filtered view as a formatted CSV file.

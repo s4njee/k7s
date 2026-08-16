@@ -10,16 +10,28 @@
 //! actually selects pods, and the HPA's scaleTargetRef resolves.
 
 use k7s_lib::kube::mappers::{
-    map_hpa, map_limitrange, map_mutatingwebhookconfiguration, map_networkpolicy, map_pdb,
-    map_resourcequota, map_validatingwebhookconfiguration,
+    map_endpointslice, map_endpoints, map_hpa, map_lease, map_limitrange,
+    map_mutatingadmissionpolicy, map_mutatingadmissionpolicybinding,
+    map_mutatingwebhookconfiguration, map_networkpolicy, map_pdb, map_priorityclass,
+    map_replicationcontroller, map_resourcequota, map_runtimeclass,
+    map_validatingadmissionpolicy, map_validatingadmissionpolicybinding,
+    map_validatingwebhookconfiguration,
 };
 use k8s_openapi::api::admissionregistration::v1::{
-    MutatingWebhookConfiguration, ValidatingWebhookConfiguration,
+    MutatingWebhookConfiguration, ValidatingAdmissionPolicy, ValidatingAdmissionPolicyBinding,
+    ValidatingWebhookConfiguration,
+};
+use k8s_openapi::api::admissionregistration::v1alpha1::{
+    MutatingAdmissionPolicy, MutatingAdmissionPolicyBinding,
 };
 use k8s_openapi::api::autoscaling::v2::HorizontalPodAutoscaler;
-use k8s_openapi::api::core::v1::{LimitRange, Pod, ResourceQuota};
+use k8s_openapi::api::coordination::v1::Lease;
+use k8s_openapi::api::core::v1::{Endpoints, LimitRange, Pod, ReplicationController, ResourceQuota};
+use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::networking::v1::NetworkPolicy;
+use k8s_openapi::api::node::v1::RuntimeClass;
 use k8s_openapi::api::policy::v1::PodDisruptionBudget;
+use k8s_openapi::api::scheduling::v1::PriorityClass;
 use kube::api::{Api, ListParams};
 use kube::{Client, ResourceExt};
 use std::collections::HashMap;
@@ -124,6 +136,148 @@ async fn main() -> anyhow::Result<()> {
         webhook_count += 1;
     }
     assert!(webhook_count > 0, "the fixture has webhook configs to check");
+
+    // ---- B90: the wave-2 kinds ----
+    // Each renders through the same mapper the watchers use and must satisfy the
+    // column contract + scope declared in src/lib/kinds.ts.
+
+    let pcs: Api<PriorityClass> = Api::all(client.clone());
+    let list = pcs.list(&ListParams::default()).await?;
+    println!("\nPriorityClasses ({}):", list.items.len());
+    let mut pc_count = 0;
+    for pc in &list.items {
+        let row = map_priorityclass(pc);
+        let t = |i: usize| row.cells[i].text.clone();
+        println!("  {:<28} {:<12} {}", t(0), t(1), t(2));
+        assert_eq!(row.cells.len(), 4, "PriorityClass rows must fill the 4-column contract");
+        assert!(row.namespace.is_none(), "a PriorityClass is cluster-scoped");
+        pc_count += 1;
+    }
+    assert!(pc_count > 0, "the fixture has a PriorityClass to check");
+
+    let rcs: Api<RuntimeClass> = Api::all(client.clone());
+    let list = rcs.list(&ListParams::default()).await?;
+    println!("\nRuntimeClasses ({}):", list.items.len());
+    for rc in &list.items {
+        let row = map_runtimeclass(rc);
+        let t = |i: usize| row.cells[i].text.clone();
+        println!("  {:<20} {:<20}", t(0), t(1));
+        assert_eq!(row.cells.len(), 3, "RuntimeClass rows must fill the 3-column contract");
+        assert!(row.namespace.is_none(), "a RuntimeClass is cluster-scoped");
+    }
+    assert!(!list.items.is_empty(), "the fixture has a RuntimeClass to check");
+
+    let leases: Api<Lease> = Api::all(client.clone());
+    let list = leases.list(&ListParams::default()).await?;
+    println!("\nLeases ({}):", list.items.len());
+    let mut holder_ok = 0;
+    for l in &list.items {
+        let row = map_lease(l);
+        let t = |i: usize| row.cells[i].text.clone();
+        println!("  {:<24} {:<40}", t(0), t(1));
+        assert_eq!(row.cells.len(), 3, "Lease rows must fill the 3-column contract");
+        assert!(row.namespace.is_some(), "a Lease is namespaced");
+        // The HOLDER cell must be the spec's holderIdentity (the leader).
+        let expected = l.spec.as_ref().and_then(|s| s.holder_identity.clone()).unwrap_or_default();
+        if !expected.is_empty() {
+            assert_eq!(t(1), expected, "the HOLDER cell must match spec.holderIdentity");
+            holder_ok += 1;
+        }
+    }
+    assert!(holder_ok > 0, "the fixture has a Lease with a holder to check");
+
+    let rcs: Api<ReplicationController> = Api::all(client.clone());
+    let list = rcs.list(&ListParams::default()).await?;
+    println!("\nReplicationControllers ({}):", list.items.len());
+    for rc in &list.items {
+        let row = map_replicationcontroller(rc);
+        let t = |i: usize| row.cells[i].text.clone();
+        println!("  {:<20} {:<7} {:<7} {:<7}", t(0), t(1), t(2), t(3));
+        assert_eq!(row.cells.len(), 5, "ReplicationController rows must fill the 5-column contract");
+        assert!(row.namespace.is_some(), "a ReplicationController is namespaced");
+    }
+    assert!(!list.items.is_empty(), "the fixture has a ReplicationController to check");
+
+    let eps: Api<Endpoints> = Api::all(client.clone());
+    let list = eps.list(&ListParams::default()).await?;
+    println!("\nEndpoints ({}):", list.items.len());
+    for e in &list.items {
+        let row = map_endpoints(e);
+        let t = |i: usize| row.cells[i].text.clone();
+        println!("  {:<24} {:<40}", t(0), t(1));
+        assert_eq!(row.cells.len(), 3, "Endpoints rows must fill the 3-column contract");
+        assert!(row.namespace.is_some(), "Endpoints are namespaced");
+    }
+    assert!(!list.items.is_empty(), "the fixture has Endpoints to check");
+
+    let ess: Api<EndpointSlice> = Api::all(client.clone());
+    let list = ess.list(&ListParams::default()).await?;
+    println!("\nEndpointSlices ({}):", list.items.len());
+    for es in &list.items {
+        let row = map_endpointslice(es);
+        let t = |i: usize| row.cells[i].text.clone();
+        println!("  {:<24} {:<10} {:<12} {:<30}", t(0), t(1), t(2), t(3));
+        assert_eq!(row.cells.len(), 5, "EndpointSlice rows must fill the 5-column contract");
+        assert!(row.namespace.is_some(), "an EndpointSlice is namespaced");
+    }
+    assert!(!list.items.is_empty(), "the fixture has EndpointSlices to check");
+
+    let vaps: Api<ValidatingAdmissionPolicy> = Api::all(client.clone());
+    let list = vaps.list(&ListParams::default()).await?;
+    println!("\nValidatingAdmissionPolicies ({}):", list.items.len());
+    for p in &list.items {
+        let row = map_validatingadmissionpolicy(p);
+        let t = |i: usize| row.cells[i].text.clone();
+        println!("  {:<24} {:<14} {}", t(0), t(1), t(2));
+        assert_eq!(row.cells.len(), 4, "VAP rows must fill the 4-column contract");
+        assert!(row.namespace.is_none(), "a VAP is cluster-scoped");
+    }
+    assert!(!list.items.is_empty(), "the fixture has a ValidatingAdmissionPolicy to check");
+
+    let vapbs: Api<ValidatingAdmissionPolicyBinding> = Api::all(client.clone());
+    let list = vapbs.list(&ListParams::default()).await?;
+    println!("ValidatingAdmissionPolicyBindings ({}):", list.items.len());
+    for b in &list.items {
+        let row = map_validatingadmissionpolicybinding(b);
+        let t = |i: usize| row.cells[i].text.clone();
+        println!("  {:<24} {:<24} {}", t(0), t(1), t(2));
+        assert_eq!(row.cells.len(), 4, "VAPB rows must fill the 4-column contract");
+        assert!(row.namespace.is_none(), "a VAPB is cluster-scoped");
+    }
+    assert!(!list.items.is_empty(), "the fixture has a ValidatingAdmissionPolicyBinding to check");
+
+    // MutatingAdmissionPolicy + Binding are alpha behind the MutatingAdmissionPolicy
+    // feature gate — off on the default fixture. That they are *unsupported* (the
+    // API isn't served) rather than an empty table or an error is exactly the B90
+    // "missing APIs are unsupported on this cluster" acceptance. Probe both.
+    let maps: Api<MutatingAdmissionPolicy> = Api::all(client.clone());
+    match maps.list(&ListParams::default()).await {
+        Ok(list) => {
+            println!("\nMutatingAdmissionPolicies ({}):", list.items.len());
+            for m in &list.items {
+                let row = map_mutatingadmissionpolicy(m);
+                let t = |i: usize| row.cells[i].text.clone();
+                println!("  {:<24} {:<14} {}", t(0), t(1), t(2));
+                assert_eq!(row.cells.len(), 4, "MAP rows must fill the 4-column contract");
+                assert!(row.namespace.is_none(), "a MAP is cluster-scoped");
+            }
+        }
+        Err(_) => println!("\nMutatingAdmissionPolicies: unsupported on this cluster (feature gate off) — expected"),
+    }
+    let mapbs: Api<MutatingAdmissionPolicyBinding> = Api::all(client.clone());
+    match mapbs.list(&ListParams::default()).await {
+        Ok(list) => {
+            println!("MutatingAdmissionPolicyBindings ({}):", list.items.len());
+            for b in &list.items {
+                let row = map_mutatingadmissionpolicybinding(b);
+                let t = |i: usize| row.cells[i].text.clone();
+                println!("  {:<24} {:<24} {}", t(0), t(1), t(2));
+                assert_eq!(row.cells.len(), 4, "MAPB rows must fill the 4-column contract");
+                assert!(row.namespace.is_none(), "a MAPB is cluster-scoped");
+            }
+        }
+        Err(_) => println!("MutatingAdmissionPolicyBindings: unsupported on this cluster (feature gate off) — expected"),
+    }
 
     // ---- cross-checks ----
     // The fixture PDB (yggdrasil-db, minAvailable 2) must actually select pods —

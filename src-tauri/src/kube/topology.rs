@@ -340,7 +340,7 @@ mod tests {
             assert_eq!(nav_for_kind(kind), Some(nav));
         }
         // A kind we don't list has no navigable node.
-        assert_eq!(nav_for_kind("Endpoints"), None);
+        assert_eq!(nav_for_kind("CustomResourceDefinition"), None);
     }
 
     /// An Ingress backend's service name is what the reference edge keys on.

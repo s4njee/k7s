@@ -184,6 +184,43 @@ export const MOCK_RESOURCES: Partial<Record<ResourceKind, RawRow[]>> = {
   validatingwebhookconfigurations: [
     R("k7s-fixture-validating", "", ["1", "31d"]),
   ],
+  // B90: built-in resource coverage, wave 2. Cluster-scoped kinds use ns "".
+  priorityclasses: [
+    R("default", "", ["0", "true", "62d"]),
+    R("system-cluster-critical", "", ["2000000000", "false", "62d"]),
+    R("low-priority", "", ["100", "false", "31d"]),
+  ],
+  runtimeclasses: [
+    R("gvisor", "", ["runsc", "31d"]),
+    R("runc", "", ["runc", "31d"]),
+  ],
+  leases: [
+    R("yggdrasil-db", "prod", ["yggdrasil-db-0_abc123", "31d"]),
+    R("kube-scheduler", "kube-system", ["kube-scheduler-k7s-dev-control-plane", "31d"]),
+  ],
+  replicationcontrollers: [
+    R("legacy-worker", "prod", ["2", "2", "2", "62d"]),
+  ],
+  endpoints: [
+    R("valkyrie-api", "prod", ["10.244.0.10:8080,10.244.0.3:8080", "31d"]),
+    R("bifrost-gateway", "prod", ["10.244.0.4:443", "31d"]),
+  ],
+  endpointslices: [
+    R("valkyrie-api-abc12", "prod", ["IPv4", "8080", "10.244.0.10,10.244.0.3", "31d"]),
+    R("bifrost-gateway-def34", "prod", ["IPv4", "443", "10.244.0.4", "31d"]),
+  ],
+  validatingadmissionpolicies: [
+    R("require-team-label", "", ["Fail", "2", "12d"]),
+  ],
+  validatingadmissionpolicybindings: [
+    R("require-team-label-binding", "", ["require-team-label", "team-config", "12d"]),
+  ],
+  mutatingadmissionpolicies: [
+    R("add-owner-label", "", ["Fail", "1", "12d"]),
+  ],
+  mutatingadmissionpolicybindings: [
+    R("add-owner-label-binding", "", ["add-owner-label", "—", "12d"]),
+  ],
 };
 
 /** Status→tone, mirroring the backend's `status_tone` exactly (B32: the problems

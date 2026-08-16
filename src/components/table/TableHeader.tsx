@@ -143,29 +143,31 @@ function HeaderCell({
       onDragOver={(e) => isBase && e.preventDefault()}
       onDrop={onDrop}
     >
-      <button type="button" className={styles.thButton} onClick={() => toggleSort(index)}>
-        {refMeta.name}
-        {sortCol === index && (
-          <span className={styles.sortArrow} aria-hidden="true">
-            {sortDir === "asc" ? " ▲" : " ▼"}
+      <div className={styles.thInner}>
+        {isBase && onReorder && (
+          <span
+            className={styles.thGrip}
+            title="drag to reorder"
+            aria-hidden="true"
+            draggable
+            onDragStart={onDragStart}
+            onDragEnd={() => {
+              setDragging(false);
+              dragName.current = null;
+            }}
+          >
+            ⣿
           </span>
         )}
-      </button>
-      {isBase && onReorder && (
-        <span
-          className={styles.thGrip}
-          title="drag to reorder"
-          aria-hidden="true"
-          draggable
-          onDragStart={onDragStart}
-          onDragEnd={() => {
-            setDragging(false);
-            dragName.current = null;
-          }}
-        >
-          ⣿
-        </span>
-      )}
+        <button type="button" className={styles.thButton} onClick={() => toggleSort(index)}>
+          {refMeta.name}
+          {sortCol === index && (
+            <span className={styles.sortArrow} aria-hidden="true">
+              {sortDir === "asc" ? " ▲" : " ▼"}
+            </span>
+          )}
+        </button>
+      </div>
       {onResize && (
         <span
           className={styles.thResize}

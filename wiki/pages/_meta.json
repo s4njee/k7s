@@ -1,0 +1,14 @@
+{
+  "index": "Overview",
+  "getting-started": "Getting Started",
+  "architecture": "Architecture & Internals",
+  "features": "Core Features",
+  "operations": "Operations & Security",
+  "development": "Development & Testing",
+  "reference": "Reference Guide",
+  "github_link": {
+    "title": "GitHub ↗",
+    "href": "https://github.com/s4njee/k7s",
+    "newWindow": true
+  }
+}

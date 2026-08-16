@@ -1,0 +1,23 @@
+import { Callout } from 'nextra/components'
+
+# Integrated kubectl Terminal
+
+k7s features an integrated **kubectl Terminal** (press <kbd>⌘T</kbd> or click the statusbar terminal pill) that spawns a real PTY shell pre-configured for your active Kubernetes cluster.
+
+---
+
+## Visual Showcase
+
+![Integrated kubectl Terminal](/screenshots/13-kubectl-terminal.png)
+<div className="screenshot-caption">
+  Integrated kubectl terminal (⌘T) running inside an isolated, single-context kubeconfig environment.
+</div>
+
+---
+
+## Architectural Highlights
+
+- **Real PTY Allocation:** Uses the `portable-pty` crate to allocate a native pseudo-terminal connected directly to your default shell (zsh, bash, fish, or powershell).
+- **Isolated Single-Context Kubeconfig:** When spawned, k7s writes a temporary, read-only (`0600`) single-context kubeconfig pointing directly at the active cluster and sets `KUBECONFIG` in the subshell environment. Any `kubectl` command you run targets the viewed cluster immediately without risk of mutating other contexts.
+- **Login-Shell PATH Discovery:** Resolves your full user login shell PATH at boot so that `kubectl`, `kubectx`, `k9s`, and custom exec plugins (such as `gke-gcloud-auth-plugin` or `aws-iam-authenticator`) work seamlessly inside the packaged application.
+- **Cluster-Badged Multi-Tabs:** Open multiple terminal tabs badged by cluster ID. Tabs and shells terminate cleanly when closed or when the cluster disconnects.

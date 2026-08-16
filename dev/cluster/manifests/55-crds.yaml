@@ -1,0 +1,83 @@
+# VerticalPodAutoscaler CRD (B90) — a minimal but structural schema so the
+# fixture's VPA object applies and the app discovers it under the Custom group,
+# with printer columns (MODE / TARGET) for the table and a status section the
+# properties panel reads per-container recommendations from.
+
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: verticalpodautoscalers.autoscaling.k8s.io
+  annotations:
+    api-approved.kubernetes.io: "https://github.com/kubernetes/kubernetes/pull/74485"
+spec:
+  group: autoscaling.k8s.io
+  names:
+    kind: VerticalPodAutoscaler
+    listKind: VerticalPodAutoscalerList
+    plural: verticalpodautoscalers
+    singular: verticalpodautoscaler
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Mode
+          type: string
+          jsonPath: .spec.updatePolicy.updateMode
+        - name: Target
+          type: string
+          jsonPath: .spec.targetRef.name
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                targetRef:
+                  type: object
+                  properties:
+                    apiVersion: { type: string }
+                    kind: { type: string }
+                    name: { type: string }
+                updatePolicy:
+                  type: object
+                  properties:
+                    updateMode: { type: string }
+                resourcePolicy:
+                  type: object
+                  properties:
+                    containerPolicies:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          containerName: { type: string }
+                          minAllowed:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          maxAllowed:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              properties:
+                recommendation:
+                  type: object
+                  properties:
+                    containerRecommendations:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          containerName: { type: string }
+                          target:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          lowerBound:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          upperBound:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true

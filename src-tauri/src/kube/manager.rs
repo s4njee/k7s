@@ -46,6 +46,9 @@ pub enum WatcherState {
     Backoff,
     /// The API denies this kind (403); retries won't help until RBAC changes.
     Forbidden,
+    /// The cluster doesn't serve this kind's API (B90) — a 404 on the watcher's
+    /// initial list. Retrying won't help; the kind is hidden as "unsupported".
+    Unsupported,
     /// Deliberately stopped (e.g. the user navigated away from a custom kind).
     Stopped,
 }

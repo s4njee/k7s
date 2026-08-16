@@ -1,0 +1,51 @@
+import { Callout } from 'nextra/components'
+
+# Testing & QA Strategy
+
+k7s employs a multi-tiered testing strategy covering frontend unit/RTL suites, Rust backend unit tests, automated accessibility audits (axe), and discovery-based live cluster harnesses.
+
+---
+
+## Automated Test Suites
+
+```
+k7s Test Suite Architecture
+├── Frontend (Vitest + React Testing Library)
+│   ├── Store & Slice Unit Tests (480+ tests)
+│   ├── Component Rendering & Interaction Tests
+│   ├── a11y Focus Trapping & Behavior Tests
+│   └── Automated axe Accessibility Audits (Dark & Light themes)
+├── Rust Backend (Cargo Test)
+│   ├── DTO Mapping & Status Tone Tests (230+ tests)
+│   ├── RFC3339 & Log Parsing Heuristics
+│   ├── PTY Terminal & Kubeconfig Isolation
+│   └── Multi-Cluster Lifecycle Management
+├── Live Cluster Harnesses (src-tauri/examples/*_check.rs)
+│   ├── Kind Fixture Verification (21 suites)
+│   ├── Helm Write & Rollback Check
+│   └── Discovery-Based Fixture Detection
+└── End-to-End Tests (WebDriver / tauri-driver)
+    └── Packaged App Launch & Smoke Workflows
+```
+
+---
+
+## Running Test Suites
+
+### 1. Frontend Tests (Vitest)
+```bash
+# Run all vitest suites
+pnpm test
+
+# Run vitest in interactive watch mode
+pnpm run test:watch
+```
+
+### 2. Rust Unit Tests & Linter
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+```
+
+### 3. Accessibility Testing (axe)
+`src/axe-views.test.tsx` renders all primary views (`ClusterOverview`, `ResourceTable`, `ClusterSwitcher`, `DetailPanel`, `TerminalPanel`) in both Dark and Light themes and asserts zero serious/critical WCAG violations.

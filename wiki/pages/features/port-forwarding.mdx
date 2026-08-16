@@ -1,0 +1,19 @@
+import { Callout } from 'nextra/components'
+
+# Port Forwarding Hub
+
+k7s provides a full-featured **Port Forwarding Hub** for routing local TCP traffic directly to Pods and Services running inside your Kubernetes cluster.
+
+---
+
+## Creating & Managing Forwards
+
+### 1. From Pods or Services
+- In any Pod or Service detail panel or context menu, click **Port Forward…**.
+- Select target container port, choose a local port (or auto-assign a free random port), and click **Start Forward**.
+
+### 2. The Forwards Management Workspace
+- View all active and configured port-forwards across all clusters in a single dashboard.
+- Real-time connection status indicators (`running`, `connecting`, `stopped`, `error`).
+- **One-Click Browser Launch:** Click the link or open icon to launch `http://localhost:<port>` directly in your default browser.
+- **Reconnect Presets:** Save frequently used port-forward configurations as named presets to restart them in a single click whenever you reconnect to the cluster.

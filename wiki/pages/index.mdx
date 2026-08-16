@@ -1,0 +1,70 @@
+import { Callout, Cards, Card } from 'nextra/components'
+
+# k7s — Kubernetes Visual Monitor
+
+**k7s** is a fast, keyboard-light, single-window **Kubernetes visual monitor** in the spirit of Lens, built as a desktop application with a high-performance **Rust backend (Tauri v2)** and a **React 19 + TypeScript** frontend.
+
+Designed from the ground up for high fidelity, instant responsiveness, zero telemetry, and deep cluster inspection, k7s delivers the rich visual ergonomics of modern desktop tools while preserving the raw control and speed required by DevOps and SRE teams.
+
+---
+
+## Visual Showcase
+
+![The k7s Resource Table](/screenshots/01-pods-table.png)
+<div className="screenshot-caption">
+  The resource table: 31+ built-in resource kinds plus discovered CRDs, with live stream counts, delta updates, and backend-driven status coloring.
+</div>
+
+---
+
+## Why k7s?
+
+<Cards num={3}>
+  <Card title="⚡ Local-First & Blazing Fast" href="/architecture/overview">
+    Engineered with Tauri v2 and Rust for minimal memory footprint (&lt; 100MB RAM), fast cold starts, and buttery smooth 60fps virtualized tables handling 10,000+ objects.
+  </Card>
+  <Card title="🔒 Zero Telemetry & Privacy" href="/operations/security-and-privacy">
+    Completely telemetry-free. No account logins, no cloud tracking, no analytics pinging back. Your kubeconfigs, cluster URLs, and tokens never leave your local machine.
+  </Card>
+  <Card title="🚀 Multi-Cluster Retained State" href="/features/cluster-management">
+    Seamlessly switch between multiple Kubernetes clusters (⌘1–9). k7s retains state, live watch streams, terminals, and port-forwards concurrently across all connected clusters.
+  </Card>
+</Cards>
+
+<Cards num={3}>
+  <Card title="📜 Live Log Streaming" href="/features/detail-panel#logs-tab">
+    Multi-container interleaved streaming, follow/pause, `previous` container inspection for crash loops, since-time filtering, text search, and color-toned log levels.
+  </Card>
+  <Card title="🛠️ Server-Side Dry Run & Diff" href="/features/detail-panel#yaml-tab">
+    Built-in CodeMirror 6 YAML editor with dry-run diff against Kubernetes validating and mutating webhooks before committing any change.
+  </Card>
+  <Card title="💻 Integrated kubectl Terminal" href="/features/kubectl-terminal">
+    Cluster-scoped PTY terminal (⌘T) that spawns with your login shell PATH and an isolated single-context kubeconfig pointing directly at the active cluster.
+  </Card>
+</Cards>
+
+---
+
+## Key Capabilities at a Glance
+
+- **Multi-Cluster Rail**: Switch between dozens of clusters instantly without teardown. Connect multiple kubeconfig files, view aggregated problem summaries, and export context QR codes for mobile sync (`mk7s`).
+- **Comprehensive Catalog**: 31+ built-in kinds across Workloads, Network, Config, Storage, Cluster, and RBAC, plus dynamic **Custom Resource Definition (CRD)** lazy discovery with `additionalPrinterColumns`.
+- **Relationship Graph & Properties**: Deep "what is this wired to" relationship resolution. Pods link to ReplicaSets and Deployments, PVCs resolve to PVs, Secrets redact credentials safely, and Helm releases show full revision histories.
+- **Root Node Debug Shell**: Launch an interactive privileged debug pod that `nsenter`s directly into the host namespaces with an explicit consent gate and auto-expiring deadline.
+- **Port-Forwarding Hub**: Manage pod and service forwards with reconnect presets, live status indicators, and one-click browser launch.
+- **Helm Release Management**: Inspect releases decoded directly from storage Secrets, view values, diff revisions, and execute safe rollbacks or uninstalls.
+- **Safe Operations**: Eviction-based node drains that calculate PodDisruptionBudgets (PDBs) before execution, workload rollout restarts and undos, and bulk actions.
+- **Offline & Self-Contained**: Bundled fonts (IBM Plex Sans, JetBrains Mono), local design tokens, and instant theme switching (Dark / Light / System).
+
+---
+
+## Documentation Roadmap
+
+Explore the comprehensive guides and references below:
+
+- **[Getting Started](/getting-started)**: Installation on macOS, Linux, and Windows, building from source, running in demo mode, and configuration.
+- **[Architecture & Internals](/architecture/overview)**: Deep dive into the Rust `ClientManager`, watcher delta pipelines, Tauri IPC contract, and Zustand state architecture.
+- **[Core Features](/features/cluster-management)**: Detailed guides on multi-cluster switching, tables, log streaming, YAML dry runs, Helm, port forwarding, and kubectl terminal.
+- **[Operations & Security](/operations/diagnostics)**: Diagnostics bundles, sanitization, log levels, security posture, and auto-updates.
+- **[Development & Testing](/development/workflow)**: Testing strategy, live cluster harnesses, kind fixture clusters, and accessibility verification.
+- **[Reference Guide](/reference/keyboard-shortcuts)**: Complete keyboard shortcut cheatsheets, supported resource matrix, and troubleshooting tips.

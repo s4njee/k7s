@@ -1,0 +1,22 @@
+import { Callout } from 'nextra/components'
+
+# Security & Zero-Telemetry
+
+k7s is built around strict local-first security guarantees, privacy by default, and defense in depth.
+
+---
+
+## Zero Telemetry Policy
+
+- **No Remote Tracking:** k7s has zero Google Analytics, Segment, PostHog, Mixpanel, or telemetry collectors.
+- **No User Accounts:** No sign-up, email verification, or cloud accounts required.
+- **Strictly Opt-In Crash Reporting:** Crash reporting is disabled by default. If enabled, it only transmits crash backtraces to a user-configured endpoint (e.g. self-hosted GlitchTip).
+
+---
+
+## Security Hardening & Isolation
+
+1. **Content Security Policy (CSP):** The webview operates under a strict CSP: `default-src 'self'`. Network connections are strictly constrained to local IPC channels.
+2. **No `dangerouslySetInnerHTML`:** All resource names, annotations, and logs are rendered as escaped text nodes, preventing XSS injection even when viewing malicious pod manifests.
+3. **Redacted Secret Viewing:** Secrets displayed in the Properties tab redact base64 values by default. Applying YAML to Secrets enforces safety checks.
+4. **Scanned Dependencies:** Automated CI workflows enforce `cargo audit` and `pnpm audit` gates to prevent vulnerable dependencies from entering release bundles.

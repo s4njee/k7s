@@ -1,0 +1,72 @@
+import { Callout } from 'nextra/components'
+
+# Getting Started with k7s
+
+Welcome to k7s! This guide covers everything you need to know to install, run, configure, and get productive with k7s.
+
+---
+
+## System Requirements & Prerequisites
+
+To build and run k7s from source, ensure your environment meets the following baseline prerequisites:
+
+| Requirement | Minimum Version | Notes |
+|---|---|---|
+| **Node.js** | `>= 20.0.0` | Node 20 or Node 22 recommended |
+| **Package Manager** | `pnpm >= 10.0.0` or `npm >= 10.0.0` | pnpm is the repository default |
+| **Rust Toolchain** | Stable (`>= 1.80.0`) | Install via `rustup` |
+| **Tauri v2 Prerequisites** | OS-dependent | Xcode CLI tools (macOS), `webkit2gtk` / `build-essential` (Linux), WebView2 (Windows) |
+| **Kubernetes Access** | `v1.24+` | Any valid `~/.kube/config` (or use demo mode) |
+| **Local Kind (Optional)** | `kind >= 0.20.0` + `kubectl` | For running the local end-to-end fixture cluster |
+
+<Callout type="info">
+  **No Cluster Needed for Testing:** You do not need a running Kubernetes cluster to try out k7s! You can launch k7s in **Demo Mode** (`VITE_DEMO=1`), which runs the full UI in your browser or desktop window with rich, synthetic fixture data.
+</Callout>
+
+---
+
+## Quick Start (30 Seconds)
+
+Clone the repository and launch the app in demo mode right away:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/s4njee/k7s.git
+cd k7s
+
+# 2. Install dependencies
+pnpm install # or npm install
+
+# 3. Launch in Demo Mode (instant browser UI, no Rust build needed)
+VITE_DEMO=1 pnpm dev
+```
+
+Visit [`http://localhost:1420`](http://localhost:1420) to interact with the full mock cluster.
+
+---
+
+## Running Against a Real Kubernetes Cluster
+
+When you are ready to connect to real Kubernetes clusters:
+
+```bash
+# Recommended dev launcher (guards against stale ports and orphans)
+dev/run.sh
+
+# Or standard Tauri dev runner
+pnpm tauri:dev
+```
+
+By default, k7s reads your current kubeconfig context at `~/.kube/config` and connects immediately. You can also supply a custom kubeconfig path:
+
+```bash
+KUBECONFIG=/path/to/custom-kubeconfig.yaml dev/run.sh
+```
+
+---
+
+## Next Steps
+
+- Check out the full [Installation Guide](/getting-started/installation) for pre-built binaries and native platform packages.
+- Learn about [Demo Mode & Stress Testing](/getting-started/demo-mode).
+- Configure themes, log levels, and namespaces in [Configuration & Preferences](/getting-started/configuration).

@@ -260,6 +260,68 @@ export const KIND_META: Record<ResourceKind, KindMeta> = {
     icon: "✓",
     columns: ["NAME", "WEBHOOKS", "AGE"],
   },
+  // B90: built-in resource coverage, wave 2.
+  priorityclasses: {
+    group: "cluster",
+    label: "PriorityClasses",
+    icon: "⚠",
+    columns: ["NAME", "VALUE", "GLOBAL-DEFAULT", "AGE"],
+  },
+  runtimeclasses: {
+    group: "cluster",
+    label: "RuntimeClasses",
+    icon: "⌗",
+    columns: ["NAME", "HANDLER", "AGE"],
+  },
+  leases: {
+    group: "config",
+    label: "Leases",
+    icon: "⚿",
+    columns: ["NAME", "HOLDER", "AGE"],
+  },
+  replicationcontrollers: {
+    group: "workloads",
+    label: "ReplicationControllers",
+    icon: "▦",
+    columns: ["NAME", "DESIRED", "CURRENT", "READY", "AGE"],
+  },
+  endpoints: {
+    group: "network",
+    label: "Endpoints",
+    icon: "◎",
+    columns: ["NAME", "ENDPOINTS", "AGE"],
+  },
+  endpointslices: {
+    group: "network",
+    label: "EndpointSlices",
+    icon: "◍",
+    columns: ["NAME", "ADDRESSTYPE", "PORTS", "ENDPOINTS", "AGE"],
+  },
+  // Admission policies: cluster-scoped, evaluated against objects on admission.
+  validatingadmissionpolicies: {
+    group: "cluster",
+    label: "ValidatingAdmissionPolicies",
+    icon: "§",
+    columns: ["NAME", "FAILURE POLICY", "VALIDATIONS", "AGE"],
+  },
+  validatingadmissionpolicybindings: {
+    group: "cluster",
+    label: "AdmissionPolicyBindings",
+    icon: "§",
+    columns: ["NAME", "POLICY NAME", "PARAM REF", "AGE"],
+  },
+  mutatingadmissionpolicies: {
+    group: "cluster",
+    label: "MutatingAdmissionPolicies",
+    icon: "✎",
+    columns: ["NAME", "FAILURE POLICY", "MUTATIONS", "AGE"],
+  },
+  mutatingadmissionpolicybindings: {
+    group: "cluster",
+    label: "AdmissionPolicyBindings",
+    icon: "✎",
+    columns: ["NAME", "POLICY NAME", "PARAM REF", "AGE"],
+  },
   // A read-only feed rather than a managed resource, but it lives in the Cluster
   // group because it is cluster-wide. It *is* namespaced, so it keeps a NAMESPACE
   // column and honours the namespace filter.
@@ -300,6 +362,13 @@ const CLUSTER_SCOPED: ReadonlySet<string> = new Set<string>([
   // B80: admission webhook configurations are cluster-scoped.
   "mutatingwebhookconfigurations",
   "validatingwebhookconfigurations",
+  // B90: scheduling/runtime/admission-policy kinds are cluster-scoped.
+  "priorityclasses",
+  "runtimeclasses",
+  "validatingadmissionpolicies",
+  "validatingadmissionpolicybindings",
+  "mutatingadmissionpolicies",
+  "mutatingadmissionpolicybindings",
 ]);
 
 /** Groups in sidebar order. */
@@ -501,6 +570,17 @@ const BUILTIN_KIND_TO_NAV: Record<string, ResourceKind> = {
   LimitRange: "limitranges",
   MutatingWebhookConfiguration: "mutatingwebhookconfigurations",
   ValidatingWebhookConfiguration: "validatingwebhookconfigurations",
+  // B90 — the wave-2 kinds, for event/owner resolution.
+  PriorityClass: "priorityclasses",
+  RuntimeClass: "runtimeclasses",
+  Lease: "leases",
+  ReplicationController: "replicationcontrollers",
+  Endpoints: "endpoints",
+  EndpointSlice: "endpointslices",
+  ValidatingAdmissionPolicy: "validatingadmissionpolicies",
+  ValidatingAdmissionPolicyBinding: "validatingadmissionpolicybindings",
+  MutatingAdmissionPolicy: "mutatingadmissionpolicies",
+  MutatingAdmissionPolicyBinding: "mutatingadmissionpolicybindings",
 };
 
 /**

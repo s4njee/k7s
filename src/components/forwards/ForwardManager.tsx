@@ -19,6 +19,8 @@ import { viewId } from "../../lib/views";
 import { errDisplay } from "../../lib/errors";
 import type { ForwardInfo, ForwardPreset } from "../../providers/types";
 
+const EMPTY_PRESETS: ForwardPreset[] = [];
+
 export function ForwardManager() {
   const open = useStore((s) => s.forwardManagerOpen);
   const setOpen = useStore((s) => s.setForwardManagerOpen);
@@ -26,7 +28,7 @@ export function ForwardManager() {
   const connection = useStore((s) => s.connection);
   const clusterStatus = useStore((s) => s.clusterStatus);
   const forwards = useStore((s) => s.portForwards);
-  const presets = useStore((s) => (s.activeCid ? s.forwardPresetsByCid[s.activeCid] ?? [] : []));
+  const presets = useStore((s) => (s.activeCid ? s.forwardPresetsByCid[s.activeCid] ?? EMPTY_PRESETS : EMPTY_PRESETS));
   const addPreset = useStore((s) => s.addForwardPreset);
   const removePreset = useStore((s) => s.removeForwardPreset);
   const setPortForwards = useStore((s) => s.setPortForwards);

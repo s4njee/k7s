@@ -1,0 +1,40 @@
+import { Callout } from 'nextra/components'
+
+# Troubleshooting & FAQ
+
+Common troubleshooting steps, known gotchas, and frequently asked questions for k7s.
+
+---
+
+## Connection & Cluster Issues
+
+### 1. Cluster Shows "Stale" (Amber Badge)
+- **Cause:** k7s lost network connectivity to the Kubernetes API server (e.g. disconnected corporate VPN, sleep/wake cycle, or API server restart).
+- **Behavior:** k7s preserves all existing rows and cache so you don't lose context.
+- **Resolution:** Re-establish network/VPN connectivity. k7s's background health poller will automatically clear the stale state on the next successful probe.
+
+### 2. Kind Table Shows 0 Rows and "Permission Denied"
+- **Cause:** Your Kubernetes user/ServiceAccount lacks RBAC permissions (`get`, `list`, `watch`) for that specific resource kind.
+- **Behavior:** k7s does not crash other stream watchers. It isolates the forbidden kind and displays a warning banner.
+- **Resolution:** Verify your `ClusterRole` and `ClusterRoleBinding` configurations.
+
+---
+
+## Terminal & Shell Issues
+
+### 1. `kubectl: command not found` in Integrated Terminal
+- **Cause:** When launched from macOS Finder / GUI launcher, the application environment may not inherit shell profile paths (`/usr/local/bin`, `/opt/homebrew/bin`, `~/.krew/bin`).
+- **Resolution:** k7s resolves your user login shell PATH at boot. If you installed kubectl after launching k7s, restart k7s or run `source ~/.zshrc` inside the terminal tab.
+
+### 2. Node Shell Fails with "Privileged Pods Forbidden"
+- **Cause:** The target cluster enforces Pod Security Standards (`restricted` or `baseline`) that prevent privileged containers with host namespace access.
+- **Resolution:** Node debug shell requires cluster permissions to run privileged pods with `hostPID: true` and `hostIPC: true`.
+
+---
+
+## Log & Export Support
+
+### How do I share logs for a bug report safely?
+1. Press <kbd>⌘⇧E</kbd> (or choose **File → Export Diagnostics…**).
+2. Save the `.zip` archive.
+3. Attach the generated `.zip` to your GitHub issue. All tokens, private certificates, server URLs, and home directory paths are automatically scrubbed by k7s's redaction engine.

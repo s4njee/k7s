@@ -1,0 +1,11 @@
+{
+  "cluster-management": "Multi-Cluster Management",
+  "resource-catalog": "Resource Catalog & Navigation",
+  "resource-tables": "Resource Tables & Views",
+  "detail-panel": "Deep Inspection & Detail Panel",
+  "actions-and-operations": "Actions & Blast-Radius Operations",
+  "helm-integration": "Helm Release Lifecycle",
+  "port-forwarding": "Port Forwarding Hub",
+  "kubectl-terminal": "Integrated kubectl Terminal",
+  "command-palette": "Command Palette (⌘K)"
+}

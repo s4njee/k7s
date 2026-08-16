@@ -1,0 +1,57 @@
+import { Callout } from 'nextra/components'
+
+# Provider Seam & Mocking
+
+A fundamental architectural strength of k7s is the **Provider Seam** (`src/providers/`). All communication between the UI components and the backend is abstracted behind the `DataProvider` interface (`src/providers/types.ts`).
+
+---
+
+## The DataProvider Contract
+
+```typescript
+export interface DataProvider {
+  // Cluster & Contexts
+  listContexts(): Promise<ContextInfo[]>
+  connect(cid: string): Promise<ClusterInfo>
+  disconnect(cid: string): Promise<void>
+  
+  // Real-time Event Subscriptions
+  onResourceUpdate(cid: string, cb: (update: ResourceUpdate) => void): Unsubscribe
+  onClusterStatus(cid: string, cb: (status: ClusterStatus) => void): Unsubscribe
+  onWatcherHealth(cid: string, cb: (health: WatcherHealthMap) => void): Unsubscribe
+  onPodMetrics(cid: string, cb: (metrics: PodMetricsMap) => void): Unsubscribe
+  
+  // Resource Operations
+  getYaml(ref: ResourceRef): Promise<string>
+  dryRunYaml(ref: ResourceRef, yaml: string): Promise<DryRunResult>
+  applyYaml(ref: ResourceRef, yaml: string): Promise<ApplyResult>
+  deleteResource(ref: ResourceRef): Promise<void>
+  scaleResource(ref: ResourceRef, replicas: number): Promise<void>
+  restartWorkload(ref: ResourceRef): Promise<void>
+  
+  // Logs & Shells
+  startLogStream(ref: ResourceRef, opts: LogStreamOptions, onLine: (line: LogLine) => void): Promise<LogHandle>
+  startTerminalSession(opts: TerminalSpawnOptions): Promise<TerminalHandle>
+}
+```
+
+---
+
+## Implementations
+
+### 1. `TauriProvider` (`src/providers/tauri/TauriProvider.ts`)
+- The production provider used inside the Tauri desktop app.
+- Maps method calls to Tauri IPC commands (`invoke('connect', { ... })`) and subscribes to Tauri events (`listen('resource-update', ...)`).
+
+### 2. `MockProvider` (`src/providers/mock/MockProvider.ts`)
+- Used in browser development (`VITE_DEMO=1`) and automated unit tests.
+- Replays authentic mock datasets matching the canonical design prototype (`design/K8s Monitor.dc.html`).
+- Emulates live log tickers, cluster status latency fluctuations, and synthetic metric pulses.
+
+---
+
+## Benefits of the Seam
+
+- **Zero-Cluster UI Development:** Frontend developers can design, style, and test complex features (such as CrashLoopBackOff log viewers or diff inspectors) entirely in a standard browser.
+- **Hermetic Testing:** Vitest and React Testing Library (RTL) tests run against `MockProvider`, ensuring lightning-fast test suites that never touch network sockets or external binaries.
+- **Pixel-Fidelity Verification:** Guarantees that design reviews and visual regression tests are completely deterministic.

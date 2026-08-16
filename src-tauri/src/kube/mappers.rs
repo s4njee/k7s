@@ -12,20 +12,28 @@ use super::dto::{Cell, CronMeta, InvolvedRef, JobMeta, NavTarget, PodMeta, PodRe
 use super::jsonpath;
 use super::metrics::{parse_cpu_millis, parse_mem_bytes};
 use k8s_openapi::api::admissionregistration::v1::{
-    MutatingWebhookConfiguration, ValidatingWebhookConfiguration,
+    MutatingWebhookConfiguration, ValidatingAdmissionPolicy, ValidatingAdmissionPolicyBinding,
+    ValidatingWebhookConfiguration,
+};
+use k8s_openapi::api::admissionregistration::v1alpha1::{
+    MutatingAdmissionPolicy, MutatingAdmissionPolicyBinding,
 };
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::autoscaling::v2::{
     HorizontalPodAutoscaler, HorizontalPodAutoscalerStatus, MetricTarget, MetricValueStatus,
 };
 use k8s_openapi::api::batch::v1::{CronJob, Job};
+use k8s_openapi::api::coordination::v1::Lease;
 use k8s_openapi::api::core::v1::{
-    ConfigMap, LimitRange, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod,
-    ResourceQuota, Secret, Service, ServiceAccount,
+    ConfigMap, Endpoints, LimitRange, Namespace, Node, PersistentVolume, PersistentVolumeClaim,
+    Pod, ReplicationController, ResourceQuota, Secret, Service, ServiceAccount,
 };
+use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::networking::v1::{Ingress, IngressClass, NetworkPolicy};
+use k8s_openapi::api::node::v1::RuntimeClass;
 use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::api::rbac::v1::{ClusterRole, ClusterRoleBinding, Role, RoleBinding};
+use k8s_openapi::api::scheduling::v1::PriorityClass;
 use k8s_openapi::api::storage::v1::StorageClass;
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
@@ -1265,6 +1273,260 @@ fn webhook_config_row<K: ResourceExt>(obj: &K, webhooks: usize) -> Row {
             name_cell(obj),
             Cell::new(webhooks.to_string(), Tone::Secondary),
             age_cell(obj),
+        ],
+        labels,
+        annotations,
+        ..Default::default()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// B90: built-in resource coverage, wave 2.
+// ---------------------------------------------------------------------------
+
+/// PriorityClasses: NAME, VALUE, GLOBAL-DEFAULT, AGE. The default class is
+/// marked in the name, as kubectl does.
+pub fn map_priorityclass(pc: &PriorityClass) -> Row {
+    let global_default = pc.global_default.unwrap_or(false);
+    let name = if global_default {
+        format!("{} (default)", pc.name_any())
+    } else {
+        pc.name_any()
+    };
+    let (labels, annotations) = row_metadata(pc);
+    Row {
+        uid: uid_of(pc),
+        name: pc.name_any(),
+        namespace: None,
+        cells: vec![
+            Cell::new(name, Tone::Primary),
+            Cell::new(pc.value.to_string(), Tone::Secondary),
+            Cell::new(if global_default { "true" } else { "false" }, Tone::Secondary),
+            age_cell(pc),
+        ],
+        labels,
+        annotations,
+        ..Default::default()
+    }
+}
+
+/// RuntimeClasses: NAME, HANDLER, AGE.
+pub fn map_runtimeclass(rc: &RuntimeClass) -> Row {
+    let (labels, annotations) = row_metadata(rc);
+    Row {
+        uid: uid_of(rc),
+        name: rc.name_any(),
+        namespace: None,
+        cells: vec![
+            name_cell(rc),
+            Cell::new(rc.handler.clone(), Tone::Secondary),
+            age_cell(rc),
+        ],
+        labels,
+        annotations,
+        ..Default::default()
+    }
+}
+
+/// Leases: NAME, HOLDER, AGE — the holder is who currently holds the lease
+/// (the leader in a leader-election).
+pub fn map_lease(l: &Lease) -> Row {
+    let holder = l
+        .spec
+        .as_ref()
+        .and_then(|s| s.holder_identity.clone())
+        .unwrap_or_else(|| "—".into());
+    simple_row(
+        l,
+        vec![name_cell(l), Cell::new(holder, Tone::Secondary), age_cell(l)],
+    )
+}
+
+/// ReplicationControllers: NAME, DESIRED, CURRENT, READY, AGE (kubectl's columns).
+pub fn map_replicationcontroller(rc: &ReplicationController) -> Row {
+    let desired = rc.spec.as_ref().and_then(|s| s.replicas).unwrap_or(0);
+    let status = rc.status.as_ref();
+    let current = status.map(|s| s.replicas).unwrap_or(0);
+    let ready = status.and_then(|s| s.ready_replicas).unwrap_or(0);
+    simple_row(
+        rc,
+        vec![
+            name_cell(rc),
+            Cell::new(desired.to_string(), Tone::Secondary),
+            Cell::new(current.to_string(), Tone::Secondary),
+            Cell::new(ready.to_string(), Tone::Secondary),
+            age_cell(rc),
+        ],
+    )
+}
+
+/// Endpoints: NAME, ENDPOINTS, AGE. The ENDPOINTS cell is the joined
+/// `ip:port` pairs from the subsets (what the Service exposes).
+pub fn map_endpoints(e: &Endpoints) -> Row {
+    let endpoints = e
+        .subsets
+        .iter()
+        .flatten()
+        .flat_map(|s| {
+            let ports: Vec<i32> = s
+                .ports
+                .as_ref()
+                .map(|ps| ps.iter().map(|p| p.port).collect())
+                .unwrap_or_default();
+            s.addresses
+                .as_ref()
+                .map(|addrs| {
+                    addrs
+                        .iter()
+                        .flat_map(|a| ports.iter().map(move |p| format!("{}:{p}", a.ip)))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    simple_row(
+        e,
+        vec![
+            name_cell(e),
+            Cell::new(if endpoints.is_empty() { "—".into() } else { endpoints }, Tone::Secondary),
+            age_cell(e),
+        ],
+    )
+}
+
+/// EndpointSlices: NAME, ADDRESSTYPE, PORTS, ENDPOINTS, AGE.
+pub fn map_endpointslice(es: &EndpointSlice) -> Row {
+    let ports = es
+        .ports
+        .as_ref()
+        .map(|ps| {
+            ps.iter()
+                .filter_map(|p| p.port)
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    let endpoints = es
+        .endpoints
+        .iter()
+        .flat_map(|ep| ep.addresses.iter().cloned())
+        .collect::<Vec<_>>()
+        .join(",");
+    simple_row(
+        es,
+        vec![
+            name_cell(es),
+            Cell::new(es.address_type.clone(), Tone::Secondary),
+            Cell::new(if ports.is_empty() { "—".into() } else { ports }, Tone::Secondary),
+            Cell::new(if endpoints.is_empty() { "—".into() } else { endpoints }, Tone::Secondary),
+            age_cell(es),
+        ],
+    )
+}
+
+/// ValidatingAdmissionPolicies: NAME, FAILURE POLICY, VALIDATIONS, AGE.
+pub fn map_validatingadmissionpolicy(p: &ValidatingAdmissionPolicy) -> Row {
+    let (labels, annotations) = row_metadata(p);
+    let spec = p.spec.as_ref();
+    Row {
+        uid: uid_of(p),
+        name: p.name_any(),
+        namespace: None,
+        cells: vec![
+            name_cell(p),
+            Cell::new(
+                spec.and_then(|s| s.failure_policy.clone()).unwrap_or_else(|| "Fail".into()),
+                Tone::Secondary,
+            ),
+            Cell::new(
+                spec.and_then(|s| s.validations.as_ref()).map_or(0, |v| v.len()).to_string(),
+                Tone::Secondary,
+            ),
+            age_cell(p),
+        ],
+        labels,
+        annotations,
+        ..Default::default()
+    }
+}
+
+/// ValidatingAdmissionPolicyBindings: NAME, POLICY NAME, PARAM REF, AGE.
+pub fn map_validatingadmissionpolicybinding(b: &ValidatingAdmissionPolicyBinding) -> Row {
+    let (labels, annotations) = row_metadata(b);
+    let spec = b.spec.as_ref();
+    Row {
+        uid: uid_of(b),
+        name: b.name_any(),
+        namespace: None,
+        cells: vec![
+            name_cell(b),
+            Cell::new(
+                spec.and_then(|s| s.policy_name.clone()).unwrap_or_default(),
+                Tone::Secondary,
+            ),
+            Cell::new(
+                spec.and_then(|s| s.param_ref.as_ref())
+                    .and_then(|p| p.name.clone())
+                    .unwrap_or_else(|| "—".to_string()),
+                Tone::Secondary,
+            ),
+            age_cell(b),
+        ],
+        labels,
+        annotations,
+        ..Default::default()
+    }
+}
+
+/// MutatingAdmissionPolicies: NAME, FAILURE POLICY, MUTATIONS, AGE (v1alpha1).
+pub fn map_mutatingadmissionpolicy(p: &MutatingAdmissionPolicy) -> Row {
+    let (labels, annotations) = row_metadata(p);
+    let spec = p.spec.as_ref();
+    Row {
+        uid: uid_of(p),
+        name: p.name_any(),
+        namespace: None,
+        cells: vec![
+            name_cell(p),
+            Cell::new(
+                spec.and_then(|s| s.failure_policy.clone()).unwrap_or_else(|| "Fail".into()),
+                Tone::Secondary,
+            ),
+            Cell::new(
+                spec.and_then(|s| s.mutations.as_ref()).map_or(0, |v| v.len()).to_string(),
+                Tone::Secondary,
+            ),
+            age_cell(p),
+        ],
+        labels,
+        annotations,
+        ..Default::default()
+    }
+}
+
+/// MutatingAdmissionPolicyBindings: NAME, POLICY NAME, PARAM REF, AGE.
+pub fn map_mutatingadmissionpolicybinding(b: &MutatingAdmissionPolicyBinding) -> Row {
+    let (labels, annotations) = row_metadata(b);
+    let spec = b.spec.as_ref();
+    Row {
+        uid: uid_of(b),
+        name: b.name_any(),
+        namespace: None,
+        cells: vec![
+            name_cell(b),
+            Cell::new(
+                spec.and_then(|s| s.policy_name.clone()).unwrap_or_default(),
+                Tone::Secondary,
+            ),
+            Cell::new(
+                spec.and_then(|s| s.param_ref.as_ref())
+                    .and_then(|p| p.name.clone())
+                    .unwrap_or_else(|| "—".to_string()),
+                Tone::Secondary,
+            ),
+            age_cell(b),
         ],
         labels,
         annotations,

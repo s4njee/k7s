@@ -13,6 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev:shots": "node dev/shots.mjs",
+    "wiki:dev": "npm --prefix wiki run dev",
+    "wiki:build": "npm --prefix wiki run build",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"

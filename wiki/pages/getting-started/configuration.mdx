@@ -1,0 +1,65 @@
+import { Callout } from 'nextra/components'
+
+# Configuration & Preferences
+
+k7s stores user configuration and runtime settings locally in a lightweight JSON file without requiring any cloud synchronization or remote accounts.
+
+---
+
+## Visual Showcase
+
+![Settings & Preferences Panel](/screenshots/17-settings-panel.png)
+<div className="screenshot-caption">
+  Settings panel: Appearance, default namespace, log levels, updater controls, and opt-in diagnostics.
+</div>
+
+---
+
+## Settings Panel (⌘,)
+
+Press <kbd>⌘</kbd> + <kbd>,</kbd> (or <kbd>Ctrl</kbd> + <kbd>,</kbd> on Linux/Windows) or select **File → Settings…** to open the Settings panel.
+
+### 1. Appearance & Theme
+
+- **Theme Mode:**
+  - **System (Default):** Automatically synchronizes with your OS appearance (Dark/Light mode).
+  - **Dark:** Fixed dark theme (`#0d0d0f` background, `#121214` panels, high-contrast dark syntax highlighting).
+  - **Light:** Clean light theme with bright work areas, dark sidebar accents, and token-derived terminal/chart palettes.
+- **Table Density & Typography:** Adjust row padding, font sizes, and mono font preferences.
+
+### 2. General Preferences
+
+- **Default Namespace:** Set the default namespace filter on initial cluster connection (e.g. `default`, `all`, or a team namespace).
+- **Log Buffer Limit:** Maximum number of lines retained in the ring buffer per log stream (default: 200 lines, configurable up to 5,000 lines).
+- **Auto-Updates:** Toggle background daily update checks and automatic download notifications.
+
+### 3. Diagnostics & Telemetry
+
+- **Log Level:** Dynamically change the backend logging verbosity (`error`, `warn`, `info`, `debug`, `trace`) without restarting the application.
+- **Crash Reporting:** Strictly opt-in panic/error reporting to a user-configured endpoint (e.g. GlitchTip or Sentry). Off by default.
+
+---
+
+## File Locations
+
+Configuration files and runtime logs are stored in standardized platform directories:
+
+| Platform | Preferences (`prefs.json`) | Application Logs (`k7s.YYYY-MM-DD.log`) |
+|---|---|---|
+| **macOS** | `~/Library/Application Support/io.k7s.app/` | `~/Library/Logs/io.k7s.app/` |
+| **Linux** | `~/.config/io.k7s.app/` (or `$XDG_CONFIG_HOME`) | `~/.config/io.k7s.app/logs/` |
+| **Windows** | `%APPDATA%\io.k7s.app\` | `%APPDATA%\io.k7s.app\logs\` |
+
+---
+
+## Environment Variables
+
+Developers and operators can control runtime behavior using the following environment variables:
+
+| Variable | Description |
+|---|---|
+| `KUBECONFIG` | Explicit path(s) to kubeconfig file(s), overriding the default `~/.kube/config`. Supports colon-delimited (`:`) on Unix and semicolon-delimited (`;`) on Windows. |
+| `RUST_LOG` | Overrides the startup logging level in development mode (e.g. `RUST_LOG=debug,k7s_lib=trace`). |
+| `VITE_DEMO` | When set to `1`, boots the frontend in demo mock mode (`MockProvider`). |
+| `VITE_STRESS` | When used with `VITE_DEMO=1`, specifies the number of synthetic pods to generate (e.g. `VITE_STRESS=5000`). |
+| `WEBKIT_DISABLE_DMABUF_RENDERER` | On Linux, disables DMA-BUF renderer to prevent black screens in headless or nested VM environments. |

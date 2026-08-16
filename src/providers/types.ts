@@ -57,7 +57,18 @@ export type ResourceKind =
   | "resourcequotas"
   | "limitranges"
   | "mutatingwebhookconfigurations"
-  | "validatingwebhookconfigurations";
+  | "validatingwebhookconfigurations"
+  // B90: built-in resource coverage, wave 2.
+  | "priorityclasses"
+  | "runtimeclasses"
+  | "leases"
+  | "replicationcontrollers"
+  | "endpoints"
+  | "endpointslices"
+  | "validatingadmissionpolicies"
+  | "validatingadmissionpolicybindings"
+  | "mutatingadmissionpolicies"
+  | "mutatingadmissionpolicybindings";
 
 /**
  * One `additionalPrinterColumn` a CRD declares for its kind (B30): a column the
@@ -285,7 +296,13 @@ export interface ErrorEnvelope {
 
 /** One kind's watcher lifecycle state (B74-L) — a forbidden kind is different
  *  from a healthy empty table. */
-export type WatcherState = "starting" | "live" | "backoff" | "forbidden" | "stopped";
+export type WatcherState =
+  | "starting"
+  | "live"
+  | "backoff"
+  | "forbidden"
+  | "unsupported"
+  | "stopped";
 
 /** One kind's watcher health (B74-L), carried by `onWatcherHealth`. */
 export interface WatcherHealth {

@@ -1,0 +1,51 @@
+import { Callout } from 'nextra/components'
+
+# Fixture Cluster Guide
+
+To verify k7s against realistic live Kubernetes API server behaviors, the repository provides automated scripts to spin up a local `kind` (Kubernetes in Docker) fixture cluster.
+
+---
+
+## Bringing Up the Fixture Cluster
+
+```bash
+# 1. Create kind cluster with standard workloads
+./dev/cluster/up.sh
+
+# 2. Or create with metrics-server enabled (populates CPU/MEM columns)
+./dev/cluster/up.sh --metrics
+
+# 3. Seed Helm fixture release
+./dev/cluster/helm-fixture.sh
+```
+
+This sets up a context named `kind-k7s-dev` pre-populated with:
+- Multi-container pods (app + sidecar logging).
+- A `CrashLoopBackOff` pod reproducing realistic exit codes, crash restart counts, and error log lines.
+- A `Pending` pod unschedulable due to resource requests.
+- StatefulSets, DaemonSets, Jobs, CronJobs, Ingresses, NetworkPolicies, ConfigMaps, and Secrets.
+- A sample Helm release (`fixture-app`) with revision history for testing rollback and uninstall workflows.
+
+---
+
+## Running Live Verification Harnesses
+
+With the fixture cluster running:
+
+```bash
+# Build Rust example harnesses
+cargo build --examples --manifest-path src-tauri/Cargo.toml
+
+# Run the manifested runner across fixtures
+node dev/run-harnesses.mjs --fixtures kind,helm,metrics,multi
+```
+
+---
+
+## Tearing Down the Cluster
+
+When finished testing:
+
+```bash
+./dev/cluster/down.sh
+```

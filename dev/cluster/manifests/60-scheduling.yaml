@@ -1,0 +1,29 @@
+# PriorityClasses and RuntimeClasses (B90): cluster-scoped scheduling kinds.
+# The "default" PriorityClass makes the app's `(default)` name marker visible.
+
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: default
+value: 0
+globalDefault: true
+description: "The default scheduling priority."
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: low-priority
+value: 100
+globalDefault: false
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: runc
+handler: runc
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runsc

@@ -1,0 +1,25 @@
+import { Callout } from 'nextra/components'
+
+# Command Palette (⌘K)
+
+Press <kbd>⌘K</kbd> (or <kbd>Ctrl</kbd> + <kbd>K</kbd> on Linux/Windows) from anywhere in the application to open the **Command Palette**.
+
+---
+
+## Visual Showcase
+
+![Command Palette](/screenshots/12-command-palette.png)
+<div className="screenshot-caption">
+  Command Palette with fzy-style fuzzy search across kinds, resources, and administrative actions.
+</div>
+
+---
+
+## Fuzzy Search Engine
+
+Powered by an in-memory `fzy`-style fuzzy ranking algorithm (`src/lib/fuzzy.ts`), the Command Palette indexes:
+
+- **Resource Kinds:** Jump directly to Pods, Deployments, Services, ConfigMaps, CRDs, etc.
+- **Active Resources:** Instantly search for specific pods, services, or workloads across all namespaces.
+- **Cluster Actions:** Switch clusters, open settings, toggle themes, create resources from YAML, or export diagnostics.
+- **Keyboard-Driven:** Navigate results with <kbd>↑</kbd> / <kbd>↓</kbd> or <kbd>Ctrl+N</kbd> / <kbd>Ctrl+P</kbd> and press <kbd>Enter</kbd> to execute. Press <kbd>Esc</kbd> to dismiss.

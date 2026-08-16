@@ -1,0 +1,64 @@
+:root {
+  --k7s-bg-app: #0d0d0f;
+  --k7s-bg-panel: #121214;
+  --k7s-bg-chrome: #101012;
+  --k7s-bg-control: #17171a;
+  --k7s-border-default: #26262b;
+  --k7s-accent-blue: #4d9fff;
+  --k7s-color-ok: #9ece6a;
+  --k7s-color-warn: #e0af68;
+  --k7s-color-err: #f7768e;
+}
+
+/* Custom styles for code and callout boxes */
+.nextra-callout {
+  border-radius: 8px !important;
+}
+
+.nextra-container {
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+img {
+  border-radius: 8px;
+  border: 1px solid var(--k7s-border-default);
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.screenshot-caption {
+  font-size: 0.875rem;
+  color: #70707a;
+  text-align: center;
+  margin-top: -1rem;
+  margin-bottom: 1.5rem;
+  font-style: italic;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table th {
+  text-align: left;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+kbd {
+  background-color: #17171a;
+  border: 1px solid #2e2e34;
+  border-radius: 4px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+  color: #ececf1;
+  display: inline-block;
+  font-family: monospace;
+  font-size: 0.8em;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  white-space: nowrap;
+}

@@ -1,5 +1,10 @@
 # k7s
 
+[![Documentation](https://img.shields.io/badge/docs-Nextra%20Wiki-blue?style=flat)](https://s4njee.github.io/k7s/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+> 📖 **Primary Documentation:** The complete user guide, architecture breakdown, and reference manual are hosted on the [**k7s Documentation Wiki**](https://s4njee.github.io/k7s/).
+
 A Lens-style **Kubernetes visual monitor** built as a [Tauri](https://tauri.app) desktop app — a Rust backend talking to the Kubernetes API, with a React + TypeScript frontend that recreates the design in [`design/`](design/).
 
 Left navigation over all common resource kinds, live resource tables with namespace filtering, and a pod detail panel with **streaming logs**, **YAML view/edit/apply**, and **Events**.

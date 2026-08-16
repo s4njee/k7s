@@ -1,0 +1,22 @@
+import { Callout } from 'nextra/components'
+
+# Auto-Updates & Release Pipeline
+
+k7s features an integrated, cryptographic auto-update system powered by `tauri-plugin-updater` and GitHub Releases.
+
+---
+
+## Update Mechanism
+
+- **Passive Checks:** Checks quietly for new versions on launch and periodically in the background.
+- **Status Bar Badge:** When a new update is available, a non-intrusive update indicator appears in the status bar.
+- **Settings UI:** Open **Settings → Software Updates** to view the current version, check for updates, or trigger a download and restart.
+
+---
+
+## Signature Verification
+
+Updates are signed using an **Ed25519** keypair independent of Apple's Developer ID:
+- The public key is embedded inside `src-tauri/tauri.conf.json`.
+- The release workflow signs the update bundle using `TAURI_SIGNING_PRIVATE_KEY` stored securely in GitHub Actions secrets.
+- The app verifies the cryptographic signature before unpacking any update payload, preventing tampering or unauthorized binary delivery.

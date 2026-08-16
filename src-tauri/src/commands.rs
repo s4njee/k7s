@@ -491,6 +491,17 @@ async fn resource_for(kind: &str, cid: &Cid, mgr: &ClientManager) -> AppResult<(
         "limitranges" => ("", "v1", "LimitRange", true),
         "mutatingwebhookconfigurations" => ("admissionregistration.k8s.io", "v1", "MutatingWebhookConfiguration", false),
         "validatingwebhookconfigurations" => ("admissionregistration.k8s.io", "v1", "ValidatingWebhookConfiguration", false),
+        // B90: built-in resource coverage, wave 2.
+        "priorityclasses" => ("scheduling.k8s.io", "v1", "PriorityClass", false),
+        "runtimeclasses" => ("node.k8s.io", "v1", "RuntimeClass", false),
+        "leases" => ("coordination.k8s.io", "v1", "Lease", true),
+        "replicationcontrollers" => ("", "v1", "ReplicationController", true),
+        "endpoints" => ("", "v1", "Endpoints", true),
+        "endpointslices" => ("discovery.k8s.io", "v1", "EndpointSlice", true),
+        "validatingadmissionpolicies" => ("admissionregistration.k8s.io", "v1", "ValidatingAdmissionPolicy", false),
+        "validatingadmissionpolicybindings" => ("admissionregistration.k8s.io", "v1", "ValidatingAdmissionPolicyBinding", false),
+        "mutatingadmissionpolicies" => ("admissionregistration.k8s.io", "v1alpha1", "MutatingAdmissionPolicy", false),
+        "mutatingadmissionpolicybindings" => ("admissionregistration.k8s.io", "v1alpha1", "MutatingAdmissionPolicyBinding", false),
         other => return Err(AppError::Other(format!("unknown kind: {other}"))),
     };
     let gvk = GroupVersionKind::gvk(group, version, k);

@@ -1,0 +1,63 @@
+import { Callout } from 'nextra/components'
+
+# Design System & Tokens
+
+k7s implements a custom, tokenized design system (`src/styles/tokens.css` and `src/styles/global.css`) based on the design handoff in `design/README.md`.
+
+---
+
+## Typography
+
+k7s bundles all font assets locally as WOFF2 files via `@fontsource` packages, ensuring full offline capability with zero external network calls:
+
+- **UI & Controls:** `IBM Plex Sans` (400 Regular, 500 Medium, 600 SemiBold)
+- **Tables, Code & Terminal:** `JetBrains Mono` and `IBM Plex Mono` (400–700 with tabular number figures)
+
+---
+
+## Design Tokens
+
+All colors, borders, and spacings are exposed as CSS custom properties:
+
+```css
+:root {
+  /* Surface & Background Colors */
+  --bg-app: #0d0d0f;        /* Main desktop background */
+  --bg-panel: #121214;      /* Sidebar and detail panels */
+  --bg-chrome: #101012;     /* Header and table sticky chrome */
+  --bg-control: #17171a;    /* Buttons and input fields */
+  --bg-code: #0a0a0c;       /* Terminal, logs, and YAML viewer */
+  --bg-hover: #1b1b1f;      /* Standard hover state */
+  --bg-active: #16233a;     /* Active nav / selected item */
+  --bg-selected: #122036;   /* Selected table row */
+
+  /* Borders */
+  --border-default: #26262b;
+  --border-control: #2e2e34;
+  --border-menu: #38383f;
+  --border-active: #4d9fff;
+
+  /* Typography Colors */
+  --text-primary: #ececf1;
+  --text-body: #d2d2d8;
+  --text-secondary: #a4a4ae;
+  --text-muted: #70707a;
+  --text-faint: #57575f;
+
+  /* Semantic State Colors */
+  --color-ok: #9ece6a;      /* Green: Running, Ready, Healthy */
+  --color-warn: #e0af68;    /* Amber: Pending, Scaling, Warning */
+  --color-err: #f7768e;     /* Red: CrashLoopBackOff, Error, Failed */
+  --color-accent: #4d9fff;  /* Blue: Primary actions and active links */
+}
+```
+
+---
+
+## Accessibility & Focus Architecture
+
+k7s follows strict accessibility guidelines:
+
+- **Native Focus Rings:** Distinct focus indicators (`--focus-ring`) appear on all interactive controls during keyboard navigation (`:focus-visible`).
+- **Focus Trapping:** Overlays (Settings, Command Palette, Create YAML, Kubeconfig QR) trap focus inside their modals and restore focus to the triggering element on close (`src/hooks/useFocusTrap.ts`).
+- **Screen Reader Semantics:** Table columns use `scope="col"`, sidebars use `role="navigation"`, tabs follow the standard ARIA tablist/tab pattern, and live regions announce row counts and status changes.

@@ -1,0 +1,58 @@
+import { Callout } from 'nextra/components'
+
+# Demo Mode & Fixtures
+
+k7s features an integrated **Demo Mode** (`MockProvider`) that runs the entire frontend in isolation without requiring a Rust compiler, a Tauri runtime, or a live Kubernetes cluster.
+
+---
+
+## Why Demo Mode?
+
+- **Rapid UI/UX Iteration:** Work on CSS styles, layouts, animations, and component behavior inside standard web browser devtools (Chrome/Firefox/Safari) at `http://localhost:1420`.
+- **Pixel-Fidelity Testing:** Replays exact reference mock datasets matching the canonical design prototype (`design/K8s Monitor.dc.html`).
+- **Zero Cluster Overhead:** Great for presentations, demos, design reviews, or onboarding contributors who don't have local Kubernetes clusters configured.
+- **Stress-Testing Engine:** Simulate large-scale production clusters with thousands of synthetic pods to test virtualization and scrolling performance.
+
+---
+
+## Launching Demo Mode
+
+To launch demo mode in a browser:
+
+```bash
+# Standard demo mode
+VITE_DEMO=1 pnpm dev
+```
+
+Open [`http://localhost:1420`](http://localhost:1420) in your browser.
+
+---
+
+## Stress Testing Virtualization
+
+By default, demo mode loads 13 representative pods illustrating various Kubernetes lifecycle states (Running, Pending, CrashLoopBackOff, Completed, Terminating).
+
+To test k7s under massive cluster load (such as 5,000 or 10,000 pods):
+
+```bash
+# Generate 5,000 synthetic pods
+VITE_DEMO=1 VITE_STRESS=5000 pnpm dev
+```
+
+This exercises the virtualized table windowing algorithm (`src/components/table/useVirtualRows.ts`), proving that DOM nodes remain capped at ~40 rows and scroll frame rates remain pinned at 60fps.
+
+---
+
+## Included Mock Fixtures
+
+The `MockProvider` (`src/providers/mock/`) simulates realistic cluster state:
+
+| Fixture Area | Simulated Data |
+|---|---|
+| **Multi-Cluster** | Three connected contexts: `freya` (production), `odin-staging` (staging), and `loki-dev` (development). |
+| **Namespaces** | `all`, `prod`, `staging`, `monitoring`, `kube-system`. |
+| **Workloads** | Diverse Deployments, StatefulSets, DaemonSets, Jobs, and CronJobs. |
+| **Chaos Pods** | `heimdall-auth-7b8f9c-2xk9` (CrashLoopBackOff with real error logs and restarts count), `canary-ingress-worker` (Pending due to resource constraints). |
+| **Live Log Ticker** | Simulates active log streaming ticking every ~900ms with formatted JSON logs, timestamps, and multi-level toning (INFO/WARN/ERROR/DEBUG). |
+| **YAML & Events** | Real manifests and Kubernetes warning/normal events tied to each mock object. |
+| **Cluster Metrics** | Live CPU/Memory percentages, API latency simulation (~42ms), and node counts (6/6 Ready). |

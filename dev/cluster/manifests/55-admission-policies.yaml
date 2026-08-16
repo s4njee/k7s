@@ -1,0 +1,55 @@
+# ValidatingAdmissionPolicy + Binding (GA since 1.30 — served on the v1.32
+# fixture). The CEL validations read an allowed list from a ConfigMap parameter,
+# so the PARAM REF column and the properties' parameter reference both have a
+# real value (B90).
+#
+# MutatingAdmissionPolicy is alpha behind the MutatingAdmissionPolicy feature
+# gate (off on the default fixture) — it is deliberately NOT created here; the
+# app registers the kind and the cluster reports it unsupported, which is the
+# "missing APIs disappear cleanly" acceptance.
+
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: require-team-label
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments"]
+  validations:
+    - expression: "'labels' in object.metadata && 'team' in object.metadata.labels"
+      message: "every Deployment must carry a 'team' label"
+    - expression: "object.metadata.labels['team'] in ['platform','data','infra']"
+      message: "the 'team' label must be one of the allowed teams"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: team-config
+  namespace: default
+data:
+  allowedTeams: "platform,data,infra"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: require-team-label-binding
+spec:
+  policyName: require-team-label
+  validationActions: ["Deny"]
+  matchResources:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments"]
+  paramRef:
+    name: team-config
+    parameterNotFoundAction: Allow

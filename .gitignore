@@ -3,6 +3,12 @@ node_modules/
 dist/
 dist-ssr/
 *.local
+.pnpm-store/
+
+# Nextra Wiki
+wiki/.next/
+wiki/out/
+wiki/node_modules/
 
 # Rust / Tauri
 src-tauri/target/

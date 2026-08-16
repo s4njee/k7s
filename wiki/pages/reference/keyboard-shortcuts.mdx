@@ -1,0 +1,50 @@
+import { Callout } from 'nextra/components'
+
+# Keyboard Shortcuts Reference
+
+k7s is designed for efficient, keyboard-first navigation and cluster management.
+
+---
+
+## Global Shortcuts
+
+| Shortcut | Description |
+|---|---|
+| <kbd>⌘K</kbd> / <kbd>Ctrl+K</kbd> | Open the Command Palette (search kinds, objects, actions). |
+| <kbd>⌘T</kbd> / <kbd>Ctrl+T</kbd> | Toggle the integrated kubectl Terminal. |
+| <kbd>⌘N</kbd> / <kbd>Ctrl+N</kbd> | Open the Resource Creation Modal (Create from YAML). |
+| <kbd>⌘,</kbd> / <kbd>Ctrl+,</kbd> | Open Settings & Preferences. |
+| <kbd>⌘⇧E</kbd> / <kbd>Ctrl+Shift+E</kbd> | Export sanitized Diagnostics Bundle (.zip). |
+| <kbd>⌘1</kbd> – <kbd>⌘9</kbd> | Switch active cluster by cluster rail index. |
+| <kbd>Esc</kbd> | Multi-tier dismissal: Close active menu → Clear multi-selection → Clear table filter → Close detail panel. |
+
+---
+
+## Table & Navigation Shortcuts
+
+| Shortcut | Description |
+|---|---|
+| <kbd>j</kbd> / <kbd>↓</kbd> | Move row selection down. |
+| <kbd>k</kbd> / <kbd>↑</kbd> | Move row selection up. |
+| <kbd>g g</kbd> | Jump to first row in table. |
+| <kbd>G</kbd> | Jump to last row in table. |
+| <kbd>Enter</kbd> | Open detail panel for highlighted row. |
+| <kbd>/</kbd> | Focus table search / filter field. |
+| <kbd>Shift</kbd> + Click | Contiguous range multi-selection. |
+| <kbd>⌘</kbd> + Click / <kbd>Ctrl</kbd> + Click | Toggle non-contiguous row selection. |
+
+---
+
+## Detail Panel Shortcuts
+
+| Shortcut | Description |
+|---|---|
+| <kbd>[</kbd> / <kbd>]</kbd> | Cycle through detail panel tabs (Logs, Properties, YAML, Diff, Events, etc.). |
+| <kbd>f</kbd> | Toggle follow / pause in Logs tab. |
+| <kbd>t</kbd> | Toggle timestamps in Logs tab. |
+| <kbd>⌘S</kbd> / <kbd>Ctrl+S</kbd> | Save current log stream to a local file. |
+| <kbd>⌘Enter</kbd> / <kbd>Ctrl+Enter</kbd> | Apply YAML changes (in YAML edit mode). |
+
+<Callout type="info">
+  **Input Field Awareness:** Keyboard shortcuts are automatically suppressed while your cursor is focused inside an active text input, search field, or YAML editor.
+</Callout>
