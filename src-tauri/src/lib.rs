@@ -217,7 +217,7 @@ fn setup_menu(app: &tauri::App) -> tauri::Result<()> {
 
     #[cfg(not(target_os = "macos"))]
     {
-        let file = SubmenuBuilder::with_id(app, "file", "File", true)
+        let file = SubmenuBuilder::with_id(app, "file", "File")
             .item(&settings)
             .separator()
             .item(&export)
