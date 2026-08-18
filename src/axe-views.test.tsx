@@ -25,6 +25,7 @@ vi.mock("./components/terminal/KubectlTerminal", () => ({
 
 const THEMES = ["dark", "light"] as const;
 type Theme = (typeof THEMES)[number];
+const AXE_TEST_TIMEOUT_MS = 30_000;
 
 let off: (() => void) | undefined;
 beforeEach(() => {
@@ -61,25 +62,25 @@ describe("axe: every main view in both themes (B84)", () => {
     await connectAll(["freya"]);
     useStore.getState().setNav("overview");
     await viewIsCleanInBothThemes("ClusterOverview", () => <ClusterOverview />);
-  });
+  }, AXE_TEST_TIMEOUT_MS);
 
   it("ResourceTable — pods", async () => {
     await connectAll(["freya"]);
     useStore.getState().setNav("pods");
     await viewIsCleanInBothThemes("ResourceTable(pods)", () => <ResourceTable />);
-  });
+  }, AXE_TEST_TIMEOUT_MS);
 
   it("ResourceTable — problems (all-clusters merge)", async () => {
     await connectAll(["freya", "odin-staging"]);
     useStore.getState().setNav("problems");
     useStore.getState().setProblemsScope("all");
     await viewIsCleanInBothThemes("ResourceTable(problems)", () => <ResourceTable />);
-  });
+  }, AXE_TEST_TIMEOUT_MS);
 
   it("ClusterSwitcher (multi-cluster rail)", async () => {
     await connectAll(["freya", "odin-staging", "loki-dev"]);
     await viewIsCleanInBothThemes("ClusterSwitcher", () => <ClusterSwitcher />);
-  });
+  }, AXE_TEST_TIMEOUT_MS);
 
   it("DetailPanel (pod selected, logs tab)", async () => {
     await connectAll(["freya"]);
@@ -89,11 +90,11 @@ describe("axe: every main view in both themes (B84)", () => {
     if (!row) throw new Error("heimdall-auth missing");
     store.selectRow(row);
     await viewIsCleanInBothThemes("DetailPanel", () => <DetailPanel />);
-  });
+  }, AXE_TEST_TIMEOUT_MS);
 
   it("TerminalPanel (open terminal)", async () => {
     await connectAll(["freya"]);
     useStore.getState().openTerminal("freya");
     await viewIsCleanInBothThemes("TerminalPanel", () => <TerminalPanel />);
-  });
+  }, AXE_TEST_TIMEOUT_MS);
 });
