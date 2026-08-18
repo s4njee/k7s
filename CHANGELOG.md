@@ -14,6 +14,9 @@ and CI refuses a tag whose three versions disagree.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-18
+
+
 ### Added
 
 - Integrated kubectl terminal (B82): ⌘T (or the statusbar "❯ terminal" pill)
