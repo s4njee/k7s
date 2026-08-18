@@ -21,6 +21,22 @@ fi
 kubectl config use-context "kind-${CLUSTER}"
 
 echo "==> Applying fixture manifests"
+# Apply the prerequisites separately. A directory apply can submit the VPA
+# object before the CRD is Established, and a newly-created namespace can be
+# admitted before its controller has created the default service account.
+kubectl apply -f "${HERE}/manifests/00-namespaces.yaml"
+for namespace in prod staging monitoring; do
+  kubectl wait --for=jsonpath='{.status.phase}'=Active \
+    --timeout=60s "namespace/${namespace}"
+  kubectl create serviceaccount default \
+    --namespace "${namespace}" \
+    --dry-run=client -o yaml | kubectl apply -f -
+done
+
+kubectl apply -f "${HERE}/manifests/55-crds.yaml"
+kubectl wait --for=condition=Established \
+  --timeout=60s "crd/verticalpodautoscalers.autoscaling.k8s.io"
+
 kubectl apply -f "${HERE}/manifests/"
 
 # metrics-server is optional; without it the app shows "—" for CPU/MEM, which is
