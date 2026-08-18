@@ -83,6 +83,26 @@ jobs:
       - name: Frontend dependency audit
         run: pnpm audit --prod --audit-level high
 
+  # `secrets` is not available in job-level `if` expressions. Resolve the
+  # presence of the updater key once, then use this non-sensitive output to
+  # decide whether the manifest job should run.
+  signing-key:
+    runs-on: ubuntu-latest
+    outputs:
+      available: ${{ steps.check.outputs.available }}
+    steps:
+      - name: Check for updater signing key
+        id: check
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # B83: the live-harness net. Stands up the kind fixture (seeded, with
   # metrics-server and the Helm fixture), runs every applicable Rust example
   # harness through the manifested runner (dev/run-harnesses.mjs — records
@@ -166,6 +186,8 @@ jobs:
     # artifact; k7s only ships a build for the arch it was built on.
     runs-on: macos-14
     timeout-minutes: 45
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
     steps:
       - uses: actions/checkout@v4
@@ -266,7 +288,7 @@ jobs:
       # The updater signature (B72) for the publish-updates job. Only exists
       # when the signing key made createUpdaterArtifacts effective.
       - name: Upload updater signatures
-        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
         uses: actions/upload-artifact@v4
         with:
           name: updater-macos
@@ -324,6 +346,8 @@ jobs:
               src-tauri/target/release/bundle/rpm/*.rpm
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
     steps:
       - uses: actions/checkout@v4
@@ -449,7 +473,7 @@ jobs:
       # The updater signature (B72) for the publish-updates job. Only exists
       # when the signing key made createUpdaterArtifacts effective.
       - name: Upload updater signatures
-        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.updater-name }}
@@ -481,8 +505,8 @@ jobs:
   # non-tag run (PR/push) the manifest is still assembled and validated; only a
   # tag push attaches it.
   publish-updates:
-    needs: [build, build-windows-linux]
-    if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+    needs: [build, build-windows-linux, signing-key]
+    if: needs.signing-key.outputs.available == 'true'
     runs-on: ubuntu-latest
 
     steps:
