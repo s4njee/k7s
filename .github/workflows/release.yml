@@ -139,10 +139,10 @@ jobs:
       # for the fixture scripts, helm for the B81 fixture release.
       - name: Install kind, kubectl, and helm
         run: |
-          curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.26.0/kind-linux-amd64
-          chmod +x /usr/local/bin/kind
-          curl -Lo /usr/local/bin/kubectl "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x /usr/local/bin/kubectl
+          curl -Lo "$RUNNER_TEMP/kind" https://kind.sigs.k8s.io/dl/v0.26.0/kind-linux-amd64
+          sudo install -m 0755 "$RUNNER_TEMP/kind" /usr/local/bin/kind
+          curl -Lo "$RUNNER_TEMP/kubectl" "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -m 0755 "$RUNNER_TEMP/kubectl" /usr/local/bin/kubectl
 
       - uses: azure/setup-helm@v4
 
